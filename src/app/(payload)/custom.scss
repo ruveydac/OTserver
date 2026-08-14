@@ -1,0 +1,9 @@
+.collection-list--assets tbody tr[data-id] {
+  cursor: pointer;
+}
+
+.asset-search-help {
+  color: var(--theme-elevation-500);
+  font-size: 0.85rem;
+  margin: 0 0 var(--base);
+}

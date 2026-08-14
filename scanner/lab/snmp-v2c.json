@@ -1,0 +1,7 @@
+[
+  {
+    "name": "ot-lab-v2c",
+    "version": "2c",
+    "communityEnv": "OTSERVER_LAB_SNMP_COMMUNITY"
+  }
+]

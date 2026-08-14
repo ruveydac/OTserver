@@ -1,0 +1,30 @@
+.site-id-field {
+  margin-bottom: var(--base);
+
+  > label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: calc(var(--base) / 4);
+  }
+
+  &__value {
+    align-items: center;
+    background: var(--theme-elevation-50);
+    border: 1px solid var(--theme-elevation-150);
+    border-radius: 4px;
+    display: flex;
+    gap: calc(var(--base) / 2);
+    justify-content: space-between;
+    padding: calc(var(--base) / 2);
+
+    code {
+      overflow-wrap: anywhere;
+    }
+  }
+
+  > p {
+    color: var(--theme-elevation-500);
+    font-size: 0.85rem;
+    margin: calc(var(--base) / 4) 0 0;
+  }
+}

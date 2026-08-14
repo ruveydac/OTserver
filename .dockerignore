@@ -1,0 +1,8 @@
+.git/
+.next/
+node_modules/
+.env*
+import-files/
+public/media/
+test-results/
+playwright-report/

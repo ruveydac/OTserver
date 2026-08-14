@@ -1,0 +1,12 @@
+.logout-button {
+  border: 1px solid var(--theme-elevation-300);
+  border-radius: var(--style-radius-s);
+  color: inherit;
+  padding: 8px 12px;
+  text-decoration: none;
+
+  &:hover,
+  &:focus-visible {
+    background: var(--theme-elevation-100);
+  }
+}

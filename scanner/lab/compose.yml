@@ -1,0 +1,91 @@
+name: otserver-scanner-lab
+
+services:
+  siemens:
+    build:
+      context: .
+      dockerfile: devices/Dockerfile.siemens
+    cap_add: [NET_RAW]
+    healthcheck: &process-health
+      test: [CMD-SHELL, "kill -0 1"]
+      interval: 1s
+      timeout: 1s
+      retries: 20
+    networks:
+      ot_lab:
+        ipv4_address: 172.30.0.10
+        mac_address: "02:00:00:00:00:10"
+
+  ethernet_ip:
+    build:
+      context: .
+      dockerfile: devices/Dockerfile.opener
+    cap_add: [NET_RAW]
+    healthcheck: *process-health
+    networks:
+      ot_lab:
+        ipv4_address: 172.30.0.11
+        mac_address: "02:00:00:00:00:11"
+
+  bacnet:
+    build:
+      context: .
+      dockerfile: devices/Dockerfile.bacnet
+    environment:
+      BACNET_IFACE: eth0
+    healthcheck: *process-health
+    networks:
+      ot_lab:
+        ipv4_address: 172.30.0.12
+        mac_address: "02:00:00:00:00:12"
+
+  fins:
+    build:
+      context: .
+      dockerfile: devices/Dockerfile.responders
+    command: [fins]
+    healthcheck: *process-health
+    networks:
+      ot_lab:
+        ipv4_address: 172.30.0.13
+        mac_address: "02:00:00:00:00:13"
+
+  fox:
+    build:
+      context: .
+      dockerfile: devices/Dockerfile.responders
+    command: [fox]
+    healthcheck: *process-health
+    networks:
+      ot_lab:
+        ipv4_address: 172.30.0.14
+        mac_address: "02:00:00:00:00:14"
+
+  test:
+    build:
+      context: ../..
+      dockerfile: scanner/lab/Dockerfile.scanner
+    cap_add: [NET_RAW]
+    depends_on:
+      siemens: { condition: service_healthy }
+      ethernet_ip: { condition: service_healthy }
+      bacnet: { condition: service_healthy }
+      fins: { condition: service_healthy }
+      fox: { condition: service_healthy }
+    environment:
+      OTSERVER_LAB_SNMP_COMMUNITY: lab-public
+      OTSERVER_LAB_SNMP_AUTH_PASSWORD: lab-auth-password
+      OTSERVER_LAB_SNMP_PRIVACY_PASSWORD: lab-privacy-password
+    volumes:
+      - ./artifacts:/artifacts:Z
+    networks:
+      ot_lab:
+        ipv4_address: 172.30.0.2
+        mac_address: "02:00:00:00:00:02"
+
+networks:
+  ot_lab:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24

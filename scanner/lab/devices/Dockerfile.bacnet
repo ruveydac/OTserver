@@ -1,0 +1,14 @@
+FROM debian:bookworm-slim AS build
+ARG BACNET_COMMIT=9bc3cfa07aab98852de432fa24079f4b4b6b7eed
+ARG BACNET_SHA256=68333ebb40ff76e7c20a41b5e7c9d9facbeab6366d9570142a26f61e60a795c8
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential ca-certificates curl \
+    && curl -LfsS "https://github.com/bacnet-stack/bacnet-stack/archive/${BACNET_COMMIT}.tar.gz" -o /tmp/bacnet.tar.gz \
+    && echo "${BACNET_SHA256}  /tmp/bacnet.tar.gz" | sha256sum -c - \
+    && mkdir /src \
+    && tar -xzf /tmp/bacnet.tar.gz --strip-components=1 -C /src \
+    && make -C /src server-basic -j2
+
+FROM debian:bookworm-slim
+COPY --from=build /src/bin/bacbasic /usr/local/bin/bacbasic
+ENTRYPOINT ["/usr/local/bin/bacbasic", "12001", "bacnet-controller-1"]

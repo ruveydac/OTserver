@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "classes": [
+    {
+      "classKey": "plc",
+      "priority": 10,
+      "rules": [
+        {
+          "manufacturerRegex": "^Siemens(?: AG)?$",
+          "modelRegex": "(?:SIMATIC\\s*)?S7-(?:1200|1500).*"
+        },
+        {
+          "manufacturerRegex": "^(?:Rockwell Automation|Allen[- ]Bradley)$",
+          "modelRegex": "(?:CompactLogix|ControlLogix|MicroLogix).*"
+        },
+        {
+          "manufacturerRegex": "^Schneider Electric$",
+          "modelRegex": "(?:Modicon|M221|M241|M251|M340|M580).*"
+        }
+      ]
+    },
+    {
+      "classKey": "hmi",
+      "priority": 20,
+      "rules": [
+        {
+          "manufacturerRegex": "^Siemens(?: AG)?$",
+          "modelRegex": "(?:SIMATIC\\s*)?(?:HMI|Comfort Panel|Basic Panel|Mobile Panel).*"
+        },
+        {
+          "manufacturerRegex": "^(?:Rockwell Automation|Allen[- ]Bradley)$",
+          "modelRegex": "PanelView.*"
+        }
+      ]
+    },
+    {
+      "classKey": "network-device",
+      "priority": 30,
+      "rules": [
+        {
+          "manufacturerRegex": "^Cisco(?: Systems)?$",
+          "modelRegex": "(?:Catalyst|Industrial Ethernet|IE[- ]?\\d+).*"
+        },
+        {
+          "manufacturerRegex": "^Hirschmann$",
+          "modelRegex": "(?:RSP|RSPE|MACH|BOBCAT|SPIDER|OCTOPUS).*"
+        },
+        {
+          "manufacturerRegex": "^Siemens(?: AG)?$",
+          "modelRegex": "SCALANCE.*"
+        }
+      ]
+    }
+  ]
+}

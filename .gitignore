@@ -1,0 +1,28 @@
+build/
+dist/
+node_modules/
+.DS_Store
+.env*
+!.env.example
+.next/
+*.tsbuildinfo
+next-env.d.ts
+.vercel/
+
+# Payload default media upload directory
+public/media/
+
+public/robots.txt
+public/sitemap*.xml
+import-files/
+scanner/target/
+scanner/snmp-profiles.json
+otscanner.json
+scanner/lab/artifacts/
+# Local driver experiments and extracted installers; distributable Windows packet-driver assets
+# belong under scanner/windows/.
+tmp/
+otserver-scan.json
+*.otserver.json
+__pycache__/
+coverage/

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Topology>
+  <ProjectName>PRONETA Example Network</ProjectName>
+  <Name>Example topology</Name>
+  <IsOnline>false</IsOnline>
+  <DeviceCollection>
+    <Device>
+      <NameOfStation>plc-01</NameOfStation>
+      <IpAddress>192.168.10.10</IpAddress>
+      <NetworkMask>255.255.255.0</NetworkMask>
+      <GatewayIp>192.168.10.1</GatewayIp>
+      <DeviceType>SIMATIC S7-1500</DeviceType>
+      <MAC>02:00:00:00:00:10</MAC>
+      <ManufacturerName>Siemens AG</ManufacturerName>
+      <Location>Control cabinet A</Location>
+      <Descriptor>Example PLC</Descriptor>
+      <Interfaces>
+        <PnInterface>
+          <Identifier>1</Identifier>
+          <PortList>
+            <Port>
+              <PortGlobalIndex>1</PortGlobalIndex>
+              <PortIfIndex>1</PortIfIndex>
+              <PortDesc>PROFINET interface X1 P1</PortDesc>
+              <PortID>port-001</PortID>
+              <MAC>02:00:00:00:00:11</MAC>
+              <RemotePortID>port-001</RemotePortID>
+              <RemoteNameOfStation>et200sp-01</RemoteNameOfStation>
+              <RemoteMAC>02:00:00:00:00:21</RemoteMAC>
+              <MauType>16</MauType>
+            </Port>
+          </PortList>
+        </PnInterface>
+      </Interfaces>
+    </Device>
+    <Device>
+      <NameOfStation>et200sp-01</NameOfStation>
+      <IpAddress>192.168.10.20</IpAddress>
+      <NetworkMask>255.255.255.0</NetworkMask>
+      <GatewayIp>192.168.10.1</GatewayIp>
+      <DeviceType>SIMATIC ET 200SP</DeviceType>
+      <MAC>02:00:00:00:00:20</MAC>
+      <ManufacturerName>Siemens AG</ManufacturerName>
+      <Location>Machine section 1</Location>
+      <Descriptor>Example distributed I/O station</Descriptor>
+      <Interfaces>
+        <PnInterface>
+          <Identifier>1</Identifier>
+          <PortList>
+            <Port>
+              <PortGlobalIndex>1</PortGlobalIndex>
+              <PortIfIndex>1</PortIfIndex>
+              <PortDesc>PROFINET interface X1 P1</PortDesc>
+              <PortID>port-001</PortID>
+              <MAC>02:00:00:00:00:21</MAC>
+              <RemotePortID>port-001</RemotePortID>
+              <RemoteNameOfStation>plc-01</RemoteNameOfStation>
+              <RemoteMAC>02:00:00:00:00:11</RemoteMAC>
+              <MauType>16</MauType>
+            </Port>
+            <Port>
+              <PortGlobalIndex>2</PortGlobalIndex>
+              <PortIfIndex>2</PortIfIndex>
+              <PortDesc>PROFINET interface X1 P2</PortDesc>
+              <PortID>port-002</PortID>
+              <MAC>02:00:00:00:00:22</MAC>
+              <RemotePortID />
+              <RemoteNameOfStation />
+              <RemoteMAC />
+              <MauType>16</MauType>
+            </Port>
+          </PortList>
+        </PnInterface>
+      </Interfaces>
+    </Device>
+  </DeviceCollection>
+</Topology>

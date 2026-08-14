@@ -1,0 +1,26 @@
+FROM ubuntu:22.04 AS build
+ARG OPENER_COMMIT=150146e3058a493d5accf6d5f76ff450468d7bd7
+ARG OPENER_SHA256=d1af346a5eadfc35dc240f315f757ca48010d53c5f415ed3c4711fa7eea878c9
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential ca-certificates cmake curl libcap-dev \
+    && curl -LfsS "https://github.com/EIPStackGroup/OpENer/archive/${OPENER_COMMIT}.tar.gz" -o /tmp/opener.tar.gz \
+    && echo "${OPENER_SHA256}  /tmp/opener.tar.gz" | sha256sum -c - \
+    && mkdir /src \
+    && tar -xzf /tmp/opener.tar.gz --strip-components=1 -C /src \
+    && cmake -S /src/source -B /build \
+      -DOpENer_PLATFORM=POSIX \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_C_FLAGS=-fcommon \
+      -DBUILD_SHARED_LIBS=OFF \
+      -DOpENer_Device_Config_Vendor_Id=1 \
+      -DOpENer_Device_Config_Device_Type=12 \
+      -DOpENer_Device_Config_Product_Code=65001 \
+      -DOpENer_Device_Config_Device_Name="OT Lab EtherNet-IP Adapter" \
+    && cmake --build /build --parallel 2
+
+FROM ubuntu:22.04
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libcap2 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /build/src/ports/POSIX/OpENer /usr/local/bin/opener
+ENTRYPOINT ["/usr/local/bin/opener", "eth0"]
