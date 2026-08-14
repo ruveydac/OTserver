@@ -88,22 +88,6 @@ Then open <http://localhost:3000/admin>. The first account receives the protecte
 
 ## How it works
 
-```mermaid
-flowchart LR
-    S[OTserver Scanner<br/>native read-only discovery] --> C[Versioned JSON v2 contract]
-    C --> P[Validate and parse]
-    A[PRONETA XML] --> P
-    B[Nmap XML] --> P
-    P --> M[Normalize MAC and merge by quality]
-    M --> I[Site-scoped asset inventory]
-    M --> E[Observations and topology]
-    I --> U[OTserver admin and API]
-    I --> D[(MongoDB)]
-    E --> D
-    I --> L[Immutable audit log]
-    L --> D
-```
-
 Every asset and import belongs to a site. During import, the application normalizes each MAC address
 to uppercase colon-separated form and uses it as the sole identity key. Records without a usable MAC
 address are skipped rather than attached to the wrong device.
