@@ -7,14 +7,14 @@ services:
       dockerfile: devices/Dockerfile.siemens
     cap_add: [NET_RAW]
     healthcheck: &process-health
-      test: [CMD-SHELL, "kill -0 1"]
+      test: [CMD-SHELL, 'kill -0 1']
       interval: 1s
       timeout: 1s
       retries: 20
     networks:
       ot_lab:
         ipv4_address: 172.30.0.10
-        mac_address: "02:00:00:00:00:10"
+        mac_address: '02:00:00:00:00:10'
 
   ethernet_ip:
     build:
@@ -25,7 +25,7 @@ services:
     networks:
       ot_lab:
         ipv4_address: 172.30.0.11
-        mac_address: "02:00:00:00:00:11"
+        mac_address: '02:00:00:00:00:11'
 
   bacnet:
     build:
@@ -37,7 +37,7 @@ services:
     networks:
       ot_lab:
         ipv4_address: 172.30.0.12
-        mac_address: "02:00:00:00:00:12"
+        mac_address: '02:00:00:00:00:12'
 
   fins:
     build:
@@ -48,7 +48,7 @@ services:
     networks:
       ot_lab:
         ipv4_address: 172.30.0.13
-        mac_address: "02:00:00:00:00:13"
+        mac_address: '02:00:00:00:00:13'
 
   fox:
     build:
@@ -59,7 +59,7 @@ services:
     networks:
       ot_lab:
         ipv4_address: 172.30.0.14
-        mac_address: "02:00:00:00:00:14"
+        mac_address: '02:00:00:00:00:14'
 
   test:
     build:
@@ -81,7 +81,7 @@ services:
     networks:
       ot_lab:
         ipv4_address: 172.30.0.2
-        mac_address: "02:00:00:00:00:02"
+        mac_address: '02:00:00:00:00:02'
 
 networks:
   ot_lab:

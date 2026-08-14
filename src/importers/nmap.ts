@@ -71,7 +71,10 @@ export const parseNmap = (xml: string): ImportResult => {
     } else if (currentHost && name === 'hostname' && parent === 'hostnames') {
       const hostname = attribute(tag, 'name')
       const type = attribute(tag, 'type')
-      if (hostname && (!currentHost.name || (type === 'user' && currentHost.hostnameType !== 'user'))) {
+      if (
+        hostname &&
+        (!currentHost.name || (type === 'user' && currentHost.hostnameType !== 'user'))
+      ) {
         currentHost.name = hostname
         currentHost.hostnameType = type
       }
@@ -80,11 +83,7 @@ export const parseNmap = (xml: string): ImportResult => {
       currentHost.osMatchFound = Boolean(currentHost.operatingSystem)
       const accuracy = Number(attribute(tag, 'accuracy'))
       if (Number.isFinite(accuracy)) currentHost.osAccuracy = accuracy
-    } else if (
-      currentHost &&
-      name === 'osclass' &&
-      (parent === 'os' || parent === 'osmatch')
-    ) {
+    } else if (currentHost && name === 'osclass' && (parent === 'os' || parent === 'osmatch')) {
       currentHost.osVendor ||= attribute(tag, 'vendor')
       if (!currentHost.osMatchFound) {
         currentHost.operatingSystem ||= [attribute(tag, 'osfamily'), attribute(tag, 'osgen')]
@@ -115,9 +114,7 @@ export const parseNmap = (xml: string): ImportResult => {
         const asset: ImportedAsset = {
           ...(currentHost.ipAddress ? { ipAddress: currentHost.ipAddress } : {}),
           ...(currentHost.lastSeen ? { lastSeen: currentHost.lastSeen } : {}),
-          ...(currentHost.operatingSystem
-            ? { operatingSystem: currentHost.operatingSystem }
-            : {}),
+          ...(currentHost.operatingSystem ? { operatingSystem: currentHost.operatingSystem } : {}),
           ...(currentHost.osAccuracy !== undefined ? { osAccuracy: currentHost.osAccuracy } : {}),
           ...(currentHost.vendor || currentHost.osVendor
             ? { vendor: currentHost.vendor || currentHost.osVendor }

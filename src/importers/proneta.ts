@@ -7,7 +7,12 @@ export const MAX_IMPORT_FILE_SIZE = 10 * 1024 * 1024
 
 type DeviceDraft = Partial<ImportedAsset> & { macAddress?: string }
 
-const versionFields = new Set(['applicationversion', 'pronetaversion', 'softwareversion', 'version'])
+const versionFields = new Set([
+  'applicationversion',
+  'pronetaversion',
+  'softwareversion',
+  'version',
+])
 
 const elementName = (name: string) =>
   (name.includes(':') ? name.slice(name.lastIndexOf(':') + 1) : name)

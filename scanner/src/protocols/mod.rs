@@ -239,7 +239,12 @@ mod tests {
         assert_eq!(result.observations.len(), 1);
         assert_eq!(result.observations[0].fields["name"], "station");
         assert_eq!(result.ports.len(), 1);
-        assert!(result.warnings[0].contains("BACnet"));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("BACnet"))
+        );
         fox_task.await.unwrap();
         bacnet_task.await.unwrap();
     }

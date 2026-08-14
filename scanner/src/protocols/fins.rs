@@ -63,7 +63,14 @@ async fn udp(target: Ipv4Addr) -> Result<Option<Vec<u8>>, String> {
             response.truncate(length);
             Ok(Some(response))
         }
-        Ok(Err(error)) if error.kind() == ErrorKind::ConnectionRefused => Ok(None),
+        Ok(Err(error))
+            if matches!(
+                error.kind(),
+                ErrorKind::ConnectionRefused | ErrorKind::ConnectionReset
+            ) =>
+        {
+            Ok(None)
+        }
         Ok(Err(error)) => Err(error.to_string()),
         Err(_) => Ok(None),
     }

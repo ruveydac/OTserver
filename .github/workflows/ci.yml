@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  application:
+    name: Application
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      mongo:
+        image: mongo:8
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: mongodb://127.0.0.1:27017/otserver-ci
+      OTSERVER_SECRET: ci-only-secret
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prettier --check .
+      - run: pnpm lint
+      - run: pnpm test:coverage:app
+      - run: pnpm build
+      - run: git diff --check
+
+  scanner:
+    name: Scanner
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Rust components
+        run: rustup component add rustfmt clippy
+      - run: cargo fmt --manifest-path scanner/Cargo.toml -- --check
+      - run: cargo check --manifest-path scanner/Cargo.toml --locked
+      - run: cargo test --manifest-path scanner/Cargo.toml --locked
+      - run: cargo clippy --manifest-path scanner/Cargo.toml --locked --all-targets -- -D warnings
+      - run: cargo install cargo-llvm-cov --locked
+      - run: >-
+          cargo llvm-cov --manifest-path scanner/Cargo.toml --lib
+          --fail-under-lines 90 --summary-only -- --test-threads=1
+
+  scanner-windows:
+    name: Scanner Windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build scanner for Windows
+        run: cargo build --manifest-path scanner/Cargo.toml --locked --release
+      - name: Run Windows scanner tests
+        run: cargo test --manifest-path scanner/Cargo.toml --locked
+
+  scanner-lab:
+    name: Scanner lab
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run Docker interoperability lab
+        run: ./scanner/lab/test.sh
+      - name: Upload lab artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: scanner-lab-artifacts
+          path: scanner/lab/artifacts/
+          if-no-files-found: ignore

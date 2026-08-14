@@ -80,7 +80,6 @@ terminal. The scanner opens the selected physical adapter directly; no virtual a
 required. If Win10Pcap is unavailable, the scanner uses built-in pktmon as a passive fallback.
 Pktmon requires Administrator rights and cannot transmit DCP Identify frames.
 
-
 ## Configuration and direct import
 
 Place an optional `otscanner.json` beside the scanner executable to provide scan defaults and an

@@ -21,9 +21,7 @@ const sensitiveField = /api[-_]?key|hash|password|salt|secret|session|token/i
 
 const canReadAuditLogs: Access = async ({ req }) => {
   const authorization = await getAuthorization(req)
-  return authorization.isAdmin
-    ? true
-    : { 'asset.site': { in: authorization.readableSiteIDs } }
+  return authorization.isAdmin ? true : { 'asset.site': { in: authorization.readableSiteIDs } }
 }
 
 const clean = (value: unknown): Document => {
@@ -73,7 +71,8 @@ export const writeAudit = async ({
   const documentID = document.id === undefined ? undefined : String(document.id)
   const documentLabel = labelFor(document)
   const relatedAsset = relationshipID(document.asset ?? document.localAsset)
-  const assetID = targetCollection === 'assets' ? documentID : relatedAsset ? String(relatedAsset) : undefined
+  const assetID =
+    targetCollection === 'assets' ? documentID : relatedAsset ? String(relatedAsset) : undefined
   const forwardedFor = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
   const requestPath = req.url ? new URL(req.url, 'http://local').pathname : undefined
 
@@ -161,13 +160,7 @@ export const AuditLogs: CollectionConfig = {
     update: () => false,
   },
   admin: {
-    defaultColumns: [
-      'createdAt',
-      'action',
-      'targetCollection',
-      'documentLabel',
-      'actorEmail',
-    ],
+    defaultColumns: ['createdAt', 'action', 'targetCollection', 'documentLabel', 'actorEmail'],
     description: 'Immutable history of inventory, configuration, and authentication changes.',
     group: 'Audit',
     hidden: hideFromNonAdmins,

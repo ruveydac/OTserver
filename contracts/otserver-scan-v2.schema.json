@@ -4,7 +4,17 @@
   "title": "OTserver Scan",
   "type": "object",
   "additionalProperties": false,
-  "required": ["format", "schemaVersion", "scanner", "scan", "devices", "links", "unresolved", "warnings", "errors"],
+  "required": [
+    "format",
+    "schemaVersion",
+    "scanner",
+    "scan",
+    "devices",
+    "links",
+    "unresolved",
+    "warnings",
+    "errors"
+  ],
   "properties": {
     "format": { "const": "otserver-scan" },
     "schemaVersion": { "const": 2 },
@@ -35,7 +45,11 @@
         "id": { "type": "string", "format": "uuid" },
         "startedAt": { "type": "string", "format": "date-time" },
         "finishedAt": { "type": "string", "format": "date-time" },
-        "targets": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
         "interface": { "$ref": "#/$defs/interfaceRef" },
         "partial": { "type": "boolean" }
       }
@@ -54,12 +68,23 @@
     "device": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["macAddress", "macAddresses", "ipAddresses", "observations", "interfaces", "ports"],
+      "required": [
+        "macAddress",
+        "macAddresses",
+        "ipAddresses",
+        "observations",
+        "interfaces",
+        "ports"
+      ],
       "properties": {
         "macAddress": { "$ref": "#/$defs/mac" },
         "macAddresses": { "type": "array", "items": { "$ref": "#/$defs/mac" } },
         "ipAddresses": { "type": "array", "items": { "type": "string" } },
-        "observations": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/observation" } },
+        "observations": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/observation" }
+        },
         "interfaces": { "type": "array", "items": { "$ref": "#/$defs/networkInterface" } },
         "ports": { "type": "array", "items": { "$ref": "#/$defs/port" } }
       }
@@ -69,7 +94,22 @@
       "additionalProperties": false,
       "required": ["source", "observedAt", "fields", "raw", "warnings"],
       "properties": {
-        "source": { "type": "string", "enum": ["arp", "bacnet", "ethernet-ip", "lldp", "niagara-fox", "omron-fins", "os-fingerprint", "profinet-dcp", "s7", "snmp", "unknown"] },
+        "source": {
+          "type": "string",
+          "enum": [
+            "arp",
+            "bacnet",
+            "ethernet-ip",
+            "lldp",
+            "niagara-fox",
+            "omron-fins",
+            "os-fingerprint",
+            "profinet-dcp",
+            "s7",
+            "snmp",
+            "unknown"
+          ]
+        },
         "observedAt": { "type": "string", "format": "date-time" },
         "ipAddress": { "type": "string" },
         "macAddress": { "$ref": "#/$defs/mac" },
