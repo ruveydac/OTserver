@@ -57,9 +57,16 @@ describe('PRONETA parser', () => {
         <Device><NameOfStation><![CDATA[ CDATA device ]]></NameOfStation><MAC>02:00:00:00:00:02</MAC></Device>
       </DeviceCollection><ProjectName> Project </ProjectName><Name> Topology </Name></Topology>
     `)
-    expect(result).toMatchObject({ projectName: 'Project', sourceVersion: '4.0', topologyName: 'Topology' })
+    expect(result).toMatchObject({
+      projectName: 'Project',
+      sourceVersion: '4.0',
+      topologyName: 'Topology',
+    })
     expect(result.assets).toHaveLength(2)
-    expect(result.assets[0]).toMatchObject({ macAddress: '02:00:00:00:00:01', name: 'Fallback model' })
+    expect(result.assets[0]).toMatchObject({
+      macAddress: '02:00:00:00:00:01',
+      name: 'Fallback model',
+    })
     expect(result.assets[1]).toMatchObject({ name: 'CDATA device' })
     expect(result.warnings.join('\n')).toContain('no valid MAC')
     expect(result.warnings.join('\n')).toContain('Duplicate device MAC')

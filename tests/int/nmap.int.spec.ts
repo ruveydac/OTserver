@@ -71,7 +71,9 @@ describe('Nmap parser', () => {
     expect(scan.sourceVersion).toBe('7.92')
     expect(scan.assets).toHaveLength(7)
     expect(scan.warnings).toHaveLength(3)
-    expect(scan.warnings.filter((warning) => warning.includes('Duplicate host MAC'))).toHaveLength(2)
+    expect(scan.warnings.filter((warning) => warning.includes('Duplicate host MAC'))).toHaveLength(
+      2,
+    )
     expect(scan.warnings.some((warning) => warning.includes('no valid MAC address'))).toBe(true)
     expect(scan.assets.find(({ macAddress }) => macAddress === '02:00:00:00:00:01')).toMatchObject({
       ipAddress: '192.0.2.1',

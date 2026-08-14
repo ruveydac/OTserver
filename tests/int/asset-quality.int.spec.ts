@@ -92,7 +92,10 @@ describe('asset data quality', () => {
 
   it('combines protocol evidence without downgrading its provenance', () => {
     const merged = mergeAssetData(
-      { protocols: ['profinet'], fieldProvenance: { protocols: { quality: 'high', source: 'profinet-dcp' } } },
+      {
+        protocols: ['profinet'],
+        fieldProvenance: { protocols: { quality: 'high', source: 'profinet-dcp' } },
+      },
       [{ data: { protocols: ['niagara-fox'] }, quality: 'medium', source: 'niagara-fox' }],
     )
 

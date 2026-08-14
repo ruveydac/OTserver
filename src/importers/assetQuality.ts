@@ -54,16 +54,16 @@ export const mergeAssetData = (
     const origin = fieldProvenance[field]
     const currentRank = empty(currentValue) ? -1 : rank[origin?.quality || 'human']
 
-    const combinesEvidence = field === 'protocols' && Array.isArray(currentValue) && Array.isArray(value)
+    const combinesEvidence =
+      field === 'protocols' && Array.isArray(currentValue) && Array.isArray(value)
     if (rank[quality] < currentRank && !combinesEvidence) return
 
-    const nextValue = combinesEvidence
-      ? [...new Set([...currentValue, ...value])]
-      : value
+    const nextValue = combinesEvidence ? [...new Set([...currentValue, ...value])] : value
     const valueChanged = !isDeepStrictEqual(currentValue, nextValue)
     const qualityImproved = rank[quality] > currentRank
     if (valueChanged) set(nextValue)
-    if (qualityImproved || (valueChanged && rank[quality] >= currentRank)) fieldProvenance[field] = { quality, source }
+    if (qualityImproved || (valueChanged && rank[quality] >= currentRank))
+      fieldProvenance[field] = { quality, source }
   }
 
   for (const input of incoming) {
@@ -85,7 +85,8 @@ export const mergeAssetData = (
   }
 
   return {
-    changed: Object.keys(data).length > 0 || !isDeepStrictEqual(originalProvenance, fieldProvenance),
+    changed:
+      Object.keys(data).length > 0 || !isDeepStrictEqual(originalProvenance, fieldProvenance),
     data,
     fieldProvenance,
   }

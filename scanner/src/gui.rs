@@ -1,6 +1,8 @@
+#[cfg(windows)]
+use crate::win10pcap_install;
 use crate::{
     LogOutput, ScanArgs, ScanOptions, ScannerConfig, load_config_sync, nonempty_opt, resolve_scan,
-    save_config_sync, scan, upload_scan, win10pcap_install,
+    save_config_sync, scan, upload_scan,
 };
 use eframe::egui;
 use otserver_scanner::profinet::{self, CaptureInterface};

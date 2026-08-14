@@ -24,7 +24,17 @@ export type ImportedAsset = {
   operatingSystem?: string
   osAccuracy?: number
   firmwareVersion?: string
-  protocols?: ('bacnet' | 'ethernet-ip' | 'modbus-tcp' | 'niagara-fox' | 'omron-fins' | 'opc-ua' | 'other' | 'profinet' | 's7')[]
+  protocols?: (
+    | 'bacnet'
+    | 'ethernet-ip'
+    | 'modbus-tcp'
+    | 'niagara-fox'
+    | 'omron-fins'
+    | 'opc-ua'
+    | 'other'
+    | 'profinet'
+    | 's7'
+  )[]
   serialNumber?: string
   status?: 'maintenance' | 'offline' | 'online' | 'unknown'
   vendor?: string
