@@ -295,7 +295,10 @@ mod tests {
             let length = (response.len() - 8) as u32;
             response[4..8].copy_from_slice(&length.to_be_bytes());
             stream.write_all(&response).await.unwrap();
-            stream.shutdown().await.unwrap();
+            // Keep the socket open until the client has consumed the response. Windows can
+            // otherwise reset the connection when the responder task drops immediately.
+            let mut close = [0; 1];
+            let _ = stream.read(&mut close).await;
         });
         let finding = probe(Ipv4Addr::LOCALHOST).await.unwrap().unwrap();
         assert_eq!(finding.fields["model"], "CJ2M-CPU32");
