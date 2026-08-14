@@ -49,6 +49,7 @@ import {
   cleanCustomFieldValues,
   sanitizeCustomFieldValues,
 } from '../../src/collections/AssetFields'
+import { initializeAssetClasses } from '../../src/collections/AssetClasses'
 import { AssetObservations } from '../../src/collections/AssetObservations'
 import { Sites, filterSiteParents } from '../../src/collections/Sites'
 import { TopologyLinks } from '../../src/collections/TopologyLinks'
@@ -299,6 +300,48 @@ describe('collection safety hooks', () => {
         req: userReq,
       }),
     ).toEqual({})
+
+    const repairedRole = {
+      id: 'admin-role',
+      isAdmin: false,
+      name: 'Administrator',
+      permissions: [],
+    }
+    const repairPayload = {
+      find: vi.fn().mockResolvedValue({ docs: [repairedRole] }),
+      update: vi.fn().mockResolvedValue({ ...repairedRole, isAdmin: true, name: 'Admin' }),
+    }
+    await ensureAdminRole(repairPayload as never)
+    expect(repairPayload.update).toHaveBeenCalled()
+  })
+
+  it('seeds asset-class rules and migrates legacy asset fields', async () => {
+    const updates: unknown[] = []
+    const payload = {
+      count: vi.fn().mockResolvedValue({ totalDocs: 1 }),
+      find: vi.fn().mockImplementation(async ({ collection }: { collection: string }) => {
+        if (collection === 'assets') {
+          return {
+            docs: [
+              { id: 'asset-1', assetType: 'plc', fieldProvenance: { assetType: 'low' } },
+              { id: 'asset-2', assetType: 42, fieldProvenance: [] },
+            ],
+          }
+        }
+        return { docs: [{ id: 'class-1', assignmentRules: [], ruleSeedVersion: 0 }] }
+      }),
+      update: vi.fn().mockImplementation(async (value: unknown) => {
+        updates.push(value)
+        return value
+      }),
+    }
+
+    await initializeAssetClasses(payload as never)
+    expect(updates.length).toBeGreaterThan(2)
+    expect(updates.at(-1)).toMatchObject({
+      data: { assetClass: 'class-1', assetType: null, fieldProvenance: {} },
+      id: 'asset-2',
+    })
   })
 
   it('keeps internal evidence collections immutable', async () => {

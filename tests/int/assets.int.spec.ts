@@ -19,6 +19,7 @@ vi.mock('@payloadcms/ui', async () => {
       }
       return createElement('div', null, 'Payload edit form')
     },
+    DefaultListView: () => createElement('div', null, 'Payload list'),
   }
 })
 
@@ -64,6 +65,22 @@ describe('asset network fields', () => {
     expect(html).toContain('Rules')
     expect(html).toContain('Priority')
     expect(html).toContain('where%5BassetClass%5D%5Bequals%5D=class-1')
+  })
+
+  it('renders the default list and empty asset-class state', async () => {
+    const defaultView = await AssetClassListView({ enableRowSelections: false } as never)
+    expect(renderToStaticMarkup(createElement(() => defaultView))).toContain('Payload list')
+
+    const emptyView = await AssetClassListView({
+      enableRowSelections: true,
+      hasCreatePermission: false,
+      payload: {
+        config: { routes: { admin: '/admin' } },
+        find: vi.fn().mockResolvedValue({ docs: [] }),
+      },
+      user: { id: 'user-1' },
+    } as never)
+    expect(renderToStaticMarkup(createElement(() => emptyView))).toContain('No asset classes yet')
   })
 
   it('matches safe manufacturer and model regular expressions together', async () => {
