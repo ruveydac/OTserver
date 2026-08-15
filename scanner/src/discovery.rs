@@ -267,35 +267,44 @@ fn source_ipv4(interface: &str) -> Result<Ipv4Addr, String> {
 #[cfg(target_os = "linux")]
 fn source_ipv4(interface: &str) -> Result<Ipv4Addr, String> {
     use std::ffi::{CStr, CString};
-    use std::ptr;
+    use std::net::Ipv4Addr;
+    use std::ptr::{self, NonNull};
 
     let wanted = CString::new(interface)
         .map_err(|_| "The interface name contains an invalid null byte.".to_string())?;
     let mut addresses = ptr::null_mut();
-    // SAFETY: getifaddrs initializes addresses on success and freeifaddrs releases the list once.
+
     if unsafe { libc::getifaddrs(&mut addresses) } != 0 {
         return Err(format!(
             "Could not inspect Linux interfaces: {}",
             std::io::Error::last_os_error()
         ));
     }
+
     let mut current = addresses;
     let mut result = None;
-    while !current.is_null() {
-        // SAFETY: current traverses the valid list returned by getifaddrs.
-        let item = unsafe { &*current };
-        if !item.ifa_addr.is_null()
+
+    while let Some(item_ptr) = NonNull::new(current) {
+        if !item_ptr.as_ptr().is_aligned() {
+            break;
+        }
+
+        let item = unsafe { item_ptr.as_ref() };
+
+        if !item.ifa_name.is_null()
+            && !item.ifa_addr.is_null()
+            && item.ifa_addr.is_aligned()
             && unsafe { CStr::from_ptr(item.ifa_name) }.to_bytes() == wanted.as_bytes()
             && unsafe { (*item.ifa_addr).sa_family as i32 } == libc::AF_INET
         {
-            // SAFETY: AF_INET guarantees that ifa_addr points to sockaddr_in.
             let address = unsafe { &*(item.ifa_addr.cast::<libc::sockaddr_in>()) };
             result = Some(Ipv4Addr::from(u32::from_be(address.sin_addr.s_addr)));
             break;
         }
+
         current = item.ifa_next;
     }
-    // SAFETY: addresses is the list returned by getifaddrs.
+
     unsafe { libc::freeifaddrs(addresses) };
     result.ok_or_else(|| format!("Interface {interface} has no IPv4 address."))
 }
