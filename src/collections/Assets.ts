@@ -66,6 +66,7 @@ export const Assets: CollectionConfig = {
     plural: 'Assets',
     singular: 'Asset',
   },
+  trash: true,
   access: {
     create: canCreateSiteDocument,
     delete: canWriteSiteDocuments,

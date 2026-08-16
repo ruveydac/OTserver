@@ -135,6 +135,53 @@ describe('asset CRUD', () => {
     }
   })
 
+  it('soft-deletes assets via trash and hides them from normal queries', async () => {
+    let assetID: string | undefined
+    let siteID: string | undefined
+
+    try {
+      const site = await payload.create({
+        collection: 'sites',
+        data: { name: `Trash site ${randomUUID()}`, type: 'Test site' },
+      })
+      siteID = site.id
+
+      const mac = `02:${randomBytes(5).toString('hex').toUpperCase().match(/.{2}/g)?.join(':')}`
+      const asset = await payload.create({
+        collection: 'assets',
+        data: {
+          assetClass: otherClassID,
+          criticality: 'low',
+          macAddress: mac,
+          name: 'Trash test asset',
+          site: siteID,
+          status: 'unknown',
+        },
+      })
+      assetID = asset.id
+
+      await payload.delete({ collection: 'assets', id: assetID })
+
+      const normal = await payload.find({
+        collection: 'assets',
+        where: { id: { equals: assetID } },
+      })
+      expect(normal.docs).toHaveLength(0)
+
+      const count = await payload.count({
+        collection: 'assets',
+        where: { macAddress: { equals: mac } },
+      })
+      expect(count.totalDocs).toBe(0)
+    } finally {
+      if (assetID)
+        await payload
+          .delete({ collection: 'assets', id: assetID, overrideAccess: true, trash: true })
+          .catch(() => {})
+      if (siteID) await payload.delete({ collection: 'sites', id: siteID })
+    }
+  })
+
   it('manages asset classes as documents and protects classes that are in use', async () => {
     let assetClassID: string | undefined
     let assetID: string | undefined

@@ -243,6 +243,7 @@ export interface Asset {
   notes?: string | null;
   updatedAt: string;
   createdAt: string;
+  deletedAt?: string | null;
 }
 /**
  * Upload discovery files to create or update assets by MAC address.
@@ -681,6 +682,7 @@ export interface AssetsSelect<T extends boolean = true> {
   notes?: T;
   updatedAt?: T;
   createdAt?: T;
+  deletedAt?: T;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema

@@ -47,9 +47,3 @@ export const importSources = [
 ] as const
 
 export type ImportSource = (typeof importSources)[number]['value']
-
-export const importSourceOptions = importSources.map(({ label, value }) => ({ label, value }))
-
-export const importSourceQuality = Object.fromEntries(
-  importSources.map(({ quality, value }) => [value, quality]),
-) as Record<ImportSource, (typeof importSources)[number]['quality']>

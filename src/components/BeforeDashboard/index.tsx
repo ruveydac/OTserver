@@ -1,16 +1,11 @@
+import Image from 'next/image'
 import Link from 'next/link'
 import type { Payload, SanitizedPermissions } from 'payload'
 
+import { statusLabels } from '@/components/labels'
 import type { User } from '@/payload-types'
 
 import './index.scss'
-
-const statusLabels = {
-  maintenance: 'Maintenance',
-  offline: 'Offline',
-  online: 'Online',
-  unknown: 'Unknown',
-}
 
 const BeforeDashboard = async ({
   payload,
@@ -68,7 +63,14 @@ const BeforeDashboard = async ({
         <div>
           <p className="before-dashboard__eyebrow">OT inventory</p>
           {/* ponytail: render otserver.svg logo */}
-          <img src="/otserver.svg" alt="OTserver" className="before-dashboard__logo" />
+          <Image
+            src="/otserver.svg"
+            alt="OTserver"
+            width={200}
+            height={40}
+            className="before-dashboard__logo"
+            unoptimized
+          />
           <p>
             Track industrial devices, network identities, ownership data, and operational state.
           </p>

@@ -1,7 +1,8 @@
 import { DefaultListView } from '@payloadcms/ui'
 import Link from 'next/link'
-import type { ListViewClientProps, ListViewServerProps } from 'payload'
+import type { ListViewServerProps } from 'payload'
 
+import { forwardListViewProps } from '@/components/forwardListViewProps'
 import type { Site } from '@/payload-types'
 
 import { assetListURL } from '@/components/assetListURL'
@@ -49,34 +50,7 @@ export const buildSiteTree = (sites: Site[]) => {
 
 const SiteTreeView = async (props: ListViewServerProps) => {
   if (!props.enableRowSelections) {
-    const clientProps: ListViewClientProps = {
-      AfterList: props.AfterList,
-      AfterListTable: props.AfterListTable,
-      beforeActions: props.beforeActions,
-      BeforeList: props.BeforeList,
-      BeforeListTable: props.BeforeListTable,
-      collectionSlug: props.collectionSlug,
-      columnState: props.columnState,
-      Description: props.Description,
-      disableBulkDelete: props.disableBulkDelete,
-      disableBulkEdit: props.disableBulkEdit,
-      disableQueryPresets: props.disableQueryPresets,
-      enableRowSelections: props.enableRowSelections,
-      hasCreatePermission: props.hasCreatePermission,
-      hasDeletePermission: props.hasDeletePermission,
-      hasTrashPermission: props.hasTrashPermission,
-      listMenuItems: props.listMenuItems,
-      listPreferences: props.listPreferences,
-      newDocumentURL: props.newDocumentURL,
-      queryPreset: props.queryPreset,
-      queryPresetPermissions: props.queryPresetPermissions,
-      renderedFilters: props.renderedFilters,
-      resolvedFilterOptions: props.resolvedFilterOptions,
-      Table: props.Table,
-      viewType: props.viewType,
-    }
-
-    return <DefaultListView {...clientProps} />
+    return <DefaultListView {...forwardListViewProps(props)} />
   }
 
   // ponytail: the hierarchy is rendered in memory; add pagination only if site counts reach thousands.
