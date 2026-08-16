@@ -2,7 +2,7 @@ FROM python:3.12-slim-bookworm
 
 RUN pip install --no-cache-dir asyncua==1.1.8
 
-COPY opcua.py /lab/opcua.py
+COPY devices/opcua.py /lab/opcua.py
 
 RUN python3 /lab/opcua.py self-test
 

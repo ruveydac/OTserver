@@ -9,7 +9,6 @@ rule, command, contract, or architectural boundary.
   quick reference is insufficient.
 - Product setup and operator basics are in `README.md`.
 - Scanner usage and platform requirements are in `scanner/README.md`.
-- Scanner design decisions and intentional compatibility breaks are in `agent.md`.
 - The OTserver Scanner/importer wire contract is `contracts/otserver-scan-v2.schema.json`.
 
 ## Project Summary
@@ -148,6 +147,29 @@ transaction only when real file sizes or atomicity requirements justify it.
   Fox. It must not publish OT ports to a physical adapter or use host networking. The Windows-host
   harness may bind its test ports only to Docker/WSL's host-only Hyper-V adapter and must clean up
   its temporary Compose project.
+
+### OPC UA Design Decisions
+
+- SecurityPolicy None only. The scanner opens only unsecured channels. Encrypted endpoints are not
+  supported. Credentials travel unencrypted when username authentication is used; the scanner warns
+  about this and requires explicit configuration. Most OT OPC UA servers in target environments use
+  None security, and adding certificate management would complicate deployment without proportional
+  benefit.
+- No continuation point following. Browse operations that return continuation points fail with an
+  error rather than paginating. OT asset servers typically have small address spaces; continuation
+  points indicate an unexpectedly large result set that likely represents a misconfiguration or
+  non-standard server. Failing fast surfaces these cases.
+- Bounded batch reads. The scanner limits reads to 64 variables per batch. This prevents overwhelming
+  servers with large address spaces and keeps discovery latency predictable. The OPC UA DI model
+  specifies a fixed set of standard variables well under this limit.
+- Certificate authentication rejected. The scanner supports anonymous and username/password
+  authentication but never attempts certificate-based client authentication. Certificate management
+  adds substantial complexity for a feature rarely used in OT environments.
+- Multi-port probing. The scanner probes ports 4840, 4841, and 48400 by default. Port 4840 is the
+  IANA-assigned OPC UA port; 4841 and 48400 are commonly used by specific vendors.
+- FindAlias with DeviceSet fallback. Asset identity resolution uses the standardized
+  `Objects/Aliases/Assets` alias categories with the `FindAlias` method when available, falling back
+  to the OPC UA DI `DeviceSet` when aliases are absent.
 
 ## Search
 
