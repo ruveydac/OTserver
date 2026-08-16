@@ -16,8 +16,9 @@ DEVICES = {
     "bacnet": "02:00:00:00:00:12",
     "fins": "02:00:00:00:00:13",
     "fox": "02:00:00:00:00:14",
+    "opcua": "02:00:00:00:00:15",
 }
-TARGETS = [f"172.30.0.{number}" for number in range(10, 15)]
+TARGETS = [f"172.30.0.{number}" for number in range(10, 16)]
 
 
 def run(*arguments: str) -> None:
@@ -155,6 +156,21 @@ def assert_full(result: dict) -> None:
     fox_ports = {value["key"]: value["raw"] for value in by_mac(result, DEVICES["fox"])["ports"]}
     assert fox_ports["tcp:1911"]["tls"] is False
     assert fox_ports["tcp:4911"]["tls"] is True
+
+    opcua = observation(by_mac(result, DEVICES["opcua"]), "opc-ua")
+    assert opcua["fields"] | {
+        "name": "LAB-ASSET-1",
+        "vendor": "OT Lab Manufacturing",
+        "model": "OPC UA Lab Device",
+        "serialNumber": "OPCLAB0001",
+        "firmwareVersion": "2.1.0",
+        "location": "Plant1/Line3/Cell2",
+        "description": "Test Device",
+        "status": "online",
+    } == opcua["fields"]
+    assert "opc-ua" in opcua["fields"].get("protocols", [])
+    opcua_ports = {value["key"] for value in by_mac(result, DEVICES["opcua"])["ports"]}
+    assert "tcp:4840" in opcua_ports
 
 
 def assert_v3(result: dict) -> None:

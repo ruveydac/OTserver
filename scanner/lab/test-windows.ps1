@@ -77,7 +77,7 @@ $composeArguments = @(
     '-f', $composeFile,
     '-f', $windowsComposeFile
 )
-$services = @('siemens', 'ethernet_ip', 'bacnet', 'fins', 'fox')
+$services = @('siemens', 'ethernet_ip', 'bacnet', 'fins', 'fox', 'opcua')
 
 Write-Host "Windows lab adapter: $($labAdapter.Name) ($interfaceId), $labAddress, $sourceMac"
 Write-Host 'This is a host-routed protocol smoke test. Docker responders share the host adapter MAC.'
@@ -111,7 +111,7 @@ try {
         throw 'The host-routed lab identity did not use the selected Hyper-V adapter MAC.'
     }
     $sources = @($result.devices[0].observations | ForEach-Object { $_.source })
-    $expectedSources = @('arp', 's7', 'ethernet-ip', 'bacnet', 'omron-fins', 'niagara-fox', 'snmp')
+    $expectedSources = @('arp', 's7', 'ethernet-ip', 'bacnet', 'omron-fins', 'niagara-fox', 'opc-ua', 'snmp')
     $missingSources = @($expectedSources | Where-Object { $_ -notin $sources })
     if ($missingSources.Count -gt 0) {
         throw "Windows lab is missing observations: $($missingSources -join ', ')."

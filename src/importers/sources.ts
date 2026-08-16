@@ -13,7 +13,7 @@ export const importSources = [
     ],
     required:
       'A validated otserver-scan JSON file with schemaVersion 2 and a unique MAC address per device.',
-    note: 'Native protocol, PROFINET, and SNMP observations are high quality. ARP/OUI and OS fingerprint observations are medium quality. Credentials are never included in the export.',
+    note: 'Native protocol, PROFINET, and SNMP observations are high quality. ARP/OUI, OPC UA asset, and OS fingerprint observations are medium quality. Credentials are never included in the export.',
   },
   {
     label: 'Siemens PRONETA',

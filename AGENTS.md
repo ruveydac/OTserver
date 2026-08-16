@@ -126,7 +126,7 @@ transaction only when real file sizes or atomicity requirements justify it.
 - Never add configuration writes, DCP Set, SNMP SET, brute force, exploits, vulnerability scripts, or
   Modbus requests without an explicit product decision and safety review.
 - Supported native queries are ARP, PROFINET DCP Identify, S7 identity, EtherNet/IP List Identity,
-  BACnet ReadProperty, Omron FINS identity, Niagara Fox hello, SNMP GET/WALK, and LLDP.
+  BACnet ReadProperty, Omron FINS identity, Niagara Fox hello, OPC UA asset discovery, SNMP GET/WALK, and LLDP.
 - Scanner protocols are enabled by default and each has an independent CLI disable flag and GUI
   toggle. Keep SNMP inventory and SNMP-transported LLDP topology independently selectable.
 - Linux raw Ethernet uses `AF_PACKET` and needs root or `CAP_NET_RAW`. Windows ARP uses native

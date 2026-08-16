@@ -90,6 +90,7 @@ pub enum Source {
     Lldp,
     NiagaraFox,
     OmronFins,
+    OpcUa,
     OsFingerprint,
     ProfinetDcp,
     S7,
@@ -106,6 +107,7 @@ impl Source {
             Self::Lldp => "lldp",
             Self::NiagaraFox => "niagara-fox",
             Self::OmronFins => "omron-fins",
+            Self::OpcUa => "opc-ua",
             Self::OsFingerprint => "os-fingerprint",
             Self::ProfinetDcp => "profinet-dcp",
             Self::S7 => "s7",
@@ -418,6 +420,7 @@ mod tests {
             Source::Lldp,
             Source::NiagaraFox,
             Source::OmronFins,
+            Source::OpcUa,
             Source::OsFingerprint,
             Source::ProfinetDcp,
             Source::S7,
@@ -426,7 +429,8 @@ mod tests {
         ]
         .map(Source::label);
         assert_eq!(labels[0], "arp");
-        assert_eq!(labels[10], "unknown");
+        assert_eq!(labels[6], "opc-ua");
+        assert_eq!(labels[11], "unknown");
         let devices = merge_devices(vec![
             Device {
                 mac_address: "invalid".into(),

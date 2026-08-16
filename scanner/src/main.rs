@@ -81,6 +81,8 @@ pub struct ScanArgs {
     #[arg(long)]
     pub no_fox: bool,
     #[arg(long)]
+    pub no_opcua: bool,
+    #[arg(long)]
     pub no_snmp: bool,
     #[arg(long)]
     pub no_lldp: bool,
@@ -120,9 +122,17 @@ pub struct ScannerConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub no_fox: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_opcua: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub no_snmp: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub no_lldp: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opcua_ports: Option<Vec<u16>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opcua_username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opcua_password_env: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -145,6 +155,7 @@ pub struct ScanOptions {
     pub snmp_profile: Option<PathBuf>,
     pub protocols: ProtocolOptions,
     pub snmp_credentials: snmp::CredentialOverrides,
+    pub opcua: otserver_scanner::protocols::OpcuaSettings,
     pub upload: Option<UploadOptions>,
 }
 
@@ -157,6 +168,7 @@ pub struct ProtocolOptions {
     pub bacnet: bool,
     pub fins: bool,
     pub fox: bool,
+    pub opcua: bool,
     pub snmp: bool,
     pub lldp: bool,
 }
@@ -171,6 +183,7 @@ impl Default for ProtocolOptions {
             bacnet: true,
             fins: true,
             fox: true,
+            opcua: true,
             snmp: true,
             lldp: true,
         }
@@ -316,9 +329,11 @@ pub fn resolve_scan(
         bacnet: !(no_native_protocols || args.no_bacnet || config.no_bacnet.unwrap_or(false)),
         fins: !(no_native_protocols || args.no_fins || config.no_fins.unwrap_or(false)),
         fox: !(no_native_protocols || args.no_fox || config.no_fox.unwrap_or(false)),
+        opcua: !(no_native_protocols || args.no_opcua || config.no_opcua.unwrap_or(false)),
         snmp: !(args.no_snmp || config.no_snmp.unwrap_or(false)),
         lldp: !(args.no_lldp || config.no_lldp.unwrap_or(false)),
     };
+    let opcua = opcua_probe_settings(&config);
     let targets = if args.targets.is_empty() {
         config.targets.unwrap_or_default()
     } else {
@@ -358,8 +373,41 @@ pub fn resolve_scan(
         snmp_profile: args.snmp_profile.or(config.snmp_config),
         protocols,
         snmp_credentials: snmp::CredentialOverrides::default(),
+        opcua,
         upload,
     })
+}
+
+fn opcua_probe_settings(config: &ScannerConfig) -> otserver_scanner::protocols::OpcuaSettings {
+    let env = |name: &str| {
+        std::env::var(name)
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+    };
+    let config_value = |value: Option<&str>| {
+        value
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+    };
+    let username =
+        env("OTSERVER_OPCUA_USERNAME").or_else(|| config_value(config.opcua_username.as_deref()));
+    let password = env("OTSERVER_OPCUA_PASSWORD").or_else(|| {
+        config
+            .opcua_password_env
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .and_then(env)
+    });
+    otserver_scanner::protocols::OpcuaSettings {
+        ports: otserver_scanner::protocols::OpcuaSettings::ports_or_default(
+            config.opcua_ports.clone(),
+        ),
+        username,
+        password,
+    }
 }
 
 pub fn nonempty(value: Option<String>, name: &str) -> Result<String, String> {
@@ -499,13 +547,20 @@ pub async fn scan(options: &ScanOptions, logger: &dyn LogOutput) -> Result<bool,
         bacnet: options.protocols.bacnet,
         fins: options.protocols.fins,
         fox: options.protocols.fox,
+        opcua: options.protocols.opcua,
     };
     if native_selection.any() {
         logger.log(format!(
             "Probing native protocols ({})...",
             native_selection.labels().join(", ")
         ));
-        probe_protocols(&mut devices, &mut warnings, native_selection).await;
+        probe_protocols(
+            &mut devices,
+            &mut warnings,
+            native_selection,
+            &options.opcua,
+        )
+        .await;
     }
 
     if (options.protocols.snmp || options.protocols.lldp)
@@ -707,6 +762,7 @@ async fn probe_protocols(
     devices: &mut [otserver_scanner::contract::Device],
     warnings: &mut Vec<String>,
     selection: protocols::Selection,
+    opcua: &otserver_scanner::protocols::OpcuaSettings,
 ) {
     let identities = unique_ip_identities(devices)
         .into_iter()
@@ -717,8 +773,9 @@ async fn probe_protocols(
         if tasks.len() == 32 {
             apply_probe(devices, warnings, tasks.join_next().await);
         }
+        let opcua = opcua.clone();
         tasks.spawn(async move {
-            let result = protocols::scan(ip, &mac, selection).await;
+            let result = protocols::scan(ip, &mac, selection, &opcua).await;
             (mac, result)
         });
     }
@@ -803,6 +860,7 @@ mod tests {
             no_bacnet: false,
             no_fins: false,
             no_fox: false,
+            no_opcua: false,
             no_snmp: false,
             no_lldp: false,
             server_url: None,
@@ -839,6 +897,7 @@ mod tests {
         assert!(!resolved.protocols.bacnet);
         assert!(!resolved.protocols.fins);
         assert!(!resolved.protocols.fox);
+        assert!(!resolved.protocols.opcua);
         assert!(resolved.protocols.snmp);
         assert!(resolved.protocols.lldp);
         let upload = resolved.upload.unwrap();
@@ -866,8 +925,12 @@ mod tests {
             no_bacnet: Some(true),
             no_fins: None,
             no_fox: Some(true),
+            no_opcua: Some(true),
             no_snmp: Some(true),
             no_lldp: Some(true),
+            opcua_ports: Some(vec![4840, 4841]),
+            opcua_username: Some("opc-user".into()),
+            opcua_password_env: Some("OTSERVER_LAB_OPCUA_PASSWORD".into()),
             server_url: Some("https://otserver.example".into()),
             site: Some("site-1".into()),
             api_key: Some("key-123".into()),
@@ -875,6 +938,26 @@ mod tests {
         let bytes = serde_json::to_vec_pretty(&config).unwrap();
         let parsed = parse_config(&bytes).unwrap();
         assert_eq!(config, parsed);
+    }
+
+    #[test]
+    fn resolves_opcua_settings_from_config() {
+        let config = ScannerConfig {
+            opcua_ports: Some(vec![4841, 48400]),
+            opcua_username: Some("opc-user".into()),
+            opcua_password_env: Some("OTSERVER_OPCUA_PASSWORD_NOT_SET_FOR_TEST".into()),
+            ..ScannerConfig::default()
+        };
+        let settings = opcua_probe_settings(&config);
+        assert_eq!(settings.ports, [4841, 48400]);
+        assert_eq!(settings.username.as_deref(), Some("opc-user"));
+        assert_eq!(settings.password, None);
+
+        let settings = opcua_probe_settings(&ScannerConfig::default());
+        assert_eq!(
+            settings.ports,
+            otserver_scanner::protocols::OPCUA_DEFAULT_PORTS
+        );
     }
 
     #[test]
@@ -901,6 +984,7 @@ mod tests {
             "--no-bacnet",
             "--no-fins",
             "--no-fox",
+            "--no-opcua",
             "--no-snmp",
             "--no-lldp",
         ])
@@ -915,6 +999,7 @@ mod tests {
         assert!(args.no_bacnet);
         assert!(args.no_fins);
         assert!(args.no_fox);
+        assert!(args.no_opcua);
         assert!(args.no_snmp);
         assert!(args.no_lldp);
     }

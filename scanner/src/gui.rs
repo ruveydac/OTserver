@@ -45,6 +45,8 @@ pub struct GuiApp {
     snmp_username: String,
     snmp_auth_password: String,
     snmp_privacy_password: String,
+    opcua_username: String,
+    opcua_password: String,
     arp_enabled: bool,
     profinet_enabled: bool,
     s7_enabled: bool,
@@ -52,6 +54,7 @@ pub struct GuiApp {
     bacnet_enabled: bool,
     fins_enabled: bool,
     fox_enabled: bool,
+    opcua_enabled: bool,
     snmp_enabled: bool,
     lldp_enabled: bool,
     server_url: String,
@@ -120,6 +123,7 @@ impl GuiApp {
         let bacnet_enabled = !(legacy_native_disabled || config.no_bacnet.unwrap_or(false));
         let fins_enabled = !(legacy_native_disabled || config.no_fins.unwrap_or(false));
         let fox_enabled = !(legacy_native_disabled || config.no_fox.unwrap_or(false));
+        let opcua_enabled = !(legacy_native_disabled || config.no_opcua.unwrap_or(false));
         let snmp_enabled = !config.no_snmp.unwrap_or(false);
         let lldp_enabled = !config.no_lldp.unwrap_or(false);
         let server_url = config.server_url.clone().unwrap_or_default();
@@ -140,6 +144,8 @@ impl GuiApp {
             snmp_username: String::new(),
             snmp_auth_password: String::new(),
             snmp_privacy_password: String::new(),
+            opcua_username: String::new(),
+            opcua_password: String::new(),
             arp_enabled,
             profinet_enabled,
             s7_enabled,
@@ -147,6 +153,7 @@ impl GuiApp {
             bacnet_enabled,
             fins_enabled,
             fox_enabled,
+            opcua_enabled,
             snmp_enabled,
             lldp_enabled,
             server_url,
@@ -193,8 +200,12 @@ impl GuiApp {
             no_bacnet: (!self.bacnet_enabled).then_some(true),
             no_fins: (!self.fins_enabled).then_some(true),
             no_fox: (!self.fox_enabled).then_some(true),
+            no_opcua: (!self.opcua_enabled).then_some(true),
             no_snmp: (!self.snmp_enabled).then_some(true),
             no_lldp: (!self.lldp_enabled).then_some(true),
+            opcua_ports: None,
+            opcua_username: None,
+            opcua_password_env: None,
             server_url: nonempty_opt(&self.server_url),
             site: nonempty_opt(&self.site),
             api_key: nonempty_opt(&self.api_key),
@@ -253,6 +264,7 @@ impl GuiApp {
             no_bacnet: !self.bacnet_enabled,
             no_fins: !self.fins_enabled,
             no_fox: !self.fox_enabled,
+            no_opcua: !self.opcua_enabled,
             no_snmp: !self.snmp_enabled,
             no_lldp: !self.lldp_enabled,
             server_url: nonempty_opt(&self.server_url),
@@ -275,6 +287,12 @@ impl GuiApp {
             auth_password: nonempty_opt(&self.snmp_auth_password),
             privacy_password: nonempty_opt(&self.snmp_privacy_password),
         };
+        if let Some(username) = nonempty_opt(&self.opcua_username) {
+            options.opcua.username = Some(username);
+        }
+        if let Some(password) = nonempty_opt(&self.opcua_password) {
+            options.opcua.password = Some(password);
+        }
 
         let (tx, rx) = mpsc::channel::<String>();
         self.log_rx = Some(rx);
@@ -475,6 +493,8 @@ impl eframe::App for GuiApp {
                         protocol_changed |=
                             ui.toggle_value(&mut self.fox_enabled, "Fox").changed();
                         protocol_changed |=
+                            ui.toggle_value(&mut self.opcua_enabled, "OPC UA").changed();
+                        protocol_changed |=
                             ui.toggle_value(&mut self.snmp_enabled, "SNMP").changed();
                         protocol_changed |=
                             ui.toggle_value(&mut self.lldp_enabled, "LLDP").changed();
@@ -590,6 +610,30 @@ impl eframe::App for GuiApp {
                             self.snmp_username.clear();
                             self.snmp_auth_password.clear();
                             self.snmp_privacy_password.clear();
+                        }
+                    });
+                    ui.separator();
+                    ui.label("OPC UA Credentials (session only)");
+                    ui.small(
+                        "Used only when a server requires username authentication. They are kept only in memory and are not saved or logged. Passwords travel unencrypted because the scanner uses SecurityPolicy None.",
+                    );
+                    ui.horizontal(|ui| {
+                        ui.label("OPC UA Username:");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.opcua_username)
+                                .hint_text("Use anonymous access when blank"),
+                        );
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("OPC UA Password:");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.opcua_password)
+                                .password(true)
+                                .hint_text("Use environment variable when blank"),
+                        );
+                        if ui.button("Clear OPC UA credentials").clicked() {
+                            self.opcua_username.clear();
+                            self.opcua_password.clear();
                         }
                     });
                 });
