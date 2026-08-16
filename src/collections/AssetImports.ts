@@ -204,9 +204,7 @@ const runImport: CollectionAfterChangeHook = async ({ context, doc, req }) => {
       ...(topology.unresolved?.length
         ? [`${topology.unresolved.length} observation(s) could not be correlated by MAC address.`]
         : []),
-      ...(durationSeconds > 30
-        ? [`Import took ${durationSeconds.toFixed(1)} seconds.`]
-        : []),
+      ...(durationSeconds > 30 ? [`Import took ${durationSeconds.toFixed(1)} seconds.`] : []),
     ]
 
     if (durationSeconds > 30) {

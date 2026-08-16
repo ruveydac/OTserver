@@ -29,7 +29,9 @@ const cleanupTrashedAssets = async (payload: Payload) => {
     where: { deletedAt: { less_than_equal: cutoff } },
   })
   if ('docs' in result && result.docs.length) {
-    payload.logger.info(`Permanently deleted ${result.docs.length} trashed asset(s) older than ${TRASH_RETENTION_DAYS} days.`)
+    payload.logger.info(
+      `Permanently deleted ${result.docs.length} trashed asset(s) older than ${TRASH_RETENTION_DAYS} days.`,
+    )
   }
 }
 
