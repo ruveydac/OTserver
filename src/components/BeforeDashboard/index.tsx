@@ -1,16 +1,10 @@
 import Link from 'next/link'
 import type { Payload, SanitizedPermissions } from 'payload'
 
+import { statusLabels } from '@/components/labels'
 import type { User } from '@/payload-types'
 
 import './index.scss'
-
-const statusLabels = {
-  maintenance: 'Maintenance',
-  offline: 'Offline',
-  online: 'Online',
-  unknown: 'Unknown',
-}
 
 const BeforeDashboard = async ({
   payload,

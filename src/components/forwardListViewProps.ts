@@ -1,0 +1,28 @@
+import type { ListViewClientProps, ListViewServerProps } from 'payload'
+
+export const forwardListViewProps = (props: ListViewServerProps): ListViewClientProps => ({
+  AfterList: props.AfterList,
+  AfterListTable: props.AfterListTable,
+  beforeActions: props.beforeActions,
+  BeforeList: props.BeforeList,
+  BeforeListTable: props.BeforeListTable,
+  collectionSlug: props.collectionSlug,
+  columnState: props.columnState,
+  Description: props.Description,
+  disableBulkDelete: props.disableBulkDelete,
+  disableBulkEdit: props.disableBulkEdit,
+  disableQueryPresets: props.disableQueryPresets,
+  enableRowSelections: props.enableRowSelections,
+  hasCreatePermission: props.hasCreatePermission,
+  hasDeletePermission: props.hasDeletePermission,
+  hasTrashPermission: props.hasTrashPermission,
+  listMenuItems: props.listMenuItems,
+  listPreferences: props.listPreferences,
+  newDocumentURL: props.newDocumentURL,
+  queryPreset: props.queryPreset,
+  queryPresetPermissions: props.queryPresetPermissions,
+  renderedFilters: props.renderedFilters,
+  resolvedFilterOptions: props.resolvedFilterOptions,
+  Table: props.Table,
+  viewType: props.viewType,
+})

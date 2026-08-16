@@ -18,7 +18,7 @@ import { parseOTserverScanner } from '../importers/otserverScanner'
 import { parseProneta } from '../importers/proneta'
 import { mergeAssetData, type FieldProvenance } from '../importers/assetQuality'
 import type { ImportResult } from '../importers/types'
-import { importSourceOptions, importSourceQuality, type ImportSource } from '../importers/sources'
+import { importSources, type ImportSource } from '../importers/sources'
 
 const parsers = {
   nmap: parseNmap,
@@ -40,6 +40,7 @@ export const getAssetOverrides = (value: unknown) => {
 const runImport: CollectionAfterChangeHook = async ({ context, doc, req }) => {
   if (context.skipAssetImport || !req.file) return doc
 
+  const startedAt = Date.now()
   let created = 0
   let updated = 0
 
@@ -83,7 +84,7 @@ const runImport: CollectionAfterChangeHook = async ({ context, doc, req }) => {
         : [
             {
               data: automaticData,
-              quality: importSourceQuality[doc.source as ImportSource],
+              quality: importSources.find((s) => s.value === doc.source)?.quality || 'low',
               source: doc.source,
             },
           ]
@@ -197,6 +198,21 @@ const runImport: CollectionAfterChangeHook = async ({ context, doc, req }) => {
       })
     }
 
+    const durationSeconds = (Date.now() - startedAt) / 1000
+    const warnings = [
+      ...topology.warnings,
+      ...(topology.unresolved?.length
+        ? [`${topology.unresolved.length} observation(s) could not be correlated by MAC address.`]
+        : []),
+      ...(durationSeconds > 30
+        ? [`Import took ${durationSeconds.toFixed(1)} seconds.`]
+        : []),
+    ]
+
+    if (durationSeconds > 30) {
+      console.warn(`Import ${doc.id} took ${durationSeconds.toFixed(1)} seconds.`)
+    }
+
     context.skipAssetImport = true
     return req.payload.update({
       collection: 'asset-imports',
@@ -211,15 +227,7 @@ const runImport: CollectionAfterChangeHook = async ({ context, doc, req }) => {
         topologyName: topology.topologyName,
         unresolved: topology.unresolved,
         updatedAssets: updated,
-        warnings:
-          [
-            ...topology.warnings,
-            ...(topology.unresolved?.length
-              ? [
-                  `${topology.unresolved.length} observation(s) could not be correlated by MAC address.`,
-                ]
-              : []),
-          ].join('\n') || null,
+        warnings: warnings.join('\n') || null,
       },
       id: doc.id,
       overrideAccess: false,
@@ -283,7 +291,7 @@ export const AssetImports: CollectionConfig = {
       name: 'source',
       type: 'select',
       defaultValue: 'otserver-scanner',
-      options: importSourceOptions,
+      options: importSources.map(({ label, value }) => ({ label, value })),
       required: true,
     },
     {

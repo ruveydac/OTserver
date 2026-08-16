@@ -2,6 +2,12 @@ import Link from 'next/link'
 import type { DocumentViewClientProps, DocumentViewServerProps } from 'payload'
 import type { ReactNode } from 'react'
 
+import {
+  criticalityLabels,
+  formatDateTime,
+  protocolLabels,
+  statusLabels,
+} from '@/components/labels'
 import type { Asset, AuditLog } from '@/payload-types'
 
 import './index.scss'
@@ -12,13 +18,6 @@ type Detail = {
   value: ReactNode
   wide?: boolean
 }
-
-const date = (value?: null | string) =>
-  value
-    ? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(
-        new Date(value),
-      )
-    : '—'
 
 const auditValue = (value: unknown) =>
   value !== null && typeof value === 'object' ? JSON.stringify(value) : String(value ?? '—')
@@ -34,7 +33,7 @@ const auditDetails = (log: AuditLog): Detail => {
 
   return {
     key: log.id,
-    label: date(log.createdAt),
+    label: formatDateTime(log.createdAt),
     value: (
       <div className="asset-view__audit-entry">
         <p>
@@ -69,22 +68,6 @@ const auditDetails = (log: AuditLog): Detail => {
     wide: true,
   }
 }
-
-const labels = {
-  criticality: { critical: 'Critical', high: 'High', low: 'Low', medium: 'Medium' },
-  protocol: {
-    bacnet: 'BACnet',
-    'ethernet-ip': 'EtherNet/IP',
-    'modbus-tcp': 'Modbus TCP',
-    'niagara-fox': 'Niagara Fox',
-    'omron-fins': 'Omron FINS',
-    'opc-ua': 'OPC UA',
-    other: 'Other',
-    profinet: 'PROFINET',
-    s7: 'S7',
-  },
-  status: { maintenance: 'Maintenance', offline: 'Offline', online: 'Online', unknown: 'Unknown' },
-} as const
 
 const Section = ({
   details,
@@ -203,7 +186,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
         </div>
         <div className="asset-view__actions">
           <span className={`asset-view__status asset-view__status--${asset.status}`}>
-            {labels.status[asset.status]}
+            {statusLabels[asset.status]}
           </span>
           <Link className="asset-view__edit" href={`${assetURL}/edit`}>
             Edit asset
@@ -267,13 +250,13 @@ const AssetView = async (props: DocumentViewServerProps) => {
         />
         <Section
           details={[
-            { label: 'Status', value: labels.status[asset.status] },
-            { label: 'Criticality', value: labels.criticality[asset.criticality] },
+            { label: 'Status', value: statusLabels[asset.status] },
+            { label: 'Criticality', value: criticalityLabels[asset.criticality] },
             {
               label: 'Protocols',
-              value: asset.protocols?.map((protocol) => labels.protocol[protocol]).join(', '),
+              value: asset.protocols?.map((protocol) => protocolLabels[protocol]).join(', '),
             },
-            { label: 'Last seen', value: date(asset.lastSeen) },
+            { label: 'Last seen', value: formatDateTime(asset.lastSeen) },
           ]}
           title="Operations"
         />
@@ -289,7 +272,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
                       ? 'Yes'
                       : 'No'
                     : definition.type === 'date' && typeof value === 'string'
-                      ? date(value)
+                      ? formatDateTime(value)
                       : typeof value === 'string' || typeof value === 'number'
                         ? value
                         : undefined,
@@ -302,7 +285,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
           details={[
             { label: 'Import source', value: asset.importSource },
             { label: 'Source version', value: asset.sourceVersion },
-            { label: 'Last imported', value: date(asset.lastImportedAt) },
+            { label: 'Last imported', value: formatDateTime(asset.lastImportedAt) },
           ]}
           title="Discovery"
         />
@@ -311,7 +294,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
             observations.docs.length
               ? observations.docs.map((observation) => ({
                   key: observation.id,
-                  label: `${observation.source} · ${date(observation.observedAt)}`,
+                  label: `${observation.source} · ${formatDateTime(observation.observedAt)}`,
                   value: (
                     <details>
                       <summary>{observation.quality} quality evidence</summary>
@@ -345,7 +328,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
                   const peer = String(localID) === String(asset.id) ? link.remote : link.local
                   return {
                     key: link.id,
-                    label: `${link.source} · ${date(link.observedAt)}`,
+                    label: `${link.source} · ${formatDateTime(link.observedAt)}`,
                     value: <pre>{JSON.stringify(peer, null, 2)}</pre>,
                     wide: true,
                   }
@@ -358,8 +341,8 @@ const AssetView = async (props: DocumentViewServerProps) => {
         <Section
           details={[
             { label: 'Record ID', value: asset.id },
-            { label: 'Created', value: date(asset.createdAt) },
-            { label: 'Updated', value: date(asset.updatedAt) },
+            { label: 'Created', value: formatDateTime(asset.createdAt) },
+            { label: 'Updated', value: formatDateTime(asset.updatedAt) },
             { label: 'Notes', value: asset.notes, wide: true },
           ]}
           title="Record"
