@@ -1,7 +1,7 @@
 import { mongooseAdapter } from '@payloadcms/db-mongodb'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { buildConfig } from 'payload'
+import { buildConfig, type Payload } from 'payload'
 
 import { Assets } from './collections/Assets'
 import { AssetClasses, initializeAssetClasses } from './collections/AssetClasses'
@@ -17,9 +17,27 @@ import { MAX_IMPORT_FILE_SIZE } from './importers/proneta'
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 
-const initializeApplication = async (payload: Parameters<typeof initializeAuthorization>[0]) => {
+const TRASH_RETENTION_DAYS = 90
+const CLEANUP_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000
+
+const cleanupTrashedAssets = async (payload: Payload) => {
+  const cutoff = new Date(Date.now() - TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString()
+  const result = await payload.delete({
+    collection: 'assets',
+    overrideAccess: true,
+    trash: true,
+    where: { deletedAt: { less_than_equal: cutoff } },
+  })
+  if ('docs' in result && result.docs.length) {
+    payload.logger.info(`Permanently deleted ${result.docs.length} trashed asset(s) older than ${TRASH_RETENTION_DAYS} days.`)
+  }
+}
+
+const initializeApplication = async (payload: Payload) => {
   await initializeAssetClasses(payload)
   await initializeAuthorization(payload)
+  await cleanupTrashedAssets(payload)
+  setInterval(() => void cleanupTrashedAssets(payload), CLEANUP_INTERVAL_MS)
 }
 
 export default buildConfig({
