@@ -25,6 +25,32 @@ describe('asset Lucene search', () => {
     })
   })
 
+  it('covers remaining whereToLucene branches', () => {
+    expect(whereToLucene({ status: { exists: true } })).toBe('status:*')
+    expect(whereToLucene({ status: { in: ['online', 'offline'] } })).toBe(
+      '(status:"online" OR status:"offline")',
+    )
+    expect(whereToLucene({ status: { in: 'online,offline' } })).toBe(
+      '(status:"online" OR status:"offline")',
+    )
+    expect(whereToLucene({ status: { not_in: ['offline'] } })).toBe('status:-"offline"')
+    expect(whereToLucene({ and: [{ status: { equals: 'online' } }] })).toBe('status:"online"')
+    expect(
+      whereToLucene({ or: [{ status: { equals: 'online' } }, { status: { equals: 'offline' } }] }),
+    ).toBe('(status:"online" OR status:"offline")')
+    expect(whereToLucene({ status: { equals: '' } })).toBe('')
+    expect(whereToLucene({ status: { equals: null } })).toBe('')
+    expect(whereToLucene({ vendor: { not_equals: 'Siemens' } })).toBe('vendor:-"Siemens"')
+    expect(whereToLucene({ vendor: { not_like: 'Siemens' } })).toBe('vendor:-*Siemens*')
+    expect(whereToLucene({ osAccuracy: { greater_than: 80 } })).toBe('osAccuracy:{80 TO *}')
+    expect(whereToLucene({ osAccuracy: { less_than: 100 } })).toBe('osAccuracy:{* TO 100}')
+    expect(whereToLucene({ osAccuracy: { less_than_equal: 100 } })).toBe('osAccuracy:[* TO 100]')
+    expect(whereToLucene({ status: { in: [] } })).toBe('')
+    expect(whereToLucene({ and: [{ status: { equals: '' } }] })).toBe('')
+    expect(whereToLucene({ or: [{ status: { equals: '' } }] })).toBe('')
+    expect(whereToLucene(undefined)).toBe('')
+  })
+
   it('supports exclusion and rejects unknown fields', () => {
     expect(parseAssetSearch('vendor:Siemens NOT status:offline')).toEqual({
       and: [{ vendor: { like: 'Siemens' } }, { status: { not_equals: 'offline' } }],

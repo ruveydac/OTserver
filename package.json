@@ -6,6 +6,7 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks",
     "build": "cross-env NODE_OPTIONS=--no-deprecation next build --webpack",
     "dev": "cross-env NODE_OPTIONS=--no-deprecation next dev",
     "generate:importmap": "cross-env NODE_OPTIONS=--no-deprecation payload generate:importmap",

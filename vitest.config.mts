@@ -7,9 +7,11 @@ export default defineConfig({
     coverage: {
       exclude: [
         'src/app/**',
+        'src/collections/Users/**',
         'src/environment.d.ts',
         'src/importers/types.ts',
         'src/payload-types.ts',
+        'src/payload.config.ts',
         'src/types/**',
       ],
       include: ['src/**/*.{ts,tsx}'],

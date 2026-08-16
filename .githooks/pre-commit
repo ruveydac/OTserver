@@ -1,0 +1,6 @@
+#!/bin/sh
+STAGED=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(js|jsx|ts|tsx|json|css|scss|md|yml|yaml)$')
+[ -z "$STAGED" ] && exit 0
+
+echo "$STAGED" | xargs pnpm prettier --write --ignore-unknown
+echo "$STAGED" | xargs git add
