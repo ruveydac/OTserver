@@ -61,6 +61,16 @@ services:
         ipv4_address: 172.30.0.14
         mac_address: '02:00:00:00:00:14'
 
+  opcua:
+    build:
+      context: .
+      dockerfile: devices/Dockerfile.opcua
+    healthcheck: *process-health
+    networks:
+      ot_lab:
+        ipv4_address: 172.30.0.15
+        mac_address: '02:00:00:00:00:15'
+
   test:
     build:
       context: ../..
@@ -72,6 +82,7 @@ services:
       bacnet: { condition: service_healthy }
       fins: { condition: service_healthy }
       fox: { condition: service_healthy }
+      opcua: { condition: service_healthy }
     environment:
       OTSERVER_LAB_SNMP_COMMUNITY: lab-public
       OTSERVER_LAB_SNMP_AUTH_PASSWORD: lab-auth-password

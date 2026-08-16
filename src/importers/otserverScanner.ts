@@ -17,6 +17,7 @@ const sources: Record<string, DataQuality> = {
   lldp: 'high',
   'niagara-fox': 'medium',
   'omron-fins': 'medium',
+  'opc-ua': 'medium',
   'os-fingerprint': 'medium',
   'profinet-dcp': 'high',
   s7: 'medium',

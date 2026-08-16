@@ -7,7 +7,10 @@ mod bacnet;
 mod enip;
 mod fins;
 mod fox;
+mod opcua;
 mod s7;
+
+pub use opcua::{DEFAULT_PORTS as OPCUA_DEFAULT_PORTS, ProbeSettings as OpcuaSettings};
 
 const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
@@ -24,11 +27,12 @@ pub struct Selection {
     pub bacnet: bool,
     pub fins: bool,
     pub fox: bool,
+    pub opcua: bool,
 }
 
 impl Selection {
     pub fn any(self) -> bool {
-        self.s7 || self.enip || self.bacnet || self.fins || self.fox
+        self.s7 || self.enip || self.bacnet || self.fins || self.fox || self.opcua
     }
 
     pub fn labels(self) -> Vec<&'static str> {
@@ -38,6 +42,7 @@ impl Selection {
             (self.bacnet, "BACnet"),
             (self.fins, "FINS"),
             (self.fox, "Fox"),
+            (self.opcua, "OPC UA"),
         ]
         .into_iter()
         .filter_map(|(enabled, label)| enabled.then_some(label))
@@ -53,6 +58,7 @@ impl Default for Selection {
             bacnet: true,
             fins: true,
             fox: true,
+            opcua: true,
         }
     }
 }
@@ -65,8 +71,13 @@ struct Finding {
     warnings: Vec<String>,
 }
 
-pub async fn scan(target: Ipv4Addr, mac: &str, selection: Selection) -> ProbeResult {
-    let (s7, enip, bacnet, fins, fox) = tokio::join!(
+pub async fn scan(
+    target: Ipv4Addr,
+    mac: &str,
+    selection: Selection,
+    opcua: &opcua::ProbeSettings,
+) -> ProbeResult {
+    let (s7, enip, bacnet, fins, fox, ua) = tokio::join!(
         async {
             if selection.s7 {
                 s7::probe(target).await
@@ -102,11 +113,18 @@ pub async fn scan(target: Ipv4Addr, mac: &str, selection: Selection) -> ProbeRes
                 Ok(None)
             }
         },
+        async {
+            if selection.opcua {
+                opcua::probe(target, opcua).await
+            } else {
+                Ok(None)
+            }
+        },
     );
     let mut observations = Vec::new();
     let mut ports = Vec::new();
     let mut warnings = Vec::new();
-    for result in [s7, enip, bacnet, fins, fox] {
+    for result in [s7, enip, bacnet, fins, fox, ua] {
         match result {
             Ok(Some(mut finding)) => {
                 let observed_at = crate::now();
@@ -121,7 +139,8 @@ pub async fn scan(target: Ipv4Addr, mac: &str, selection: Selection) -> ProbeRes
                     .insert("macAddress".into(), serde_json::json!(mac));
                 finding
                     .fields
-                    .insert("status".into(), serde_json::json!("online"));
+                    .entry("status".into())
+                    .or_insert_with(|| serde_json::json!("online"));
                 ports.append(&mut finding.ports);
                 observations.push(Observation {
                     source: finding.source,
@@ -183,6 +202,7 @@ mod tests {
             Ipv4Addr::LOCALHOST,
             "00:11:22:33:44:55",
             Selection::default(),
+            &opcua::ProbeSettings::default(),
         )
         .await;
         assert!(result.observations.is_empty());
@@ -200,10 +220,17 @@ mod tests {
             bacnet: false,
             fins: false,
             fox: false,
+            opcua: false,
         };
         assert!(!selection.any());
         assert!(selection.labels().is_empty());
-        let result = scan(Ipv4Addr::LOCALHOST, "00:11:22:33:44:55", selection).await;
+        let result = scan(
+            Ipv4Addr::LOCALHOST,
+            "00:11:22:33:44:55",
+            selection,
+            &opcua::ProbeSettings::default(),
+        )
+        .await;
         assert!(result.observations.is_empty());
         assert!(result.ports.is_empty());
         assert!(result.warnings.is_empty());
@@ -234,6 +261,7 @@ mod tests {
             Ipv4Addr::LOCALHOST,
             "00:11:22:33:44:55",
             Selection::default(),
+            &opcua::ProbeSettings::default(),
         )
         .await;
         assert_eq!(result.observations.len(), 1);

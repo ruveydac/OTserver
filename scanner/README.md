@@ -1,7 +1,7 @@
 # OTserver Scanner
 
 Windows and Linux read-only discovery CLI for [OTserver](https://otserver.org). It discovers IPv4/MAC pairs
-with ARP and directly queries PROFINET DCP, S7, EtherNet/IP, BACnet, Omron FINS, Niagara Fox, and
+with ARP and directly queries PROFINET DCP, S7, EtherNet/IP, BACnet, Omron FINS, Niagara Fox, OPC UA, and
 optional SNMP. Windows uses native IP Helper for active ARP, Win10Pcap for active PROFINET DCP, and
 Microsoft pktmon as a passive fallback. Linux uses native raw sockets. No TAP adapter or Windows
 Network Bridge is used or modified.
@@ -50,11 +50,11 @@ cargo build --release --target x86_64-pc-windows-msvc
 
 Only scan networks you own or are authorized to assess. The scanner sends PROFINET DCP Identify,
 read-only SNMP requests, and fixed read-only identity requests for S7, EtherNet/IP, BACnet, Omron
-FINS, and Niagara Fox. It never runs SNMP SET, DCP Set, brute-force, exploit, vulnerability, or
+FINS, Niagara Fox, and OPC UA. It never runs SNMP SET, DCP Set, brute-force, exploit, vulnerability, or
 Modbus requests.
 
 All discovery protocols are enabled by default. Disable individual protocols on the CLI with
-`--no-arp`, `--no-profinet`, `--no-s7`, `--no-enip`, `--no-bacnet`, `--no-fins`, `--no-fox`, or
+`--no-arp`, `--no-profinet`, `--no-s7`, `--no-enip`, `--no-bacnet`, `--no-fins`, `--no-fox`, `--no-opcua`, or
 `--no-snmp` and `--no-lldp`. SNMP inventory and LLDP topology queries both require an SNMP profile,
 but can be enabled independently. The GUI exposes the same choices as highlighted on/off toggle
 buttons.
@@ -65,6 +65,14 @@ of source control. If a variable is missing, the CLI prompts without echoing inp
 provides masked, session-only fields for an SNMPv2c community and SNMPv3 username, authentication
 password, and privacy password. Entered GUI credentials override every loaded profile for that scan,
 remain only in process memory, and are never written to `otscanner.json`, logs, or scan exports.
+
+OPC UA discovery connects to ports 4840, 4841, and 48400 by default (configurable via `opcuaPorts`).
+The scanner prefers anonymous authentication; if the server requires username authentication, set
+`opcuaUsername` in the config or `OTSERVER_OPCUA_USERNAME` in the environment, and provide the
+password via the environment variable named in `opcuaPasswordEnv` (default: `OTSERVER_OPCUA_PASSWORD`)
+or the GUI's session-only OPC UA credential fields. Passwords are never written to disk or logs.
+The scanner reads only asset identification, health, and location variables; it never writes values
+or calls methods that modify server state.
 
 Validate an export before uploading it:
 
@@ -99,6 +107,10 @@ OTserver destination:
   "noBacnet": false,
   "noFins": false,
   "noFox": false,
+  "noOpcua": false,
+  "opcuaPorts": [4840, 4841, 48400],
+  "opcuaUsername": "",
+  "opcuaPasswordEnv": "OTSERVER_OPCUA_PASSWORD",
   "noSnmp": false,
   "noLldp": false,
   "serverUrl": "https://otserver.example",
@@ -133,7 +145,7 @@ scan.
 ## Virtual OT lab
 
 The Docker lab exercises the complete Linux scanner against deterministic virtual devices for ARP,
-PROFINET DCP, S7, EtherNet/IP, BACnet/IP, Omron FINS, Niagara Fox, SNMPv2c, SNMPv3, and LLDP:
+PROFINET DCP, S7, EtherNet/IP, BACnet/IP, Omron FINS, Niagara Fox, OPC UA, SNMPv2c, SNMPv3, and LLDP:
 
 ```bash
 ./lab/test.sh
@@ -158,7 +170,7 @@ forwarded protocol responses belong to that one temporary identity; Docker's int
 MACs are not visible to the Windows host. The importable scan is deleted after validation and only a
 plain-text summary and Compose log are retained.
 
-This smoke test covers Windows ARP, S7, EtherNet/IP, BACnet, FINS, Fox, SNMP, and LLDP client paths.
+This smoke test covers Windows ARP, S7, EtherNet/IP, BACnet, FINS, Fox, OPC UA, SNMP, and LLDP client paths.
 It does not verify distinct device MAC correlation. Docker Desktop also does not bridge raw Ethernet
 frames between its Linux bridge and a Windows capture driver, so the harness disables PROFINET DCP.
 Active Windows DCP and multi-device MAC discovery require physical Layer-2 test devices or a
@@ -166,7 +178,7 @@ dedicated external Layer-2 test interface.
 
 Images use pinned Snap7 and SNMP Simulator packages plus checksum-pinned OpENer and BACnet Stack sources; the
 repository's small FINS and Fox responders implement only the fixed read-only identity requests sent
-by this scanner.
+by this scanner. The OPC UA responder uses the maintained asyncua (opcua-asyncio) Python stack.
 
 SNMPv3 profiles may set an optional `contextName`. Most physical devices use the default empty
 context and can omit it; simulators and partitioned agents may require it.

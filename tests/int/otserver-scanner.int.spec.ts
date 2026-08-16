@@ -60,6 +60,27 @@ const exportFile = (localMAC: string, remoteMAC: string) => ({
           raw: { ports: [] },
           warnings: [],
         },
+        {
+          source: 'opc-ua',
+          observedAt: '2026-08-10T10:00:25Z',
+          fields: {
+            macAddress: localMAC,
+            name: 'LAB-ASSET-1',
+            model: 'OPC UA Lab Device',
+            serialNumber: 'OPCLAB0001',
+            firmwareVersion: '2.1.0',
+            location: 'Plant1/Line3/Cell2',
+            description: 'Test Device',
+            status: 'online',
+            protocols: ['opc-ua'],
+          },
+          raw: {
+            endpointUrl: 'opc.tcp://192.0.2.10:4840',
+            applicationUri: 'urn:otserver:lab:opcua:server',
+            userTokenPolicies: ['anonymous'],
+          },
+          warnings: [],
+        },
       ],
     },
     {
@@ -280,7 +301,7 @@ describe('OTserver Scanner importer', () => {
         model: 'SIMATIC S7-1500 CPU',
         name: 'Main PLC',
         operatingSystem: 'Embedded Linux',
-        protocols: ['profinet', 'niagara-fox'],
+        protocols: ['profinet', 'niagara-fox', 'opc-ua'],
         vendor: 'Siemens AG',
       })
       expect(assets.docs.find(({ macAddress }) => macAddress === remoteMAC)?.protocols).toEqual([
@@ -293,7 +314,7 @@ describe('OTserver Scanner importer', () => {
         pagination: false,
         where: { import: { equals: importID } },
       })
-      expect(observations.docs).toHaveLength(4)
+      expect(observations.docs).toHaveLength(5)
       expect(observations.docs.map(({ quality }) => quality)).toEqual(
         expect.arrayContaining(['high', 'medium']),
       )
