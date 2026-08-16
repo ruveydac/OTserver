@@ -1,5 +1,14 @@
+import Image from 'next/image'
+
 export const Brand = ({ height = '32px', alt = 'OTserver' }: { height?: string; alt?: string }) => (
-  <img src="/otserver.svg" alt={alt} style={{ height, width: 'auto' }} />
+  <Image
+    src="/otserver.svg"
+    alt={alt}
+    width={160}
+    height={32}
+    style={{ height, width: 'auto' }}
+    unoptimized
+  />
 )
 
 export const Icon = () => <Brand />
