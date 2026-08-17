@@ -24,7 +24,9 @@
     "@payloadcms/db-mongodb": "3.87.1",
     "@payloadcms/next": "3.87.1",
     "@payloadcms/ui": "3.87.1",
+    "@xyflow/react": "^12.11.3",
     "cross-env": "^7.0.3",
+    "d3-force": "^3.0.0",
     "graphql": "^16.8.2",
     "lucene-query-parser": "^1.2.0",
     "next": "16.2.11",
@@ -34,6 +36,7 @@
     "saxes": "6.0.0"
   },
   "devDependencies": {
+    "@types/d3-force": "^3.0.10",
     "@types/node": "22.19.9",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
