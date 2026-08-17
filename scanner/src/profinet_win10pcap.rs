@@ -20,6 +20,50 @@ const MAX_CAPTURED_FRAMES: usize = 4_096;
 const BPF_HEADER_MINIMUM: usize = 18;
 const PACKET_ALIGNMENT: usize = 4;
 
+// Public bpf_insn/bpf_program layout from Win10Pcap's GPLv2 Packet32.h.
+#[repr(C)]
+struct BpfInsn {
+    code: u16,
+    jt: u8,
+    jf: u8,
+    k: u32,
+}
+
+#[repr(C)]
+struct BpfProgram {
+    length: u32,
+    instructions: *mut BpfInsn,
+}
+
+// cBPF for `ether[12:2] == 0x8892`: load the etherType, accept PROFINET, drop the rest
+// in the driver so a busy segment does not flood the capture path.
+const DCP_FILTER: [BpfInsn; 4] = [
+    BpfInsn {
+        code: 0x28,
+        jt: 0,
+        jf: 0,
+        k: 12,
+    },
+    BpfInsn {
+        code: 0x15,
+        jt: 0,
+        jf: 1,
+        k: 0x8892,
+    },
+    BpfInsn {
+        code: 0x06,
+        jt: 0,
+        jf: 0,
+        k: 0xffff,
+    },
+    BpfInsn {
+        code: 0x06,
+        jt: 0,
+        jf: 0,
+        k: 0,
+    },
+];
+
 enum Adapter {}
 
 #[repr(C)]
@@ -64,6 +108,7 @@ type SendPacket = unsafe extern "C" fn(*mut Adapter, *mut Packet, c_uchar) -> c_
 type ReceivePacket = unsafe extern "C" fn(*mut Adapter, *mut Packet, c_uchar) -> c_uchar;
 type SetReadTimeout = unsafe extern "C" fn(*mut Adapter, c_int) -> c_uchar;
 type SetMinToCopy = unsafe extern "C" fn(*mut Adapter, c_int) -> c_uchar;
+type SetBpf = unsafe extern "C" fn(*mut Adapter, *mut BpfProgram) -> c_uchar;
 
 struct Api {
     module: HMODULE,
@@ -77,6 +122,7 @@ struct Api {
     receive_packet: ReceivePacket,
     set_read_timeout: SetReadTimeout,
     set_min_to_copy: SetMinToCopy,
+    set_bpf: Option<SetBpf>,
 }
 
 impl Api {
@@ -131,6 +177,10 @@ impl Api {
                 set_read_timeout: unsafe { symbol(module, b"PacketSetReadTimeout\0")? },
                 // SAFETY: see above.
                 set_min_to_copy: unsafe { symbol(module, b"PacketSetMinToCopy\0")? },
+                // Optional: older Packet.dll builds may omit it, in which case capture
+                // stays unfiltered and frames are filtered in user space as before.
+                // SAFETY: see above.
+                set_bpf: unsafe { symbol(module, b"PacketSetBpf\0").ok() },
             })
         })();
         if result.is_err() {
@@ -229,6 +279,19 @@ pub fn capture(interface: &str, request: &[u8], wait: Duration) -> Result<Vec<Ve
         return Err(format!(
             "Win10Pcap could not configure capture on interface {interface}."
         ));
+    }
+    // Best effort: restrict the driver to PROFINET frames so a busy segment does not
+    // flood the capture path. If the filter cannot be installed, capture stays
+    // unfiltered and frames are filtered in user space as before.
+    if let Some(set_bpf) = api.set_bpf {
+        let mut instructions = DCP_FILTER;
+        let mut program = BpfProgram {
+            length: instructions.len() as u32,
+            instructions: instructions.as_mut_ptr(),
+        };
+        // SAFETY: adapter is open; program and instructions outlive the call, and the
+        // driver copies the filter rather than retaining the pointer.
+        unsafe { (set_bpf)(adapter.handle, &mut program) };
     }
     let tx_packet = allocate_packet(&api)?;
     let rx_packet = allocate_packet(&api)?;
@@ -487,5 +550,40 @@ mod tests {
         frames.clear();
         parse_bpf_records(&record, &mut frames).unwrap();
         assert!(frames.is_empty());
+    }
+
+    fn run_filter(filter: &[super::BpfInsn], frame: &[u8]) -> u32 {
+        let mut accumulator = 0_u32;
+        let mut pc = 0_usize;
+        loop {
+            let insn = &filter[pc];
+            match insn.code {
+                0x28 => {
+                    let offset = insn.k as usize;
+                    accumulator = u16::from_be_bytes([frame[offset], frame[offset + 1]]) as u32;
+                    pc += 1;
+                }
+                0x15 => {
+                    pc += 1 + if accumulator == insn.k {
+                        insn.jt
+                    } else {
+                        insn.jf
+                    } as usize;
+                }
+                0x06 => return insn.k,
+                code => panic!("unexpected BPF opcode {code:#04x}"),
+            }
+        }
+    }
+
+    #[test]
+    fn dcp_filter_accepts_only_profinet_ethertype() {
+        let mut profinet = vec![0_u8; 60];
+        profinet[12..14].copy_from_slice(&[0x88, 0x92]);
+        assert!(run_filter(&super::DCP_FILTER, &profinet) > 0);
+
+        let mut ipv4 = vec![0_u8; 60];
+        ipv4[12..14].copy_from_slice(&[0x08, 0x00]);
+        assert_eq!(run_filter(&super::DCP_FILTER, &ipv4), 0);
     }
 }

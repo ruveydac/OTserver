@@ -7,8 +7,22 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
-const COTP_102: &[u8] = &hex_literal::<22>("0300001611E00000001400C1020100C2020102C0010A");
-const COTP_200: &[u8] = &hex_literal::<22>("0300001611E00000000500C1020100C2020200C0010A");
+// (source, destination) TSAP pairings: connection type PG 0x01xx, OP 0x02xx, S7 basic
+// 0x03xx, with destination slot 0/1 for S7-1200/1500, 2 for S7-300, and 3 for S7-400.
+const TSAP_PAIRS: [(u16, u16); 12] = [
+    (0x0100, 0x0100),
+    (0x0100, 0x0101),
+    (0x0100, 0x0102),
+    (0x0100, 0x0103),
+    (0x0200, 0x0200),
+    (0x0200, 0x0201),
+    (0x0200, 0x0202),
+    (0x0200, 0x0203),
+    (0x0300, 0x0300),
+    (0x0300, 0x0301),
+    (0x0300, 0x0302),
+    (0x0300, 0x0303),
+];
 const SETUP: &[u8] = &hex_literal::<25>("0300001902F08032010000000000080000F0000001000101E0");
 const SZL_11: &[u8] =
     &hex_literal::<33>("0300002102F080320700000000000800080001120411440100FF09000400110001");
@@ -39,35 +53,38 @@ const fn hex_literal<const N: usize>(value: &str) -> [u8; N] {
 }
 
 pub async fn probe(target: Ipv4Addr) -> Result<Option<Finding>, String> {
-    match timeout(
-        TIMEOUT,
-        TcpStream::connect(SocketAddr::new(IpAddr::V4(target), CONNECT_PORT)),
-    )
-    .await
-    {
-        Ok(Ok(mut stream)) => {
-            let first = negotiate(&mut stream, COTP_102).await?;
-            if !first {
-                drop(stream);
-                let Ok(Ok(mut retry)) = timeout(
-                    TIMEOUT,
-                    TcpStream::connect(SocketAddr::new(IpAddr::V4(target), CONNECT_PORT)),
-                )
-                .await
-                else {
-                    return Ok(None);
-                };
-                if !negotiate(&mut retry, COTP_200).await? {
-                    return Ok(None);
-                }
-                return read_identity(retry, target).await;
+    // Real CPUs reject a connect request whose TSAP does not match a configured
+    // connection (RST, FIN, or silence), so every TSAP pairing gets its own connection.
+    for (src_tsap, dst_tsap) in TSAP_PAIRS {
+        let request = connect_request(src_tsap, dst_tsap);
+        let mut stream = match timeout(
+            TIMEOUT,
+            TcpStream::connect(SocketAddr::new(IpAddr::V4(target), CONNECT_PORT)),
+        )
+        .await
+        {
+            Ok(Ok(stream)) => stream,
+            Ok(Err(error)) if matches!(error.kind(), std::io::ErrorKind::ConnectionRefused) => {
+                return Ok(None);
             }
-            read_identity(stream, target).await
+            Ok(Err(error)) => return Err(format!("S7 {target}: {error}")),
+            Err(_) => return Ok(None),
+        };
+        if negotiate(&mut stream, &request).await.unwrap_or(false) {
+            return read_identity(stream, target).await;
         }
-        Ok(Err(error)) if matches!(error.kind(), std::io::ErrorKind::ConnectionRefused) => Ok(None),
-        Ok(Err(error)) => Err(format!("S7 {target}: {error}")),
-        Err(_) => Ok(None),
     }
+    Ok(None)
+}
+
+fn connect_request(src_tsap: u16, dst_tsap: u16) -> [u8; 22] {
+    let mut frame = [
+        0x03, 0x00, 0x00, 0x16, 0x11, 0xe0, 0x00, 0x00, 0x00, 0x14, 0x00, 0xc1, 0x02, 0x00, 0x00,
+        0xc2, 0x02, 0x00, 0x00, 0xc0, 0x01, 0x0a,
+    ];
+    frame[13..15].copy_from_slice(&src_tsap.to_be_bytes());
+    frame[17..19].copy_from_slice(&dst_tsap.to_be_bytes());
+    frame
 }
 
 async fn negotiate(stream: &mut TcpStream, request: &[u8]) -> Result<bool, String> {
@@ -318,11 +335,13 @@ mod tests {
         (hardware, identity)
     }
 
-    async fn read_tpkt(stream: &mut TcpStream) {
+    async fn read_tpkt(stream: &mut TcpStream) -> Vec<u8> {
         let mut header = [0; 4];
         stream.read_exact(&mut header).await.unwrap();
-        let mut rest = vec![0; u16::from_be_bytes([header[2], header[3]]) as usize - 4];
-        stream.read_exact(&mut rest).await.unwrap();
+        let mut frame = vec![0; u16::from_be_bytes([header[2], header[3]]) as usize];
+        frame[..4].copy_from_slice(&header);
+        stream.read_exact(&mut frame[4..]).await.unwrap();
+        frame
     }
 
     fn setup_frame() -> Vec<u8> {
@@ -368,6 +387,30 @@ mod tests {
         let result = parse(&hardware, &identity).unwrap();
         assert_eq!(result.fields["name"], "PLC1");
         assert_eq!(result.fields["serialNumber"], "SERIAL");
+    }
+
+    #[test]
+    fn builds_connect_request_with_tsaps() {
+        let frame = connect_request(0x0100, 0x0102);
+        assert_eq!(frame.len(), 22);
+        assert_eq!(&frame[..4], &[0x03, 0x00, 0x00, 0x16]);
+        assert_eq!(frame[5], 0xe0);
+        assert_eq!(&frame[11..15], &[0xc1, 0x02, 0x01, 0x00]);
+        assert_eq!(&frame[15..19], &[0xc2, 0x02, 0x01, 0x02]);
+        assert_eq!(&frame[19..22], &[0xc0, 0x01, 0x0a]);
+
+        let op = connect_request(0x0200, 0x0203);
+        assert_eq!(&op[11..15], &[0xc1, 0x02, 0x02, 0x00]);
+        assert_eq!(&op[15..19], &[0xc2, 0x02, 0x02, 0x03]);
+    }
+
+    #[test]
+    fn tsap_pairs_match_connection_type() {
+        assert_eq!(TSAP_PAIRS.len(), 12);
+        for (src, dst) in TSAP_PAIRS {
+            assert_eq!(src >> 8, dst >> 8, "source and destination type differ");
+            assert_eq!(src & 0xff, 0, "source TSAP must be rack/slot zero");
+        }
     }
 
     #[test]
@@ -428,6 +471,34 @@ mod tests {
         let finding = probe(Ipv4Addr::LOCALHOST).await.unwrap().unwrap();
         assert_eq!(finding.fields["name"], "PLC1");
         assert_eq!(finding.fields["model"], "S7-1500");
+        responder.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn retries_next_tsap_when_connect_request_is_rejected() {
+        let _network = crate::network_test_lock().await;
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, CONNECT_PORT))
+            .await
+            .unwrap();
+        let (hardware, identity) = identities();
+        let responder = tokio::spawn(async move {
+            let (mut rejected, _) = listener.accept().await.unwrap();
+            let first = read_tpkt(&mut rejected).await;
+            assert_eq!(&first[17..19], &[0x01, 0x00]);
+            drop(rejected);
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let second = read_tpkt(&mut stream).await;
+            assert_eq!(&second[17..19], &[0x01, 0x01]);
+            stream.write_all(&[3, 0, 0, 7, 2, 0xd0, 0]).await.unwrap();
+            read_tpkt(&mut stream).await;
+            stream.write_all(&setup_frame()).await.unwrap();
+            read_tpkt(&mut stream).await;
+            stream.write_all(&userdata_frame(&hardware)).await.unwrap();
+            read_tpkt(&mut stream).await;
+            stream.write_all(&userdata_frame(&identity)).await.unwrap();
+        });
+        let finding = probe(Ipv4Addr::LOCALHOST).await.unwrap().unwrap();
+        assert_eq!(finding.fields["name"], "PLC1");
         responder.await.unwrap();
     }
 
