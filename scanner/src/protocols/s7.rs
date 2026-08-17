@@ -8,6 +8,7 @@ use tokio::net::TcpStream;
 use tokio::time::timeout;
 
 const COTP_102: &[u8] = &hex_literal::<22>("0300001611E00000001400C1020100C2020102C0010A");
+const COTP_100: &[u8] = &hex_literal::<22>("0300001611E00000001400C1020100C2020100C0010A");
 const COTP_200: &[u8] = &hex_literal::<22>("0300001611E00000000500C1020100C2020200C0010A");
 const SETUP: &[u8] = &hex_literal::<25>("0300001902F08032010000000000080000F0000001000101E0");
 const SZL_11: &[u8] =
@@ -39,35 +40,28 @@ const fn hex_literal<const N: usize>(value: &str) -> [u8; N] {
 }
 
 pub async fn probe(target: Ipv4Addr) -> Result<Option<Finding>, String> {
-    match timeout(
-        TIMEOUT,
-        TcpStream::connect(SocketAddr::new(IpAddr::V4(target), CONNECT_PORT)),
-    )
-    .await
-    {
-        Ok(Ok(mut stream)) => {
-            let first = negotiate(&mut stream, COTP_102).await?;
-            if !first {
-                drop(stream);
-                let Ok(Ok(mut retry)) = timeout(
-                    TIMEOUT,
-                    TcpStream::connect(SocketAddr::new(IpAddr::V4(target), CONNECT_PORT)),
-                )
-                .await
-                else {
-                    return Ok(None);
-                };
-                if !negotiate(&mut retry, COTP_200).await? {
-                    return Ok(None);
-                }
-                return read_identity(retry, target).await;
+    // Real CPUs reject a connect request whose destination TSAP does not match a
+    // configured connection (RST, FIN, or silence), so each TSAP gets its own
+    // connection: 0x0102 for S7-300/400, 0x0100 for S7-1200/1500, 0x0200 for S7-200.
+    for request in [COTP_102, COTP_100, COTP_200] {
+        let mut stream = match timeout(
+            TIMEOUT,
+            TcpStream::connect(SocketAddr::new(IpAddr::V4(target), CONNECT_PORT)),
+        )
+        .await
+        {
+            Ok(Ok(stream)) => stream,
+            Ok(Err(error)) if matches!(error.kind(), std::io::ErrorKind::ConnectionRefused) => {
+                return Ok(None);
             }
-            read_identity(stream, target).await
+            Ok(Err(error)) => return Err(format!("S7 {target}: {error}")),
+            Err(_) => return Ok(None),
+        };
+        if negotiate(&mut stream, request).await.unwrap_or(false) {
+            return read_identity(stream, target).await;
         }
-        Ok(Err(error)) if matches!(error.kind(), std::io::ErrorKind::ConnectionRefused) => Ok(None),
-        Ok(Err(error)) => Err(format!("S7 {target}: {error}")),
-        Err(_) => Ok(None),
     }
+    Ok(None)
 }
 
 async fn negotiate(stream: &mut TcpStream, request: &[u8]) -> Result<bool, String> {
@@ -428,6 +422,32 @@ mod tests {
         let finding = probe(Ipv4Addr::LOCALHOST).await.unwrap().unwrap();
         assert_eq!(finding.fields["name"], "PLC1");
         assert_eq!(finding.fields["model"], "S7-1500");
+        responder.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn retries_next_tsap_when_connect_request_is_rejected() {
+        let _network = crate::network_test_lock().await;
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, CONNECT_PORT))
+            .await
+            .unwrap();
+        let (hardware, identity) = identities();
+        let responder = tokio::spawn(async move {
+            let (mut rejected, _) = listener.accept().await.unwrap();
+            read_tpkt(&mut rejected).await;
+            drop(rejected);
+            let (mut stream, _) = listener.accept().await.unwrap();
+            read_tpkt(&mut stream).await;
+            stream.write_all(&[3, 0, 0, 7, 2, 0xd0, 0]).await.unwrap();
+            read_tpkt(&mut stream).await;
+            stream.write_all(&setup_frame()).await.unwrap();
+            read_tpkt(&mut stream).await;
+            stream.write_all(&userdata_frame(&hardware)).await.unwrap();
+            read_tpkt(&mut stream).await;
+            stream.write_all(&userdata_frame(&identity)).await.unwrap();
+        });
+        let finding = probe(Ipv4Addr::LOCALHOST).await.unwrap().unwrap();
+        assert_eq!(finding.fields["name"], "PLC1");
         responder.await.unwrap();
     }
 
