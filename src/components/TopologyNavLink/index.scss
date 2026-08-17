@@ -1,0 +1,19 @@
+// ponytail: order-based placement assumes OT Inventory stays the first visible
+// nav group; move the link into the group markup if group order ever varies
+.topology-nav-link {
+  order: 1;
+}
+
+.nav__wrap {
+  > .nav-group {
+    order: 2;
+
+    &:first-child {
+      order: 0;
+    }
+  }
+
+  > .nav__controls {
+    order: 3;
+  }
+}

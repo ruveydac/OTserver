@@ -45,6 +45,7 @@ const initializeApplication = async (payload: Payload) => {
 export default buildConfig({
   admin: {
     components: {
+      afterNavLinks: ['@/components/TopologyNavLink'],
       beforeDashboard: ['@/components/BeforeDashboard'],
       graphics: {
         Icon: '@/components/Brand#Icon',
@@ -52,6 +53,12 @@ export default buildConfig({
       },
       logout: {
         Button: '@/components/LogoutButton',
+      },
+      views: {
+        custom: {
+          Component: '@/components/TopologyView',
+          path: '/topology',
+        },
       },
     },
     importMap: {
