@@ -12,6 +12,7 @@ import {
 import { applyAssetSearch } from '../search/assetLucene'
 import { trackHumanAssetChanges } from '../importers/assetQuality'
 import { assignDefaultAssetClass } from './AssetClasses'
+import { exportAssetsCSV } from './AssetExport'
 import { sanitizeCustomFieldValues } from './AssetFields'
 
 const macAddressPattern = /^(?:[0-9A-F]{2}:){5}[0-9A-F]{2}$/
@@ -90,6 +91,13 @@ export const Assets: CollectionConfig = {
     useAsTitle: 'name',
   },
   defaultSort: 'name',
+  endpoints: [
+    {
+      handler: exportAssetsCSV,
+      method: 'get',
+      path: '/export-csv',
+    },
+  ],
   fields: [
     {
       name: 'name',
