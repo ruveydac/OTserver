@@ -12,6 +12,7 @@ import {
 
 import { hideFromNonAdmins } from '../../src/access/authorization'
 import { ensureAssetClass } from '../../src/collections/AssetClasses'
+import { exportAssetsCSV } from '../../src/collections/AssetExport'
 import { filterSiteParents } from '../../src/collections/Sites'
 import { ensureAdminRole } from '../../src/collections/UserRoles'
 import { buildSiteTree } from '../../src/components/SiteTreeView'
@@ -616,6 +617,141 @@ describe('asset CRUD', () => {
         where: { id: { in: [aachenAsset.id, usaAsset.id] } },
       })
       expect(visibleToAdmin.totalDocs).toBe(2)
+    } finally {
+      const assets = await payload.find({
+        collection: 'assets',
+        depth: 0,
+        pagination: false,
+        where: { macAddress: { in: assetMACs } },
+      })
+      for (const asset of assets.docs) await payload.delete({ collection: 'assets', id: asset.id })
+      for (const id of userIDs) await payload.delete({ collection: 'users', id })
+      for (const id of roleIDs) await payload.delete({ collection: 'user-roles', id })
+      for (const id of siteIDs.reverse()) await payload.delete({ collection: 'sites', id })
+    }
+  })
+
+  it('exports selected assets as CSV within the reader site scope', async () => {
+    const assetMACs: string[] = []
+    const roleIDs: string[] = []
+    const siteIDs: string[] = []
+    const userIDs: string[] = []
+
+    const mac = () => {
+      const value = `02:${randomBytes(5).toString('hex').toUpperCase().match(/.{2}/g)?.join(':')}`
+      assetMACs.push(value)
+      return value
+    }
+
+    const exportCSV = async (token: string | undefined, ids: string[], search?: string) => {
+      const parts = ids.map((id) => `where[id][in]=${encodeURIComponent(id)}`)
+      if (search) parts.push(`search=${encodeURIComponent(search)}`)
+      const request = new Request(`http://localhost/api/assets/export-csv?${parts.join('&')}`, {
+        headers: token ? { Authorization: `JWT ${token}` } : {},
+      })
+      const browserReq = await createPayloadRequest({ config: payload.config, request })
+      const response = await exportAssetsCSV(browserReq)
+      return response.text()
+    }
+
+    try {
+      const allowedSite = await payload.create({
+        collection: 'sites',
+        data: { name: `Export allowed ${randomUUID()}`, type: 'Plant' },
+      })
+      siteIDs.push(allowedSite.id)
+      const otherSite = await payload.create({
+        collection: 'sites',
+        data: { name: `Export other ${randomUUID()}`, type: 'Plant' },
+      })
+      siteIDs.push(otherSite.id)
+
+      const adminRole = await ensureAdminRole(payload)
+      const readerRole = await payload.create({
+        collection: 'user-roles',
+        data: {
+          name: `Export reader ${randomUUID()}`,
+          permissions: [{ access: 'read', site: allowedSite.id }],
+        },
+      })
+      roleIDs.push(readerRole.id)
+
+      const password = randomUUID()
+      const reader = await payload.create({
+        collection: 'users',
+        data: {
+          email: `export-${randomUUID()}@example.test`,
+          name: 'Export test user',
+          password,
+          role: readerRole.id,
+        },
+      })
+      userIDs.push(reader.id)
+      const adminPassword = randomUUID()
+      const admin = await payload.create({
+        collection: 'users',
+        data: {
+          email: `export-admin-${randomUUID()}@example.test`,
+          name: 'Export admin user',
+          password: adminPassword,
+          role: adminRole.id,
+        },
+      })
+      userIDs.push(admin.id)
+
+      const allowedAsset = await payload.create({
+        collection: 'assets',
+        data: {
+          assetClass: plcClassID,
+          criticality: 'medium',
+          macAddress: mac(),
+          name: 'Exported PLC, with "quotes"',
+          notes: 'line one\nline two',
+          site: allowedSite.id,
+          status: 'online',
+          vendor: 'Siemens',
+        },
+      })
+      const otherAsset = await payload.create({
+        collection: 'assets',
+        data: {
+          assetClass: otherClassID,
+          criticality: 'low',
+          macAddress: mac(),
+          name: 'Hidden asset',
+          site: otherSite.id,
+          status: 'unknown',
+        },
+      })
+
+      const login = await payload.login({
+        collection: 'users',
+        data: { email: reader.email, password },
+      })
+      const csv = await exportCSV(login.token, [allowedAsset.id, otherAsset.id])
+      const [header, ...rows] = csv.trim().split('\r\n')
+      const columns = header.replace(/^\uFEFF/, '').split(',')
+      expect(columns).toEqual(expect.arrayContaining(['macAddress', 'vendor', 'notes']))
+      expect(rows).toHaveLength(1)
+      expect(csv).toContain(allowedAsset.macAddress)
+      expect(csv).toContain('"Exported PLC, with ""quotes"""')
+      expect(csv).toContain('"line one\nline two"')
+      expect(csv).not.toContain(otherAsset.macAddress)
+
+      const adminLogin = await payload.login({
+        collection: 'users',
+        data: { email: admin.email, password: adminPassword },
+      })
+      const adminCSV = await exportCSV(adminLogin.token, [allowedAsset.id, otherAsset.id])
+      expect(adminCSV).toContain(allowedAsset.macAddress)
+      expect(adminCSV).toContain(otherAsset.macAddress)
+
+      const searchedCSV = await exportCSV(adminLogin.token, [], 'vendor:Siemens')
+      expect(searchedCSV).toContain(allowedAsset.macAddress)
+      expect(searchedCSV).not.toContain(otherAsset.macAddress)
+
+      const anonymousCSV = await exportCSV(undefined, [allowedAsset.id, otherAsset.id])
+      expect(anonymousCSV.trim()).toBe('id')
     } finally {
       const assets = await payload.find({
         collection: 'assets',

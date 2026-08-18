@@ -11,6 +11,11 @@ const mocks = vi.hoisted(() => ({
   push: vi.fn(),
   query: {} as { search?: string; where?: Record<string, unknown> },
   refineListData: vi.fn(),
+  selection: { count: 0, getQueryParams: vi.fn(() => ''), selectAll: 'none' } as {
+    count: number
+    getQueryParams: () => string
+    selectAll: string
+  },
   setValue: vi.fn(),
 }))
 
@@ -34,6 +39,7 @@ vi.mock('@payloadcms/ui', async () => {
     useField: () => ({ setValue: mocks.setValue, value: mocks.fieldValue }),
     useListQuery: () => ({ query: mocks.query, refineListData: mocks.refineListData }),
     useModal: () => ({ openModal: mocks.openModal }),
+    useSelection: () => mocks.selection,
   }
 })
 
@@ -62,6 +68,7 @@ beforeEach(() => {
   mocks.documentID = undefined
   mocks.fieldValue = {}
   mocks.query = {}
+  mocks.selection = { count: 0, getQueryParams: vi.fn(() => ''), selectAll: 'none' }
   container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
@@ -190,6 +197,39 @@ describe('asset list interactions', () => {
     mocks.query = { search: 'status:"online"', where: { status: { equals: 'online' } } }
     await render(createElement(AssetListInteractions))
     expect(mocks.refineListData).not.toHaveBeenCalled()
+  })
+
+  it('downloads the selected or filtered assets as CSV from the selection bar', async () => {
+    document.body.insertAdjacentHTML(
+      'afterbegin',
+      '<div class="collection-list--assets"><div class="list-selection"><div class="list-selection__actions"></div></div></div>',
+    )
+    vi.stubGlobal('URL', { createObjectURL: vi.fn(() => 'blob:csv'), revokeObjectURL: vi.fn() })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ blob: () => Promise.resolve(new Blob()), ok: true }),
+    )
+
+    mocks.query = { search: 'vendor:Siemens' }
+    mocks.selection = {
+      count: 1,
+      getQueryParams: () => '?where%5Bid%5D%5Bin%5D=abc',
+      selectAll: 'some',
+    }
+    await render(createElement(AssetListInteractions))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    })
+    const bar = document.querySelector<HTMLElement>('.list-selection__actions')!
+    const button = bar.querySelector<HTMLButtonElement>('.asset-export-csv')!
+    expect(button.textContent).toContain('Download CSV')
+    await act(async () => button.click())
+    expect(fetch).toHaveBeenCalledWith('/api/assets/export-csv?where%5Bid%5D%5Bin%5D=abc')
+
+    mocks.selection = { count: 5, getQueryParams: vi.fn(() => ''), selectAll: 'allAvailable' }
+    await render(createElement(AssetListInteractions))
+    await act(async () => bar.querySelector<HTMLButtonElement>('.asset-export-csv')!.click())
+    expect(fetch).toHaveBeenCalledWith('/api/assets/export-csv?search=vendor%3ASiemens')
   })
 })
 

@@ -8,6 +8,8 @@ export default defineConfig({
       exclude: [
         'src/app/**',
         'src/collections/Users/**',
+        'src/components/CustomNav/**',
+        'src/components/TopologyView/**',
         'src/environment.d.ts',
         'src/importers/types.ts',
         'src/payload-types.ts',
