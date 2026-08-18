@@ -32,7 +32,7 @@ field merging, flexible hierarchies, role-based access, search, and a complete a
 ## What you get
 
 - **OTserver Scanner** — Discover devices on Windows and Linux using native ARP, PROFINET
-  DCP, S7, EtherNet/IP, BACnet, Omron FINS, Niagara Fox, SNMP, and LLDP requests.
+  DCP, S7, EtherNet/IP, BACnet, Omron FINS, Niagara Fox, OPC UA, SNMP, and LLDP requests.
 - **Rich discovery evidence** — Preserve per-protocol observations, field quality, interfaces,
   ports, topology links, warnings, and partial failures in a validated JSON contract.
 - **OT inventory** — Automatically track vendor, model, firmware, protocols, ownership, location,
