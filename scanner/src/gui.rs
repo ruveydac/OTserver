@@ -6,9 +6,11 @@ use crate::{
 };
 use eframe::egui;
 use otserver_scanner::profinet::{self, CaptureInterface};
-use otserver_scanner::snmp::CredentialOverrides;
+use otserver_scanner::snmp::Settings as SnmpSettings;
 use std::net::IpAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 
 pub struct GuiLogger {
@@ -35,15 +37,40 @@ fn bound_ip_addresses(interfaces: &[CaptureInterface], selected: &str) -> Vec<St
         .unwrap_or_default()
 }
 
+fn protocol_combo(
+    ui: &mut egui::Ui,
+    id: &str,
+    value: &mut String,
+    options: &[(&str, &str)],
+) -> bool {
+    let selected = options
+        .iter()
+        .find(|(option, _)| *option == value.as_str())
+        .map(|(_, label)| *label)
+        .unwrap_or("None");
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(selected)
+        .show_ui(ui, |ui| {
+            for (option, label) in options {
+                ui.selectable_value(value, (*option).to_string(), *label);
+            }
+        })
+        .response
+        .changed()
+}
+
 pub struct GuiApp {
     targets: String,
     interface: String,
     source_mac: String,
     output: String,
-    snmp_config: String,
+    snmp_version: String,
     snmp_community: String,
     snmp_username: String,
+    snmp_context: String,
+    snmp_auth_protocol: String,
     snmp_auth_password: String,
+    snmp_privacy_protocol: String,
     snmp_privacy_password: String,
     opcua_username: String,
     opcua_password: String,
@@ -66,6 +93,7 @@ pub struct GuiApp {
     log_text: String,
     status: String,
     is_scanning: bool,
+    cancellation: Option<Arc<AtomicBool>>,
     log_rx: Option<Receiver<String>>,
     install_rx: Option<Receiver<Result<String, String>>>,
     is_installing: bool,
@@ -109,11 +137,15 @@ impl GuiApp {
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|| "otserver-scan.json".to_string());
 
-        let snmp_config = config
-            .snmp_config
-            .as_ref()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default();
+        let snmp = config.snmp.unwrap_or_default();
+        let snmp_version = otserver_scanner::snmp::resolved_version(&snmp).to_string();
+        let snmp_community = snmp.community.unwrap_or_default();
+        let snmp_username = snmp.username.unwrap_or_default();
+        let snmp_context = snmp.context_name.unwrap_or_default();
+        let snmp_auth_protocol = snmp.auth_protocol.unwrap_or_default();
+        let snmp_auth_password = snmp.auth_password.unwrap_or_default();
+        let snmp_privacy_protocol = snmp.privacy_protocol.unwrap_or_default();
+        let snmp_privacy_password = snmp.privacy_password.unwrap_or_default();
 
         let legacy_native_disabled = config.no_protocols.unwrap_or(false);
         let arp_enabled = !config.no_arp.unwrap_or(false);
@@ -139,13 +171,16 @@ impl GuiApp {
             interface,
             source_mac,
             output,
-            snmp_config,
-            snmp_community: String::new(),
-            snmp_username: String::new(),
-            snmp_auth_password: String::new(),
-            snmp_privacy_password: String::new(),
-            opcua_username: String::new(),
-            opcua_password: String::new(),
+            snmp_version,
+            snmp_community,
+            snmp_username,
+            snmp_context,
+            snmp_auth_protocol,
+            snmp_auth_password,
+            snmp_privacy_protocol,
+            snmp_privacy_password,
+            opcua_username: config.opcua_username.unwrap_or_default(),
+            opcua_password: config.opcua_password.unwrap_or_default(),
             arp_enabled,
             profinet_enabled,
             s7_enabled,
@@ -164,6 +199,7 @@ impl GuiApp {
             log_text: "OTserver Scanner GUI Ready.\n".to_string(),
             status: "Ready".to_string(),
             is_scanning: false,
+            cancellation: None,
             log_rx: None,
             install_rx: None,
             is_installing: false,
@@ -172,6 +208,20 @@ impl GuiApp {
             #[cfg(windows)]
             win10pcap_interface_available,
         }
+    }
+
+    fn snmp_settings(&self) -> Option<SnmpSettings> {
+        let settings = SnmpSettings {
+            version: (self.snmp_version == "3").then_some("3".to_string()),
+            community: nonempty_opt(&self.snmp_community),
+            username: nonempty_opt(&self.snmp_username),
+            context_name: nonempty_opt(&self.snmp_context),
+            auth_protocol: nonempty_opt(&self.snmp_auth_protocol),
+            auth_password: nonempty_opt(&self.snmp_auth_password),
+            privacy_protocol: nonempty_opt(&self.snmp_privacy_protocol),
+            privacy_password: nonempty_opt(&self.snmp_privacy_password),
+        };
+        (settings != SnmpSettings::default()).then_some(settings)
     }
 
     fn to_config(&self) -> ScannerConfig {
@@ -191,7 +241,7 @@ impl GuiApp {
             interface: nonempty_opt(&self.interface),
             source_mac: nonempty_opt(&self.source_mac),
             output: nonempty_opt(&self.output).map(PathBuf::from),
-            snmp_config: nonempty_opt(&self.snmp_config).map(PathBuf::from),
+            snmp: self.snmp_settings(),
             no_protocols: None,
             no_arp: (!self.arp_enabled).then_some(true),
             no_profinet: (!self.profinet_enabled).then_some(true),
@@ -204,8 +254,8 @@ impl GuiApp {
             no_snmp: (!self.snmp_enabled).then_some(true),
             no_lldp: (!self.lldp_enabled).then_some(true),
             opcua_ports: None,
-            opcua_username: None,
-            opcua_password_env: None,
+            opcua_username: nonempty_opt(&self.opcua_username),
+            opcua_password: nonempty_opt(&self.opcua_password),
             server_url: nonempty_opt(&self.server_url),
             site: nonempty_opt(&self.site),
             api_key: nonempty_opt(&self.api_key),
@@ -254,7 +304,6 @@ impl GuiApp {
             interface: nonempty_opt(&self.interface),
             source_mac: nonempty_opt(&self.source_mac),
             output: nonempty_opt(&self.output).map(PathBuf::from),
-            snmp_profile: nonempty_opt(&self.snmp_config).map(PathBuf::from),
             ack_authorized: true,
             no_protocols: false,
             no_arp: !self.arp_enabled,
@@ -272,7 +321,7 @@ impl GuiApp {
         };
 
         let env_key = std::env::var("OTSERVER_API_KEY").ok();
-        let mut options: ScanOptions = match resolve_scan(args, config, env_key) {
+        let options: ScanOptions = match resolve_scan(args, config, env_key) {
             Ok(opts) => opts,
             Err(err) => {
                 self.status = format!("Configuration error: {err}");
@@ -281,21 +330,11 @@ impl GuiApp {
                 return;
             }
         };
-        options.snmp_credentials = CredentialOverrides {
-            community: nonempty_opt(&self.snmp_community),
-            username: nonempty_opt(&self.snmp_username),
-            auth_password: nonempty_opt(&self.snmp_auth_password),
-            privacy_password: nonempty_opt(&self.snmp_privacy_password),
-        };
-        if let Some(username) = nonempty_opt(&self.opcua_username) {
-            options.opcua.username = Some(username);
-        }
-        if let Some(password) = nonempty_opt(&self.opcua_password) {
-            options.opcua.password = Some(password);
-        }
 
         let (tx, rx) = mpsc::channel::<String>();
+        let cancellation = Arc::new(AtomicBool::new(false));
         self.log_rx = Some(rx);
+        self.cancellation = Some(Arc::clone(&cancellation));
         self.is_scanning = true;
         self.status = "Scan running...".to_string();
         self.log_text.push_str("\n--- Starting Scan ---\n");
@@ -308,27 +347,36 @@ impl GuiApp {
 
             let logger = GuiLogger { sender: tx.clone() };
 
-            rt.block_on(async {
-                match scan(&options, &logger).await {
+            let marker = rt.block_on(async {
+                match scan(&options, &logger, &cancellation).await {
                     Ok(partial) => {
-                        if let Some(upload) = &options.upload
+                        if !cancellation.load(Ordering::Relaxed)
+                            && let Some(upload) = &options.upload
                             && let Err(err) = upload_scan(upload, &options.output, &logger).await
                         {
                             logger.log(format!("Upload error: {err}"));
                         }
-                        if partial {
+                        if cancellation.load(Ordering::Relaxed) {
+                            logger.log("Scan stopped. Partial results were written.".to_string());
+                        } else if partial {
                             logger.log("Scan completed with partial errors.".to_string());
                         } else {
                             logger.log("Scan completed successfully.".to_string());
                         }
+                        if cancellation.load(Ordering::Relaxed) {
+                            "[STOPPED]"
+                        } else {
+                            "[FINISHED]"
+                        }
                     }
                     Err(err) => {
                         logger.log(format!("Scan error: {err}"));
+                        "[FAILED]"
                     }
                 }
             });
 
-            let _ = tx.send("[FINISHED]".to_string());
+            let _ = tx.send(marker.to_string());
         });
     }
 }
@@ -339,7 +387,16 @@ impl eframe::App for GuiApp {
             while let Ok(msg) = rx.try_recv() {
                 if msg == "[FINISHED]" {
                     self.is_scanning = false;
+                    self.cancellation = None;
                     self.status = "Scan completed.".to_string();
+                } else if msg == "[STOPPED]" {
+                    self.is_scanning = false;
+                    self.cancellation = None;
+                    self.status = "Scan stopped; partial output written.".to_string();
+                } else if msg == "[FAILED]" {
+                    self.is_scanning = false;
+                    self.cancellation = None;
+                    self.status = "Scan failed.".to_string();
                 } else {
                     self.log_text.push_str(&msg);
                     self.log_text.push('\n');
@@ -548,7 +605,7 @@ impl eframe::App for GuiApp {
 
                 ui.group(|ui| {
                     ui.set_min_width(ui.available_width());
-                    ui.heading("Output & Profile Settings");
+                    ui.heading("Output Settings");
                     ui.horizontal(|ui| {
                         ui.label("Output File:");
                         if ui
@@ -557,83 +614,175 @@ impl eframe::App for GuiApp {
                         {
                             self.save_config();
                         }
+                        if ui.button("Browse...").clicked() {
+                            let path = Path::new(&self.output);
+                            let mut dialog = rfd::FileDialog::new()
+                                .add_filter("OTserver scan", &["json"]);
+                            if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+                                dialog = dialog.set_file_name(name);
+                            }
+                            if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+                                dialog = dialog.set_directory(parent);
+                            }
+                            if let Some(path) = dialog.save_file() {
+                                self.output = path.to_string_lossy().into_owned();
+                                self.save_config();
+                            }
+                        }
                     });
+                });
+
+                ui.add_space(8.0);
+
+                ui.group(|ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.heading("SNMP Settings");
+                    ui.small(
+                        "Stored in otscanner.json. Without settings, SNMPv2c with community \"public\" is used.",
+                    );
                     ui.horizontal(|ui| {
-                        ui.label("SNMP Profile Config:");
+                        ui.label("Version:");
+                        if protocol_combo(
+                            ui,
+                            "snmp-version",
+                            &mut self.snmp_version,
+                            &[("2c", "SNMPv2c"), ("3", "SNMPv3")],
+                        ) {
+                            self.save_config();
+                        }
+                    });
+                    if self.snmp_version == "3" {
+                        ui.horizontal(|ui| {
+                            ui.label("Username:");
+                            if ui
+                                .add(egui::TextEdit::singleline(&mut self.snmp_username))
+                                .changed()
+                            {
+                                self.save_config();
+                            }
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Context Name:");
+                            if ui
+                                .add(egui::TextEdit::singleline(&mut self.snmp_context))
+                                .changed()
+                            {
+                                self.save_config();
+                            }
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Authentication Protocol:");
+                            if protocol_combo(
+                                ui,
+                                "snmp-auth-protocol",
+                                &mut self.snmp_auth_protocol,
+                                &[
+                                    ("", "None"),
+                                    ("md5", "MD5"),
+                                    ("sha1", "SHA-1"),
+                                    ("sha224", "SHA-224"),
+                                    ("sha256", "SHA-256"),
+                                    ("sha384", "SHA-384"),
+                                    ("sha512", "SHA-512"),
+                                ],
+                            ) {
+                                self.save_config();
+                            }
+                        });
+                        if !self.snmp_auth_protocol.is_empty() {
+                            ui.horizontal(|ui| {
+                                ui.label("Authentication Password:");
+                                if ui
+                                    .add(
+                                        egui::TextEdit::singleline(&mut self.snmp_auth_password)
+                                            .password(true),
+                                    )
+                                    .changed()
+                                {
+                                    self.save_config();
+                                }
+                            });
+                        }
+                        ui.horizontal(|ui| {
+                            ui.label("Privacy Protocol:");
+                            if protocol_combo(
+                                ui,
+                                "snmp-privacy-protocol",
+                                &mut self.snmp_privacy_protocol,
+                                &[
+                                    ("", "None"),
+                                    ("des", "DES"),
+                                    ("aes128", "AES-128"),
+                                    ("aes192", "AES-192"),
+                                    ("aes256", "AES-256"),
+                                ],
+                            ) {
+                                self.save_config();
+                            }
+                        });
+                        if !self.snmp_privacy_protocol.is_empty() {
+                            ui.horizontal(|ui| {
+                                ui.label("Privacy Password:");
+                                if ui
+                                    .add(
+                                        egui::TextEdit::singleline(
+                                            &mut self.snmp_privacy_password,
+                                        )
+                                        .password(true),
+                                    )
+                                    .changed()
+                                {
+                                    self.save_config();
+                                }
+                            });
+                        }
+                    } else {
+                        ui.horizontal(|ui| {
+                            ui.label("Community:");
+                            if ui
+                                .add(
+                                    egui::TextEdit::singleline(&mut self.snmp_community)
+                                        .password(true)
+                                        .hint_text("public"),
+                                )
+                                .changed()
+                            {
+                                self.save_config();
+                            }
+                        });
+                    }
+                });
+
+                ui.add_space(8.0);
+
+                ui.group(|ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.heading("OPC UA Credentials");
+                    ui.small(
+                        "Stored in otscanner.json. Used only when a server requires username authentication. Passwords travel unencrypted because the scanner uses SecurityPolicy None.",
+                    );
+                    ui.horizontal(|ui| {
+                        ui.label("Username:");
                         if ui
                             .add(
-                                egui::TextEdit::singleline(&mut self.snmp_config)
-                                    .hint_text("snmp-profiles.json"),
+                                egui::TextEdit::singleline(&mut self.opcua_username)
+                                    .hint_text("Use anonymous access when blank"),
                             )
                             .changed()
                         {
                             self.save_config();
                         }
                     });
-                    ui.separator();
-                    ui.label("SNMP Credentials (session only)");
-                    ui.small(
-                        "These values override credentials for every loaded SNMP profile. They are kept only in memory and are not saved or logged.",
-                    );
                     ui.horizontal(|ui| {
-                        ui.label("SNMPv2c Community:");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.snmp_community)
-                                .password(true)
-                                .hint_text("Use profile environment variable when blank"),
-                        );
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("SNMPv3 Username:");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.snmp_username)
-                                .hint_text("Use profile username when blank"),
-                        );
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("Authentication Password:");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.snmp_auth_password)
-                                .password(true)
-                                .hint_text("Use profile environment variable when blank"),
-                        );
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("Privacy Password:");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.snmp_privacy_password)
-                                .password(true)
-                                .hint_text("Use profile environment variable when blank"),
-                        );
-                        if ui.button("Clear credentials").clicked() {
-                            self.snmp_community.clear();
-                            self.snmp_username.clear();
-                            self.snmp_auth_password.clear();
-                            self.snmp_privacy_password.clear();
-                        }
-                    });
-                    ui.separator();
-                    ui.label("OPC UA Credentials (session only)");
-                    ui.small(
-                        "Used only when a server requires username authentication. They are kept only in memory and are not saved or logged. Passwords travel unencrypted because the scanner uses SecurityPolicy None.",
-                    );
-                    ui.horizontal(|ui| {
-                        ui.label("OPC UA Username:");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.opcua_username)
-                                .hint_text("Use anonymous access when blank"),
-                        );
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("OPC UA Password:");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.opcua_password)
-                                .password(true)
-                                .hint_text("Use environment variable when blank"),
-                        );
-                        if ui.button("Clear OPC UA credentials").clicked() {
-                            self.opcua_username.clear();
-                            self.opcua_password.clear();
+                        ui.label("Password:");
+                        if ui
+                            .add(
+                                egui::TextEdit::singleline(&mut self.opcua_password)
+                                    .password(true),
+                            )
+                            .changed()
+                        {
+                            self.save_config();
                         }
                     });
                 });
@@ -689,6 +838,15 @@ impl eframe::App for GuiApp {
                         );
                         if scan_btn.clicked() {
                             self.start_scan();
+                        }
+
+                        if ui
+                            .add_enabled(self.is_scanning, egui::Button::new("Stop Scan"))
+                            .clicked()
+                            && let Some(cancellation) = &self.cancellation
+                        {
+                            cancellation.store(true, Ordering::Relaxed);
+                            self.status = "Stopping scan...".to_string();
                         }
 
                         if ui.button("💾 Save Config").clicked() {

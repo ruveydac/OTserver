@@ -9,5 +9,5 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends libssl3 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /src/target/release/otserver-scanner /usr/local/bin/
-COPY scanner/lab/verify.py scanner/lab/snmp-v2c.json scanner/lab/snmp-v3.json /lab/
+COPY scanner/lab/verify.py /lab/
 ENTRYPOINT ["python3", "/lab/verify.py"]

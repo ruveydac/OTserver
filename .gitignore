@@ -16,7 +16,6 @@ public/robots.txt
 public/sitemap*.xml
 import-files/
 scanner/target/
-scanner/snmp-profiles.json
 otscanner.json
 scanner/lab/artifacts/
 # Local driver experiments and extracted installers; distributable Windows packet-driver assets

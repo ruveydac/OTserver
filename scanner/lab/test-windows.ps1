@@ -66,7 +66,8 @@ $sourceMac = $labAdapter.MacAddress.Replace('-', ':').ToUpperInvariant()
 $interfaceGuid = $labAdapter.InterfaceGuid.ToString().Trim('{', '}').ToUpperInvariant()
 $interfaceId = "{$interfaceGuid}"
 $env:OTSERVER_LAB_BIND_IP = $labAddress
-$env:OTSERVER_LAB_SNMP_COMMUNITY = 'lab-public'
+$configPath = Join-Path (Split-Path -Parent $ScannerPath) 'otscanner.json'
+Set-Content -LiteralPath $configPath -Value '{"snmp":{"version":"2c","community":"lab-public"}}' -Encoding utf8
 New-Item -ItemType Directory -Force -Path $artifactDirectory | Out-Null
 $runId = [Guid]::NewGuid().ToString('N').Substring(0, 8)
 $outputPath = Join-Path $env:TEMP "otserver-windows-protocol-smoke-$runId.otserver.json"
@@ -91,7 +92,6 @@ try {
         --target $labAddress `
         --interface $interfaceId `
         --source-mac $sourceMac `
-        --snmp-config (Join-Path $labDirectory 'snmp-v2c.json') `
         --no-profinet `
         --output $outputPath `
         --ack-authorized
@@ -143,5 +143,8 @@ try {
     $ErrorActionPreference = $cleanupErrorPreference
     if (Test-Path -LiteralPath $outputPath) {
         Remove-Item -LiteralPath $outputPath -Force
+    }
+    if (Test-Path -LiteralPath $configPath) {
+        Remove-Item -LiteralPath $configPath -Force
     }
 }

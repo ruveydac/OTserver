@@ -83,10 +83,6 @@ services:
       fins: { condition: service_healthy }
       fox: { condition: service_healthy }
       opcua: { condition: service_healthy }
-    environment:
-      OTSERVER_LAB_SNMP_COMMUNITY: lab-public
-      OTSERVER_LAB_SNMP_AUTH_PASSWORD: lab-auth-password
-      OTSERVER_LAB_SNMP_PRIVACY_PASSWORD: lab-privacy-password
     volumes:
       - ./artifacts:/artifacts:Z
     networks:

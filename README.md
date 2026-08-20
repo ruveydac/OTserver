@@ -164,7 +164,7 @@ the scanner environment or executable-adjacent `otscanner.json`, the scanner can
 JSON directly to the existing REST importer with the user's current site permissions. The local
 scan file is retained.
 
-See the [scanner guide](scanner/README.md) for Windows commands, SNMP profiles, output validation,
+See the [scanner guide](scanner/README.md) for Windows commands, SNMP settings, output validation,
 direct import configuration, exit codes, platform requirements, and the isolated interoperability
 lab.
 
@@ -177,8 +177,8 @@ lab.
 - All registered collections are audited for creates, updates, deletes, and authentication events.
 - Audit entries are immutable and redact fields resembling passwords, secrets, tokens, hashes, or
   sessions.
-- Scanner credentials remain in environment variables referenced by ignored SNMP profiles and are
-  never included in scan exports.
+- Scanner SNMP and OPC UA settings, including credentials, live in the executable-adjacent
+  `otscanner.json` and are never included in logs or scan exports.
 
 ## Technology
 

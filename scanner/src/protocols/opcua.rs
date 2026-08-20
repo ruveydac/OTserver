@@ -142,7 +142,7 @@ async fn probe_port(
         _ => {
             let supported = token_labels(&endpoints).join(", ");
             warnings.push(format!(
-                "OPC UA server offers no usable authentication (supported: {supported}); configure opcuaUsername and opcuaPasswordEnv for username authentication."
+                "OPC UA server offers no usable authentication (supported: {supported}); configure opcuaUsername and opcuaPassword for username authentication."
             ));
             return Ok(Some(finding(
                 &url,

@@ -18,6 +18,7 @@ pub struct ProbeResult {
     pub observations: Vec<Observation>,
     pub ports: Vec<Port>,
     pub warnings: Vec<String>,
+    pub outcomes: Vec<(Source, bool)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -124,7 +125,20 @@ pub async fn scan(
     let mut observations = Vec::new();
     let mut ports = Vec::new();
     let mut warnings = Vec::new();
-    for result in [s7, enip, bacnet, fins, fox, ua] {
+    let mut outcomes = Vec::new();
+    let results = [
+        (selection.s7, Source::S7, s7),
+        (selection.enip, Source::EthernetIp, enip),
+        (selection.bacnet, Source::Bacnet, bacnet),
+        (selection.fins, Source::OmronFins, fins),
+        (selection.fox, Source::NiagaraFox, fox),
+        (selection.opcua, Source::OpcUa, ua),
+    ];
+    for (enabled, source, result) in results {
+        if !enabled {
+            continue;
+        }
+        outcomes.push((source, matches!(result, Ok(Some(_)))));
         match result {
             Ok(Some(mut finding)) => {
                 let observed_at = crate::now();
@@ -160,6 +174,7 @@ pub async fn scan(
         observations,
         ports,
         warnings,
+        outcomes,
     }
 }
 
@@ -207,6 +222,8 @@ mod tests {
         .await;
         assert!(result.observations.is_empty());
         assert!(result.ports.is_empty());
+        assert_eq!(result.outcomes.len(), 6);
+        assert!(result.outcomes.iter().all(|(_, success)| !success));
         assert!(text(b"  value\0ignored").as_deref() == Some("value"));
         assert_eq!(text(b" \0"), None);
         assert_eq!(hex(&[0xaa, 0x01]), "AA01");
@@ -234,6 +251,7 @@ mod tests {
         assert!(result.observations.is_empty());
         assert!(result.ports.is_empty());
         assert!(result.warnings.is_empty());
+        assert!(result.outcomes.is_empty());
     }
 
     #[tokio::test]
@@ -267,6 +285,10 @@ mod tests {
         assert_eq!(result.observations.len(), 1);
         assert_eq!(result.observations[0].fields["name"], "station");
         assert_eq!(result.ports.len(), 1);
+        let outcomes: std::collections::BTreeMap<Source, bool> =
+            result.outcomes.iter().copied().collect();
+        assert!(outcomes[&Source::NiagaraFox]);
+        assert!(!outcomes[&Source::S7]);
         assert!(
             result
                 .warnings
