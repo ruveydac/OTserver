@@ -8,7 +8,7 @@ export const importSources = [
       'Windows 10+ uses native IP Helper and Packet Monitor (pktmon); Linux requires root or CAP_NET_RAW. Then run otserver-scanner doctor.',
       'List capture devices with otserver-scanner interfaces.',
       'Run otserver-scanner scan --target <network> --interface <id> --source-mac <mac> --output scan.json --ack-authorized.',
-      'Optionally add --snmp-config profiles.json for read-only SNMP v2c/v3 collection.',
+      'Optionally set SNMP v2c/v3 settings and credentials in otscanner.json or the scanner GUI; without them, SNMPv2c with community public is used.',
       'To import directly, add an OTserver URL, site ID, and user API key through otscanner.json or the documented flags and environment variable.',
     ],
     required:

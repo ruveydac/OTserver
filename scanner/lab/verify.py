@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 
 SCANNER = "/usr/local/bin/otserver-scanner"
+SCANNER_CONFIG = Path("/usr/local/bin/otscanner.json")
 ARTIFACTS = Path("/artifacts")
 SCANNER_MAC = "02:00:00:00:00:02"
 DEVICES = {
@@ -27,7 +28,11 @@ def run(*arguments: str) -> None:
     subprocess.run(command, check=True)
 
 
-def scan(output: Path, profile: str, targets: list[str], *flags: str) -> dict:
+def set_snmp(settings: dict) -> None:
+    SCANNER_CONFIG.write_text(json.dumps({"snmp": settings}), encoding="utf-8")
+
+
+def scan(output: Path, targets: list[str], *flags: str) -> dict:
     arguments = ["scan"]
     for target in targets:
         arguments.extend(("--target", target))
@@ -37,8 +42,6 @@ def scan(output: Path, profile: str, targets: list[str], *flags: str) -> dict:
             "eth0",
             "--source-mac",
             SCANNER_MAC,
-            "--snmp-config",
-            profile,
             "--output",
             str(output),
             "--ack-authorized",
@@ -187,11 +190,22 @@ def main() -> None:
     run_id = uuid.uuid4().hex[:8]
     full_path = ARTIFACTS / f"full-scan-{run_id}.otserver.json"
     v3_path = ARTIFACTS / f"snmp-v3-{run_id}.otserver.json"
-    assert_full(scan(full_path, "/lab/snmp-v2c.json", TARGETS))
+    set_snmp({"version": "2c", "community": "lab-public"})
+    assert_full(scan(full_path, TARGETS))
+    set_snmp(
+        {
+            "version": "3",
+            "username": "inventory",
+            "contextName": "lab-public",
+            "authProtocol": "sha256",
+            "authPassword": "lab-auth-password",
+            "privacyProtocol": "aes128",
+            "privacyPassword": "lab-privacy-password",
+        }
+    )
     assert_v3(
         scan(
             v3_path,
-            "/lab/snmp-v3.json",
             ["172.30.0.10"],
             "--no-protocols",
             "--no-profinet",

@@ -19,12 +19,10 @@ corresponding Win10Pcap project information is at <https://www.win10pcap.org/>.
 cargo build --release
 sudo ./target/release/otserver-scanner doctor
 sudo ./target/release/otserver-scanner interfaces
-sudo --preserve-env=OTSERVER_SNMP_COMMUNITY,OTSERVER_SNMP_AUTH_PASSWORD,OTSERVER_SNMP_PRIVACY_PASSWORD \
-  ./target/release/otserver-scanner scan \
+sudo ./target/release/otserver-scanner scan \
   --target 192.168.1.0/24 \
   --interface eth0 \
   --source-mac 00:11:22:33:44:55 \
-  --snmp-config ./snmp-profiles.json \
   --output ./scan.otserver.json \
   --ack-authorized
 ```
@@ -43,7 +41,6 @@ cargo build --release --target x86_64-pc-windows-msvc
   --interface '<interface name or GUID>' `
   --source-mac 00:11:22:33:44:55 `
   --no-bacnet `
-  --snmp-config .\snmp-profiles.json `
   --output .\scan.otserver.json `
   --ack-authorized
 ```
@@ -55,22 +52,25 @@ Modbus requests.
 
 All discovery protocols are enabled by default. Disable individual protocols on the CLI with
 `--no-arp`, `--no-profinet`, `--no-s7`, `--no-enip`, `--no-bacnet`, `--no-fins`, `--no-fox`, `--no-opcua`, or
-`--no-snmp` and `--no-lldp`. SNMP inventory and LLDP topology queries both require an SNMP profile,
+`--no-snmp` and `--no-lldp`. SNMP inventory and LLDP topology queries share the same SNMP settings
 but can be enabled independently. The GUI exposes the same choices as highlighted on/off toggle
-buttons.
+buttons. The scan log records one entry per probed IP and protocol, for example
+`[12:43] 192.168.1.10 Protocol snmp Success`.
 
-SNMP profiles contain environment-variable names, not credentials. Copy
-`snmp-profiles.example.json`, set the named variables, and keep the real profile and environment out
-of source control. If a variable is missing, the CLI prompts without echoing input. The GUI also
-provides masked, session-only fields for an SNMPv2c community and SNMPv3 username, authentication
-password, and privacy password. Entered GUI credentials override every loaded profile for that scan,
-remain only in process memory, and are never written to `otscanner.json`, logs, or scan exports.
+The GUI output field accepts a filename directly or opens the native save-file picker. Stopping a
+running scan writes a valid partial export containing all results collected before cancellation.
+
+SNMP settings and credentials live in the `snmp` block of `otscanner.json` and are fully editable
+in the GUI. Without any settings, SNMPv2c with the community `public` is used, so SNMP never blocks
+a scan. For SNMPv3 set `version` to `3` plus `username`, optional `contextName`, and the
+`authProtocol`/`authPassword` and `privacyProtocol`/`privacyPassword` pairs. Credentials are stored
+in plaintext in `otscanner.json`; keep the file out of source control and restrict its permissions.
+Credentials are never written to logs or scan exports.
 
 OPC UA discovery connects to ports 4840, 4841, and 48400 by default (configurable via `opcuaPorts`).
 The scanner prefers anonymous authentication; if the server requires username authentication, set
-`opcuaUsername` in the config or `OTSERVER_OPCUA_USERNAME` in the environment, and provide the
-password via the environment variable named in `opcuaPasswordEnv` (default: `OTSERVER_OPCUA_PASSWORD`)
-or the GUI's session-only OPC UA credential fields. Passwords are never written to disk or logs.
+`opcuaUsername` and `opcuaPassword` in the config or in the GUI. Passwords travel unencrypted
+because the scanner uses SecurityPolicy None, and are never written to logs or scan exports.
 The scanner reads only asset identification, health, and location variables; it never writes values
 or calls methods that modify server state.
 
@@ -99,7 +99,10 @@ OTserver destination:
   "interface": "eth0",
   "sourceMac": "00:11:22:33:44:55",
   "output": "scan.otserver.json",
-  "snmpConfig": "snmp-profiles.json",
+  "snmp": {
+    "version": "2c",
+    "community": "public"
+  },
   "noArp": false,
   "noProfinet": false,
   "noS7": false,
@@ -110,7 +113,7 @@ OTserver destination:
   "noOpcua": false,
   "opcuaPorts": [4840, 4841, 48400],
   "opcuaUsername": "",
-  "opcuaPasswordEnv": "OTSERVER_OPCUA_PASSWORD",
+  "opcuaPassword": "",
   "noSnmp": false,
   "noLldp": false,
   "serverUrl": "https://otserver.example",
@@ -119,10 +122,27 @@ OTserver destination:
 }
 ```
 
+An SNMPv3 block looks like this instead:
+
+```json
+{
+  "snmp": {
+    "version": "3",
+    "username": "inventory",
+    "contextName": "optional-snmp-context",
+    "authProtocol": "sha256",
+    "authPassword": "...",
+    "privacyProtocol": "aes128",
+    "privacyPassword": "..."
+  }
+}
+```
+
 Command-line values override the file, and `OTSERVER_API_KEY` overrides its `apiKey`. Relative paths
-are resolved from the current working directory. Keep the config out of source control and restrict
-its permissions (for example, `chmod 600 otscanner.json`). The safer automation setup omits
-`apiKey` from the file and supplies `OTSERVER_API_KEY` through the process environment.
+are resolved from the current working directory. The config contains credentials in plaintext; keep
+it out of source control and restrict its permissions (for example, `chmod 600 otscanner.json`).
+The safer automation setup omits `apiKey` from the file and supplies `OTSERVER_API_KEY` through the
+process environment.
 
 When `serverUrl`, `site`, and an API key are present, `scan` writes and validates the local JSON and
 then posts it to OTserver's REST API. The local file remains available if the upload fails. The site
@@ -180,7 +200,7 @@ Images use pinned Snap7 and SNMP Simulator packages plus checksum-pinned OpENer 
 repository's small FINS and Fox responders implement only the fixed read-only identity requests sent
 by this scanner. The OPC UA responder uses the maintained asyncua (opcua-asyncio) Python stack.
 
-SNMPv3 profiles may set an optional `contextName`. Most physical devices use the default empty
+SNMPv3 settings may include an optional `contextName`. Most physical devices use the default empty
 context and can omit it; simulators and partitioned agents may require it.
 
 ## License

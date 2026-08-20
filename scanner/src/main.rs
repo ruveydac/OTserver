@@ -3,13 +3,14 @@ pub mod win10pcap_install;
 
 use clap::{ArgAction, Args, Parser, Subcommand};
 use otserver_scanner::contract::{
-    InterfaceRef, ScanExport, ScanInfo, ScannerInfo, merge_devices, validate,
+    InterfaceRef, ScanExport, ScanInfo, ScannerInfo, Source, merge_devices, validate,
 };
 use otserver_scanner::{discovery, profinet, protocols, snmp};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -60,8 +61,6 @@ pub struct ScanArgs {
     pub source_mac: Option<String>,
     #[arg(short, long)]
     pub output: Option<PathBuf>,
-    #[arg(long = "snmp-config")]
-    pub snmp_profile: Option<PathBuf>,
     #[arg(long, action = ArgAction::SetTrue, required = true)]
     pub ack_authorized: bool,
     #[arg(long, hide = true)]
@@ -104,7 +103,7 @@ pub struct ScannerConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub snmp_config: Option<PathBuf>,
+    pub snmp: Option<snmp::Settings>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub no_protocols: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -132,7 +131,7 @@ pub struct ScannerConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub opcua_username: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub opcua_password_env: Option<String>,
+    pub opcua_password: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -152,9 +151,8 @@ pub struct ScanOptions {
     pub interface: String,
     pub source_mac: String,
     pub output: PathBuf,
-    pub snmp_profile: Option<PathBuf>,
     pub protocols: ProtocolOptions,
-    pub snmp_credentials: snmp::CredentialOverrides,
+    pub snmp: snmp::Settings,
     pub opcua: otserver_scanner::protocols::OpcuaSettings,
     pub upload: Option<UploadOptions>,
 }
@@ -262,7 +260,8 @@ async fn run() -> Result<(), String> {
             let config = load_config().await?;
             let options = resolve_scan(args, config, std::env::var("OTSERVER_API_KEY").ok())?;
             let logger = StdoutLogger;
-            let partial = scan(&options, &logger).await?;
+            let cancelled = AtomicBool::new(false);
+            let partial = scan(&options, &logger, &cancelled).await?;
             if let Some(upload) = &options.upload {
                 upload_scan(upload, &options.output, &logger).await?;
             }
@@ -370,44 +369,40 @@ pub fn resolve_scan(
             .output
             .or(config.output)
             .unwrap_or_else(|| PathBuf::from("otserver-scan.json")),
-        snmp_profile: args.snmp_profile.or(config.snmp_config),
         protocols,
-        snmp_credentials: snmp::CredentialOverrides::default(),
+        snmp: config.snmp.unwrap_or_default(),
         opcua,
         upload,
     })
 }
 
 fn opcua_probe_settings(config: &ScannerConfig) -> otserver_scanner::protocols::OpcuaSettings {
-    let env = |name: &str| {
-        std::env::var(name)
-            .ok()
-            .map(|value| value.trim().to_owned())
-            .filter(|value| !value.is_empty())
-    };
     let config_value = |value: Option<&str>| {
         value
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_owned)
     };
-    let username =
-        env("OTSERVER_OPCUA_USERNAME").or_else(|| config_value(config.opcua_username.as_deref()));
-    let password = env("OTSERVER_OPCUA_PASSWORD").or_else(|| {
-        config
-            .opcua_password_env
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .and_then(env)
-    });
     otserver_scanner::protocols::OpcuaSettings {
         ports: otserver_scanner::protocols::OpcuaSettings::ports_or_default(
             config.opcua_ports.clone(),
         ),
-        username,
-        password,
+        username: config_value(config.opcua_username.as_deref()),
+        password: config_value(config.opcua_password.as_deref()),
     }
+}
+
+fn timestamp() -> String {
+    let now = time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+    format!("[{:02}:{:02}]", now.hour(), now.minute())
+}
+
+pub fn log_probe(logger: &dyn LogOutput, ip: &str, protocol: &str, success: bool) {
+    logger.log(format!(
+        "{} {ip} Protocol {protocol} {}",
+        timestamp(),
+        if success { "Success" } else { "Fail" }
+    ));
 }
 
 pub fn nonempty(value: Option<String>, name: &str) -> Result<String, String> {
@@ -468,7 +463,11 @@ fn doctor() -> Result<(), String> {
     Ok(())
 }
 
-pub async fn scan(options: &ScanOptions, logger: &dyn LogOutput) -> Result<bool, String> {
+pub async fn scan(
+    options: &ScanOptions,
+    logger: &dyn LogOutput,
+    cancelled: &AtomicBool,
+) -> Result<bool, String> {
     let started_at = otserver_scanner::now();
     let mut devices = Vec::new();
     let mut links = Vec::new();
@@ -487,11 +486,16 @@ pub async fn scan(options: &ScanOptions, logger: &dyn LogOutput) -> Result<bool,
 
     let target_addresses = discovery::expand_targets(&options.targets)?;
 
-    if options.protocols.arp {
+    if options.protocols.arp && !cancelled.load(Ordering::Relaxed) {
         logger.log("Executing ARP discovery...".into());
         match discover(&options.interface, &options.source_mac, &target_addresses).await {
             Ok(found) => {
                 logger.log(format!("ARP discovery found {} device(s).", found.len()));
+                for device in &found {
+                    for ip in &device.ip_addresses {
+                        log_probe(logger, ip, Source::Arp.label(), true);
+                    }
+                }
                 devices.extend(found);
             }
             Err(error) => {
@@ -499,11 +503,11 @@ pub async fn scan(options: &ScanOptions, logger: &dyn LogOutput) -> Result<bool,
                 errors.push(error);
             }
         }
-    } else {
+    } else if !options.protocols.arp {
         logger.log("ARP discovery disabled.".into());
     }
 
-    if options.protocols.profinet {
+    if options.protocols.profinet && !cancelled.load(Ordering::Relaxed) {
         #[cfg(windows)]
         if profinet::win10pcap_available() {
             logger.log(
@@ -549,7 +553,7 @@ pub async fn scan(options: &ScanOptions, logger: &dyn LogOutput) -> Result<bool,
         fox: options.protocols.fox,
         opcua: options.protocols.opcua,
     };
-    if native_selection.any() {
+    if native_selection.any() && !cancelled.load(Ordering::Relaxed) {
         logger.log(format!(
             "Probing native protocols ({})...",
             native_selection.labels().join(", ")
@@ -559,64 +563,69 @@ pub async fn scan(options: &ScanOptions, logger: &dyn LogOutput) -> Result<bool,
             &mut warnings,
             native_selection,
             &options.opcua,
+            logger,
+            cancelled,
         )
         .await;
     }
 
-    if (options.protocols.snmp || options.protocols.lldp)
-        && let Some(path) = &options.snmp_profile
-    {
+    if (options.protocols.snmp || options.protocols.lldp) && !cancelled.load(Ordering::Relaxed) {
         let snmp_selection = snmp::QuerySelection {
             inventory: options.protocols.snmp,
             lldp: options.protocols.lldp,
         };
-        logger.log(format!(
-            "Querying {} profile: {}",
-            match (snmp_selection.inventory, snmp_selection.lldp) {
-                (true, true) => "SNMP and LLDP",
-                (true, false) => "SNMP",
-                (false, true) => "LLDP",
-                (false, false) => unreachable!("guard requires one query type"),
-            },
-            path.display()
-        ));
-        let profiles = snmp::load(path).await?;
+        let label = match (snmp_selection.inventory, snmp_selection.lldp) {
+            (true, true) => "SNMP and LLDP",
+            (true, false) => "SNMP",
+            (false, true) => "LLDP",
+            (false, false) => unreachable!("guard requires one query type"),
+        };
+        logger.log(format!("Querying {label}..."));
         let ip_to_mac = unique_ip_identities(&devices);
         let ips = devices
             .iter()
             .flat_map(|device| device.ip_addresses.iter().cloned())
             .collect::<BTreeSet<_>>();
         for ip in ips {
-            for profile in &profiles {
-                let local_mac = ip_to_mac.get(&ip).map(String::as_str);
-                match snmp::query(
-                    &ip,
-                    local_mac,
-                    profile,
-                    snmp_selection,
-                    &options.snmp_credentials,
-                )
-                .await
-                {
-                    Ok(result) => {
-                        links.extend(result.links);
-                        if let Some(mac) = local_mac {
-                            if let Some(device) =
-                                devices.iter_mut().find(|device| device.mac_address == mac)
-                            {
-                                if let Some(observation) = result.observation {
-                                    device.observations.push(observation);
-                                }
-                                device.interfaces.extend(result.interfaces);
+            if cancelled.load(Ordering::Relaxed) {
+                break;
+            }
+            let local_mac = ip_to_mac.get(&ip).map(String::as_str);
+            let protocol = if snmp_selection.inventory {
+                Source::Snmp.label()
+            } else {
+                Source::Lldp.label()
+            };
+            match snmp::query(&ip, local_mac, &options.snmp, snmp_selection).await {
+                Ok(result) => {
+                    log_probe(logger, &ip, protocol, true);
+                    links.extend(result.links);
+                    if let Some(mac) = local_mac {
+                        if let Some(device) =
+                            devices.iter_mut().find(|device| device.mac_address == mac)
+                        {
+                            if let Some(observation) = result.observation {
+                                device.observations.push(observation);
                             }
-                        } else if let Some(observation) = result.observation {
-                            unresolved.push(observation);
+                            device.interfaces.extend(result.interfaces);
                         }
+                    } else if let Some(observation) = result.observation {
+                        unresolved.push(observation);
                     }
-                    Err(error) => warnings.push(error),
+                }
+                Err(error) => {
+                    log_probe(logger, &ip, protocol, false);
+                    warnings.push(error);
                 }
             }
         }
+    }
+
+    let stopped = cancelled.load(Ordering::Relaxed);
+    if stopped {
+        warnings
+            .push("Scan stopped by user; this export contains results collected so far.".into());
+        logger.log("Stopping scan and writing collected results...".into());
     }
 
     let scan = ScanExport {
@@ -638,7 +647,7 @@ pub async fn scan(options: &ScanOptions, logger: &dyn LogOutput) -> Result<bool,
                 mac_address: otserver_scanner::contract::normalize_mac(&options.source_mac),
                 addresses: vec![],
             },
-            partial: !errors.is_empty(),
+            partial: stopped || !errors.is_empty(),
         },
         devices: merge_devices(devices),
         links,
@@ -763,6 +772,8 @@ async fn probe_protocols(
     warnings: &mut Vec<String>,
     selection: protocols::Selection,
     opcua: &otserver_scanner::protocols::OpcuaSettings,
+    logger: &dyn LogOutput,
+    cancelled: &AtomicBool,
 ) {
     let identities = unique_ip_identities(devices)
         .into_iter()
@@ -770,30 +781,43 @@ async fn probe_protocols(
         .collect::<Vec<_>>();
     let mut tasks = tokio::task::JoinSet::new();
     for (ip, mac) in identities {
+        if cancelled.load(Ordering::Relaxed) {
+            break;
+        }
         if tasks.len() == 32 {
-            apply_probe(devices, warnings, tasks.join_next().await);
+            apply_probe(devices, warnings, logger, tasks.join_next().await);
         }
         let opcua = opcua.clone();
         tasks.spawn(async move {
             let result = protocols::scan(ip, &mac, selection, &opcua).await;
-            (mac, result)
+            (ip, mac, result)
         });
     }
-    while let Some(result) = tasks.join_next().await {
-        apply_probe(devices, warnings, Some(result));
+    while !cancelled.load(Ordering::Relaxed)
+        && let Some(result) = tasks.join_next().await
+    {
+        apply_probe(devices, warnings, logger, Some(result));
     }
+    while let Some(result) = tasks.try_join_next() {
+        apply_probe(devices, warnings, logger, Some(result));
+    }
+    tasks.abort_all();
 }
 
 fn apply_probe(
     devices: &mut [otserver_scanner::contract::Device],
     warnings: &mut Vec<String>,
-    result: Option<Result<(String, protocols::ProbeResult), tokio::task::JoinError>>,
+    logger: &dyn LogOutput,
+    result: Option<Result<(Ipv4Addr, String, protocols::ProbeResult), tokio::task::JoinError>>,
 ) {
     let Some(result) = result else { return };
-    let Ok((mac, mut result)) = result else {
+    let Ok((ip, mac, mut result)) = result else {
         warnings.push("A native protocol probe task failed.".into());
         return;
     };
+    for (source, success) in &result.outcomes {
+        log_probe(logger, &ip.to_string(), source.label(), *success);
+    }
     warnings.append(&mut result.warnings);
     if let Some(device) = devices.iter_mut().find(|device| device.mac_address == mac) {
         device.observations.append(&mut result.observations);
@@ -850,7 +874,6 @@ mod tests {
             interface: None,
             source_mac: None,
             output: None,
-            snmp_profile: None,
             ack_authorized: true,
             no_protocols: false,
             no_arp: false,
@@ -876,6 +899,7 @@ mod tests {
                 "interface":"config-interface",
                 "sourceMac":"00:11:22:33:44:55",
                 "output":"configured.json",
+                "snmp":{"version":"3","username":"ops","authProtocol":"sha256","authPassword":"secret"},
                 "noProtocols":true,
                 "serverUrl":"https://otserver.example/base/",
                 "site":"site-1",
@@ -900,6 +924,8 @@ mod tests {
         assert!(!resolved.protocols.opcua);
         assert!(resolved.protocols.snmp);
         assert!(resolved.protocols.lldp);
+        assert_eq!(resolved.snmp.username.as_deref(), Some("ops"));
+        assert_eq!(resolved.snmp.auth_password.as_deref(), Some("secret"));
         let upload = resolved.upload.unwrap();
         assert_eq!(
             upload.endpoint.as_str(),
@@ -916,7 +942,11 @@ mod tests {
             interface: Some("eth0".into()),
             source_mac: Some("00:11:22:33:44:55".into()),
             output: Some(PathBuf::from("output.json")),
-            snmp_config: Some(PathBuf::from("snmp.json")),
+            snmp: Some(snmp::Settings {
+                version: Some("2c".into()),
+                community: Some("lab-public".into()),
+                ..snmp::Settings::default()
+            }),
             no_protocols: None,
             no_arp: Some(true),
             no_profinet: None,
@@ -930,7 +960,7 @@ mod tests {
             no_lldp: Some(true),
             opcua_ports: Some(vec![4840, 4841]),
             opcua_username: Some("opc-user".into()),
-            opcua_password_env: Some("OTSERVER_LAB_OPCUA_PASSWORD".into()),
+            opcua_password: Some("opc-password".into()),
             server_url: Some("https://otserver.example".into()),
             site: Some("site-1".into()),
             api_key: Some("key-123".into()),
@@ -945,19 +975,21 @@ mod tests {
         let config = ScannerConfig {
             opcua_ports: Some(vec![4841, 48400]),
             opcua_username: Some("opc-user".into()),
-            opcua_password_env: Some("OTSERVER_OPCUA_PASSWORD_NOT_SET_FOR_TEST".into()),
+            opcua_password: Some("opc-password".into()),
             ..ScannerConfig::default()
         };
         let settings = opcua_probe_settings(&config);
         assert_eq!(settings.ports, [4841, 48400]);
         assert_eq!(settings.username.as_deref(), Some("opc-user"));
-        assert_eq!(settings.password, None);
+        assert_eq!(settings.password.as_deref(), Some("opc-password"));
 
         let settings = opcua_probe_settings(&ScannerConfig::default());
         assert_eq!(
             settings.ports,
             otserver_scanner::protocols::OPCUA_DEFAULT_PORTS
         );
+        assert_eq!(settings.username, None);
+        assert_eq!(settings.password, None);
     }
 
     #[test]
@@ -1012,6 +1044,53 @@ mod tests {
         cli.source_mac = Some("00:11:22:33:44:55".into());
         let resolved = resolve_scan(cli, ScannerConfig::default(), None).unwrap();
         assert_eq!(resolved.protocols, ProtocolOptions::default());
+        assert_eq!(resolved.snmp, snmp::Settings::default());
+        assert_eq!(snmp::resolved_version(&resolved.snmp), "2c");
+        assert!(snmp::auth(&resolved.snmp).is_ok());
+    }
+
+    #[test]
+    fn logs_per_ip_protocol_outcomes_with_timestamp() {
+        #[derive(Default)]
+        struct CapturingLogger {
+            lines: std::sync::Mutex<Vec<String>>,
+        }
+        impl LogOutput for CapturingLogger {
+            fn log(&self, msg: String) {
+                self.lines.lock().unwrap().push(msg);
+            }
+        }
+        let logger = CapturingLogger::default();
+        log_probe(&logger, "192.0.2.10", Source::Snmp.label(), true);
+        log_probe(&logger, "192.0.2.11", Source::S7.label(), false);
+        let lines = logger.lines.lock().unwrap();
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].starts_with("["), "missing timestamp: {}", lines[0]);
+        assert!(lines[0].ends_with("] 192.0.2.10 Protocol snmp Success"));
+        assert!(lines[1].ends_with("] 192.0.2.11 Protocol s7 Fail"));
+    }
+
+    #[tokio::test]
+    async fn stopped_scan_writes_valid_partial_export() {
+        let output = std::env::temp_dir().join(format!("{}.json", Uuid::new_v4()));
+        let options = ScanOptions {
+            targets: vec!["192.0.2.1".into()],
+            interface: "test-interface".into(),
+            source_mac: "00:11:22:33:44:55".into(),
+            output: output.clone(),
+            protocols: ProtocolOptions::default(),
+            snmp: snmp::Settings::default(),
+            opcua: protocols::OpcuaSettings::default(),
+            upload: None,
+        };
+        let cancelled = AtomicBool::new(true);
+
+        assert!(scan(&options, &StdoutLogger, &cancelled).await.unwrap());
+        let export: ScanExport =
+            serde_json::from_slice(&tokio::fs::read(&output).await.unwrap()).unwrap();
+        tokio::fs::remove_file(output).await.unwrap();
+
+        assert!(export.scan.partial);
     }
 
     #[tokio::test]

@@ -136,13 +136,18 @@ transaction only when real file sizes or atomicity requirements justify it.
   absent, passive discovery uses Microsoft pktmon. Preserve these paths.
 - Keep protocol framing and parsing in `scanner/src/protocols/` or the existing dedicated modules.
   Reject truncated, oversized, mismatched, or unsolicited responses.
-- CLI credentials belong in environment variables referenced by an ignored SNMP profile. The GUI may
-  provide masked, in-memory overrides for a scan, but must never persist, export, or log credentials.
+- SNMP and OPC UA settings, including credentials, live in the executable-adjacent
+  `otscanner.json` and are fully editable in the GUI. There are no separate SNMP profile files,
+  credential environment variables, or interactive credential prompts. Without SNMP settings, scans
+  default to SNMPv2c with community `public`, so SNMP must never gate or block a scan. Credentials
+  must never appear in logs or scan exports.
 - Direct scanner imports use Payload's existing `asset-imports` REST upload with a native per-user API
   key so site authorization, validation, merging, and auditing remain shared with manual imports.
-- `otscanner.json` lives beside the scanner executable and may provide scan and upload defaults, but
-  `--ack-authorized` must remain an explicit flag on every scan. `OTSERVER_API_KEY` overrides the
-  config-file key.
+- `otscanner.json` lives beside the scanner executable and holds all scan defaults, SNMP and OPC UA
+  credentials, and upload settings, but `--ack-authorized` must remain an explicit flag on every
+  scan. `OTSERVER_API_KEY` overrides the config-file key. The scan log records one
+  `[HH:MM] <ip> Protocol <name> Success/Fail` entry per probed IP and protocol; keep credentials out
+  of it.
 - The Docker lab uses maintained stacks where available and minimal fixed responders for FINS and
   Fox. It must not publish OT ports to a physical adapter or use host networking. The Windows-host
   harness may bind its test ports only to Docker/WSL's host-only Hyper-V adapter and must clean up
@@ -184,7 +189,7 @@ queries must continue to fail with a clear HTTP 400 error.
 - Regenerate the Payload admin import map with `pnpm generate:importmap` when component registrations
   change.
 - Commit `scanner/Cargo.lock` and `pnpm-lock.yaml` when their manifests change.
-- Never commit `.env`, real SNMP profiles, scanner output, uploads, build output, Docker lab artifacts,
+- Never commit `.env`, `otscanner.json` with real credentials, scanner output, uploads, build output, Docker lab artifacts,
   or Python/Rust caches. The root `.gitignore` contains the expected patterns.
 
 ## Local Setup and Checks

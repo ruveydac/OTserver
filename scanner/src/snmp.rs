@@ -1,9 +1,8 @@
 use crate::contract::{Endpoint, NetworkInterface, Observation, Source, TopologyLink};
 use async_snmp::{Auth, AuthProtocol, Client, PrivProtocol, Retry, Value, oid::Oid};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, json};
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::time::Duration;
 
 #[cfg(not(test))]
@@ -11,18 +10,25 @@ const SNMP_PORT: u16 = 161;
 #[cfg(test)]
 const SNMP_PORT: u16 = 1_161;
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Profile {
-    pub name: String,
-    pub version: String,
-    pub community_env: Option<String>,
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+pub struct Settings {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub community: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub context_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_protocol: Option<String>,
-    pub auth_password_env: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_password: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub privacy_protocol: Option<String>,
-    pub privacy_password_env: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub privacy_password: Option<String>,
 }
 
 pub struct ResultData {
@@ -37,83 +43,62 @@ pub struct QuerySelection {
     pub lldp: bool,
 }
 
-#[derive(Clone, Default)]
-pub struct CredentialOverrides {
-    pub community: Option<String>,
-    pub username: Option<String>,
-    pub auth_password: Option<String>,
-    pub privacy_password: Option<String>,
+pub fn resolved_version(settings: &Settings) -> &str {
+    settings
+        .version
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("2c")
 }
 
-pub async fn load(path: &Path) -> Result<Vec<Profile>, String> {
-    let text = tokio::fs::read_to_string(path)
-        .await
-        .map_err(|error| format!("Could not read SNMP profile: {error}"))?;
-    serde_json::from_str(&text).map_err(|error| format!("Invalid SNMP profile JSON: {error}"))
-}
-
-fn secret(
-    override_value: Option<&str>,
-    environment: &Option<String>,
-    prompt: &str,
-) -> Result<String, String> {
-    if let Some(value) = override_value.filter(|value| !value.is_empty()) {
-        return Ok(value.to_owned());
+pub fn auth(settings: &Settings) -> Result<Auth, String> {
+    let version = resolved_version(settings);
+    if version.eq_ignore_ascii_case("2c") {
+        let community = settings
+            .community
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .unwrap_or("public");
+        return Ok(Auth::v2c(community.to_owned()));
     }
-    if let Some(name) = environment
-        && let Ok(value) = std::env::var(name)
-    {
-        return Ok(value);
+    if version != "3" {
+        return Err(format!("Unsupported SNMP version {version}."));
     }
-    rpassword::prompt_password(prompt)
-        .map_err(|error| format!("Could not read SNMP credential: {error}"))
-}
-
-fn auth(profile: &Profile, credentials: &CredentialOverrides) -> Result<Auth, String> {
-    if profile.version.eq_ignore_ascii_case("2c") {
-        return Ok(Auth::v2c(secret(
-            credentials.community.as_deref(),
-            &profile.community_env,
-            &format!("SNMP community for {}: ", profile.name),
-        )?));
-    }
-    if profile.version != "3" {
-        return Err(format!(
-            "SNMP profile {} has unsupported version {}.",
-            profile.name, profile.version
-        ));
-    }
-    let username = credentials
+    let username = settings
         .username
         .as_deref()
         .filter(|value| !value.is_empty())
-        .or(profile.username.as_deref())
-        .ok_or_else(|| format!("SNMPv3 profile {} needs username.", profile.name))?;
+        .ok_or_else(|| "SNMPv3 settings need a username.".to_owned())?;
     let mut builder = Auth::usm(username);
-    if let Some(protocol) = &profile.auth_protocol {
+    if let Some(protocol) = &settings.auth_protocol {
         builder = builder.auth(
             auth_protocol(protocol)?,
-            secret(
-                credentials.auth_password.as_deref(),
-                &profile.auth_password_env,
-                &format!("SNMP auth password for {}: ", profile.name),
+            password(
+                settings.auth_password.as_deref(),
+                &format!("SNMPv3 authentication protocol {protocol}"),
             )?,
         );
     }
-    if let Some(protocol) = &profile.privacy_protocol {
+    if let Some(protocol) = &settings.privacy_protocol {
         builder = builder.privacy(
             privacy_protocol(protocol)?,
-            secret(
-                credentials.privacy_password.as_deref(),
-                &profile.privacy_password_env,
-                &format!("SNMP privacy password for {}: ", profile.name),
+            password(
+                settings.privacy_password.as_deref(),
+                &format!("SNMPv3 privacy protocol {protocol}"),
             )?,
         );
     }
-    if let Some(context_name) = &profile.context_name {
+    if let Some(context_name) = &settings.context_name {
         builder = builder.context_name(context_name);
     }
     Ok(builder.into())
+}
+
+fn password(value: Option<&str>, context: &str) -> Result<String, String> {
+    value
+        .map(str::to_owned)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| format!("{context} needs a password."))
 }
 
 fn auth_protocol(value: &str) -> Result<AuthProtocol, String> {
@@ -141,11 +126,10 @@ fn privacy_protocol(value: &str) -> Result<PrivProtocol, String> {
 pub async fn query(
     target: &str,
     local_mac: Option<&str>,
-    profile: &Profile,
+    settings: &Settings,
     selection: QuerySelection,
-    credentials: &CredentialOverrides,
 ) -> Result<ResultData, String> {
-    let client = Client::builder((target, SNMP_PORT), auth(profile, credentials)?)
+    let client = Client::builder((target, SNMP_PORT), auth(settings)?)
         .timeout(Duration::from_secs(3))
         .retry(Retry::fixed(1, Duration::ZERO))
         .max_walk_results(4000)
@@ -346,7 +330,7 @@ pub async fn query(
                         port_id: neighbor.port,
                         port_mac: None,
                     },
-                    raw: json!({ "profile": profile.name }),
+                    raw: json!({ "version": resolved_version(settings) }),
                 })
             })
             .collect()
@@ -445,17 +429,11 @@ mod tests {
     use async_snmp::{Oid, Pdu, PduType, VarBind};
     use tokio::net::UdpSocket;
 
-    fn profile(version: &str) -> Profile {
-        Profile {
-            name: "test".into(),
-            version: version.into(),
-            community_env: Some("OTSERVER_TEST_SNMP_COMMUNITY".into()),
-            username: None,
-            context_name: None,
-            auth_protocol: None,
-            auth_password_env: None,
-            privacy_protocol: None,
-            privacy_password_env: None,
+    fn settings(version: &str) -> Settings {
+        Settings {
+            version: Some(version.into()),
+            community: Some("public".into()),
+            ..Settings::default()
         }
     }
     #[test]
@@ -490,53 +468,56 @@ mod tests {
         assert_eq!(neighbor.chassis_mac(), None);
     }
 
-    #[tokio::test]
-    async fn loads_and_validates_profiles() {
-        let path = std::env::temp_dir().join(format!("otserver-snmp-{}.json", std::process::id()));
-        tokio::fs::write(
-            &path,
-            r#"[{"name":"lab","version":"2c","communityEnv":"COMMUNITY"}]"#,
-        )
-        .await
-        .unwrap();
-        assert_eq!(load(&path).await.unwrap()[0].name, "lab");
-        tokio::fs::write(&path, "invalid").await.unwrap();
-        assert!(load(&path).await.is_err());
-        tokio::fs::remove_file(&path).await.unwrap();
-        assert!(load(&path).await.is_err());
+    #[test]
+    fn builds_auth_from_inline_settings() {
+        assert!(auth(&settings("unsupported")).is_err());
 
-        let credentials = CredentialOverrides::default();
-        assert!(auth(&profile("unsupported"), &credentials).is_err());
-        let mut v3 = profile("3");
-        assert!(auth(&v3, &credentials).is_err());
+        let v2c = Settings::default();
+        assert_eq!(resolved_version(&v2c), "2c");
+        assert!(auth(&v2c).is_ok());
+
+        let mut v3 = settings("3");
+        v3.community = None;
+        assert!(auth(&v3).is_err());
         v3.username = Some("operator".into());
+        assert!(auth(&v3).is_ok());
         v3.auth_protocol = Some("invalid".into());
-        assert!(auth(&v3, &credentials).is_err());
-        let mut override_profile = profile("3");
-        override_profile.auth_protocol = Some("sha256".into());
-        assert!(
-            auth(
-                &override_profile,
-                &CredentialOverrides {
-                    username: Some("gui-user".into()),
-                    auth_password: Some("gui-password".into()),
-                    ..CredentialOverrides::default()
-                }
-            )
-            .is_ok()
-        );
+        assert!(auth(&v3).is_err());
+        v3.auth_protocol = Some("sha256".into());
+        assert!(auth(&v3).is_err());
+        v3.auth_password = Some("auth-secret".into());
+        v3.privacy_protocol = Some("aes128".into());
+        assert!(auth(&v3).is_err());
+        v3.privacy_password = Some("privacy-secret".into());
+        v3.context_name = Some("lab-context".into());
+        assert!(auth(&v3).is_ok());
+
         for value in ["md5", "sha1", "sha224", "sha256", "sha384", "sha512"] {
             assert!(auth_protocol(value).is_ok());
         }
+        assert!(auth_protocol("invalid").is_err());
         for value in ["des", "aes128", "aes192", "aes256"] {
             assert!(privacy_protocol(value).is_ok());
         }
         assert!(privacy_protocol("invalid").is_err());
     }
 
+    #[test]
+    fn settings_roundtrip_through_json() {
+        let value = serde_json::json!({
+            "version": "3",
+            "username": "inventory",
+            "authProtocol": "sha256",
+            "authPassword": "secret"
+        });
+        let parsed: Settings = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(parsed.username.as_deref(), Some("inventory"));
+        assert_eq!(serde_json::to_value(&parsed).unwrap(), value);
+        assert!(serde_json::from_str::<Settings>(r#"{"unknown":true}"#).is_err());
+    }
+
     #[tokio::test]
     async fn queries_system_interfaces_inventory_and_lldp() {
-        unsafe { std::env::set_var("OTSERVER_TEST_SNMP_COMMUNITY", "public") };
         let string = |value: &'static str| Value::OctetString(value.into());
         let mut entries = vec![
             ("1.0.8802.1.1.2.1.4.1.1.4.0.7.1", Value::Integer(4)),
@@ -621,12 +602,11 @@ mod tests {
         let result = query(
             "127.0.0.1",
             Some("00:11:22:33:44:55"),
-            &profile("2c"),
+            &settings("2c"),
             QuerySelection {
                 inventory: true,
                 lldp: true,
             },
-            &CredentialOverrides::default(),
         )
         .await
         .unwrap();
@@ -640,21 +620,20 @@ mod tests {
         let lldp_only = query(
             "127.0.0.1",
             Some("00:11:22:33:44:55"),
-            &profile("2c"),
+            &settings("2c"),
             QuerySelection {
                 inventory: false,
                 lldp: true,
             },
-            &CredentialOverrides::default(),
         )
         .await
         .unwrap();
         assert!(lldp_only.observation.is_none());
         assert!(lldp_only.interfaces.is_empty());
         assert_eq!(lldp_only.links.len(), 1);
+        assert_eq!(lldp_only.links[0].raw["version"], "2c");
 
         task.abort();
-        unsafe { std::env::remove_var("OTSERVER_TEST_SNMP_COMMUNITY") };
     }
 
     #[test]

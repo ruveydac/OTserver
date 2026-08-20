@@ -81,7 +81,7 @@ pub struct Observation {
     pub warnings: Vec<String>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Source {
     Arp,
