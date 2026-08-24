@@ -62,10 +62,18 @@ running scan writes a valid partial export containing all results collected befo
 
 SNMP settings and credentials live in the `snmp` block of `otscanner.json` and are fully editable
 in the GUI. Without any settings, SNMPv2c with the community `public` is used, so SNMP never blocks
-a scan. For SNMPv3 set `version` to `3` plus `username`, optional `contextName`, and the
+a scan. Set `version` to `1` for a legacy SNMPv1 agent. For SNMPv3 set `version` to `3` plus
+`username`, optional `contextName`, and the
 `authProtocol`/`authPassword` and `privacyProtocol`/`privacyPassword` pairs. Credentials are stored
 in plaintext in `otscanner.json`; keep the file out of source control and restrict its permissions.
 Credentials are never written to logs or scan exports.
+
+SNMP uses bounded, read-only queries for system identity, IF-MIB/IP-MIB interfaces, ENTITY-MIB
+components, BRIDGE/Q-BRIDGE ports and VLANs, LLDP topology, and the generic Siemens
+AUTOMATION-SYSTEM-MIB identity scalars. It probes configured IPv4 targets even when Layer 2
+discovery cannot see them, but creates an asset only after obtaining a valid MAC from an interface,
+bridge, or LLDP chassis identity. Forwarding-table MACs are port evidence only and never asset
+identities.
 
 OPC UA discovery connects to ports 4840, 4841, and 48400 by default (configurable via `opcuaPorts`).
 The scanner prefers anonymous authentication; if the server requires username authentication, set

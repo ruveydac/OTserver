@@ -3,7 +3,7 @@ pub mod win10pcap_install;
 
 use clap::{ArgAction, Args, Parser, Subcommand};
 use otserver_scanner::contract::{
-    InterfaceRef, ScanExport, ScanInfo, ScannerInfo, Source, merge_devices, validate,
+    Device, InterfaceRef, ScanExport, ScanInfo, ScannerInfo, Source, merge_devices, validate,
 };
 use otserver_scanner::{discovery, profinet, protocols, snmp};
 use serde::{Deserialize, Serialize};
@@ -474,6 +474,7 @@ pub async fn scan(
     let mut unresolved = Vec::new();
     let mut warnings = Vec::new();
     let mut errors = Vec::new();
+    let mut protocol_failed = false;
 
     logger.log(format!(
         "Starting discovery for target(s): {}",
@@ -574,6 +575,10 @@ pub async fn scan(
             inventory: options.protocols.snmp,
             lldp: options.protocols.lldp,
         };
+        logger.log(format!(
+            "Resolved SNMP inventory={} LLDP topology={}.",
+            snmp_selection.inventory, snmp_selection.lldp
+        ));
         let label = match (snmp_selection.inventory, snmp_selection.lldp) {
             (true, true) => "SNMP and LLDP",
             (true, false) => "SNMP",
@@ -581,44 +586,27 @@ pub async fn scan(
             (false, false) => unreachable!("guard requires one query type"),
         };
         logger.log(format!("Querying {label}..."));
-        let ip_to_mac = unique_ip_identities(&devices);
-        let ips = devices
+        let mut ips = target_addresses
             .iter()
-            .flat_map(|device| device.ip_addresses.iter().cloned())
+            .map(Ipv4Addr::to_string)
             .collect::<BTreeSet<_>>();
-        for ip in ips {
-            if cancelled.load(Ordering::Relaxed) {
-                break;
-            }
-            let local_mac = ip_to_mac.get(&ip).map(String::as_str);
-            let protocol = if snmp_selection.inventory {
-                Source::Snmp.label()
-            } else {
-                Source::Lldp.label()
-            };
-            match snmp::query(&ip, local_mac, &options.snmp, snmp_selection).await {
-                Ok(result) => {
-                    log_probe(logger, &ip, protocol, true);
-                    links.extend(result.links);
-                    if let Some(mac) = local_mac {
-                        if let Some(device) =
-                            devices.iter_mut().find(|device| device.mac_address == mac)
-                        {
-                            if let Some(observation) = result.observation {
-                                device.observations.push(observation);
-                            }
-                            device.interfaces.extend(result.interfaces);
-                        }
-                    } else if let Some(observation) = result.observation {
-                        unresolved.push(observation);
-                    }
-                }
-                Err(error) => {
-                    log_probe(logger, &ip, protocol, false);
-                    warnings.push(error);
-                }
-            }
-        }
+        ips.extend(
+            devices
+                .iter()
+                .flat_map(|device| device.ip_addresses.iter().cloned()),
+        );
+        protocol_failed |= probe_snmp(
+            ips,
+            &mut devices,
+            &mut links,
+            &mut unresolved,
+            &mut warnings,
+            &options.snmp,
+            snmp_selection,
+            logger,
+            cancelled,
+        )
+        .await;
     }
 
     let stopped = cancelled.load(Ordering::Relaxed);
@@ -647,7 +635,7 @@ pub async fn scan(
                 mac_address: otserver_scanner::contract::normalize_mac(&options.source_mac),
                 addresses: vec![],
             },
-            partial: stopped || !errors.is_empty(),
+            partial: stopped || protocol_failed || !errors.is_empty(),
         },
         devices: merge_devices(devices),
         links,
@@ -802,6 +790,142 @@ async fn probe_protocols(
         apply_probe(devices, warnings, logger, Some(result));
     }
     tasks.abort_all();
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "keeps scan result mutation in one bounded probe path"
+)]
+async fn probe_snmp(
+    ips: BTreeSet<String>,
+    devices: &mut Vec<Device>,
+    links: &mut Vec<otserver_scanner::contract::TopologyLink>,
+    unresolved: &mut Vec<otserver_scanner::contract::Observation>,
+    warnings: &mut Vec<String>,
+    settings: &snmp::Settings,
+    selection: snmp::QuerySelection,
+    logger: &dyn LogOutput,
+    cancelled: &AtomicBool,
+) -> bool {
+    let identities = unique_ip_identities(devices);
+    let mut tasks = tokio::task::JoinSet::new();
+    let mut failed = false;
+    for ip in ips {
+        if cancelled.load(Ordering::Relaxed) {
+            break;
+        }
+        if tasks.len() == 16 {
+            let result = tokio::select! {
+                () = wait_for_cancellation(cancelled) => break,
+                result = tasks.join_next() => result,
+            };
+            failed |= apply_snmp_probe(
+                devices, links, unresolved, warnings, logger, selection, result,
+            );
+        }
+        let settings = settings.clone();
+        let local_mac = identities.get(&ip).cloned();
+        tasks.spawn(async move {
+            let result = snmp::query(&ip, local_mac.as_deref(), &settings, selection).await;
+            (ip, result)
+        });
+    }
+    while !tasks.is_empty() {
+        let result = tokio::select! {
+            () = wait_for_cancellation(cancelled) => break,
+            result = tasks.join_next() => result,
+        };
+        failed |= apply_snmp_probe(
+            devices, links, unresolved, warnings, logger, selection, result,
+        );
+    }
+    while let Some(result) = tasks.try_join_next() {
+        failed |= apply_snmp_probe(
+            devices,
+            links,
+            unresolved,
+            warnings,
+            logger,
+            selection,
+            Some(result),
+        );
+    }
+    tasks.abort_all();
+    failed
+}
+
+async fn wait_for_cancellation(cancelled: &AtomicBool) {
+    while !cancelled.load(Ordering::Relaxed) {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+#[expect(
+    clippy::type_complexity,
+    reason = "the join result carries the target and fallible SNMP response"
+)]
+fn apply_snmp_probe(
+    devices: &mut Vec<Device>,
+    links: &mut Vec<otserver_scanner::contract::TopologyLink>,
+    unresolved: &mut Vec<otserver_scanner::contract::Observation>,
+    warnings: &mut Vec<String>,
+    logger: &dyn LogOutput,
+    selection: snmp::QuerySelection,
+    result: Option<
+        Result<(String, Result<snmp::ResultData, snmp::QueryError>), tokio::task::JoinError>,
+    >,
+) -> bool {
+    let Some(result) = result else { return false };
+    let Ok((ip, result)) = result else {
+        warnings.push("An SNMP probe task failed.".into());
+        return true;
+    };
+    let mut result = match result {
+        Ok(result) => result,
+        Err(error) => {
+            if selection.inventory {
+                log_probe(logger, &ip, Source::Snmp.label(), false);
+            }
+            if selection.lldp {
+                log_probe(logger, &ip, Source::Lldp.label(), false);
+            }
+            let failed = !error.is_no_response();
+            warnings.push(error.to_string());
+            return failed;
+        }
+    };
+    if selection.inventory {
+        log_probe(logger, &ip, Source::Snmp.label(), result.inventory_complete);
+    }
+    if selection.lldp {
+        log_probe(logger, &ip, Source::Lldp.label(), result.lldp_complete);
+    }
+    let incomplete = selection.inventory && !result.inventory_complete
+        || selection.lldp && !result.lldp_complete;
+    warnings.append(&mut result.warnings);
+    links.append(&mut result.links);
+    if let Some(mac) = result.identity_mac {
+        if let Some(device) = devices.iter_mut().find(|device| device.mac_address == mac) {
+            device.ip_addresses.push(ip);
+            if let Some(observation) = result.observation {
+                device.observations.push(observation);
+            }
+            device.interfaces.append(&mut result.interfaces);
+            device.ports.append(&mut result.ports);
+        } else if let Some(observation) = result.observation {
+            devices.push(Device {
+                mac_address: mac.clone(),
+                mac_addresses: vec![mac],
+                ip_addresses: vec![ip],
+                observations: vec![observation],
+                interfaces: result.interfaces,
+                ports: result.ports,
+            });
+        }
+    } else if let Some(observation) = result.observation {
+        unresolved.push(observation);
+    }
+    incomplete
 }
 
 fn apply_probe(
@@ -1047,6 +1171,87 @@ mod tests {
         assert_eq!(resolved.snmp, snmp::Settings::default());
         assert_eq!(snmp::resolved_version(&resolved.snmp), "2c");
         assert!(snmp::auth(&resolved.snmp).is_ok());
+    }
+
+    #[test]
+    fn snmp_probe_creates_device_only_from_derived_mac_identity() {
+        let mut devices = vec![];
+        let mut links = vec![];
+        let mut unresolved = vec![];
+        let mut warnings = vec![];
+        let observation = otserver_scanner::contract::Observation {
+            source: Source::Snmp,
+            observed_at: "2026-08-24T00:00:00Z".into(),
+            ip_address: Some("192.0.2.10".into()),
+            mac_address: Some("00:11:22:33:44:55".into()),
+            fields: BTreeMap::new(),
+            raw: serde_json::json!({}),
+            warnings: vec![],
+        };
+        let result = snmp::ResultData {
+            identity_mac: Some("00:11:22:33:44:55".into()),
+            observation: Some(observation),
+            interfaces: vec![],
+            ports: vec![],
+            links: vec![],
+            warnings: vec![],
+            inventory_complete: true,
+            lldp_complete: true,
+        };
+
+        assert!(!apply_snmp_probe(
+            &mut devices,
+            &mut links,
+            &mut unresolved,
+            &mut warnings,
+            &StdoutLogger,
+            snmp::QuerySelection {
+                inventory: true,
+                lldp: false,
+            },
+            Some(Ok(("192.0.2.10".into(), Ok(result)))),
+        ));
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].mac_address, "00:11:22:33:44:55");
+        assert!(unresolved.is_empty());
+    }
+
+    #[tokio::test]
+    async fn snmp_configuration_failure_marks_probe_failed() {
+        let settings = snmp::Settings {
+            version: Some("unsupported".into()),
+            ..snmp::Settings::default()
+        };
+        let Err(error) = snmp::query(
+            "127.0.0.1",
+            None,
+            &settings,
+            snmp::QuerySelection {
+                inventory: true,
+                lldp: false,
+            },
+        )
+        .await
+        else {
+            panic!("unsupported SNMP configuration unexpectedly succeeded")
+        };
+        let mut devices = vec![];
+        let mut links = vec![];
+        let mut unresolved = vec![];
+        let mut warnings = vec![];
+
+        assert!(apply_snmp_probe(
+            &mut devices,
+            &mut links,
+            &mut unresolved,
+            &mut warnings,
+            &StdoutLogger,
+            snmp::QuerySelection {
+                inventory: true,
+                lldp: false,
+            },
+            Some(Ok(("127.0.0.1".into(), Err(error)))),
+        ));
     }
 
     #[test]
