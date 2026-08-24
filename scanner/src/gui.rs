@@ -212,7 +212,7 @@ impl GuiApp {
 
     fn snmp_settings(&self) -> Option<SnmpSettings> {
         let settings = SnmpSettings {
-            version: (self.snmp_version == "3").then_some("3".to_string()),
+            version: (self.snmp_version != "2c").then(|| self.snmp_version.clone()),
             community: nonempty_opt(&self.snmp_community),
             username: nonempty_opt(&self.snmp_username),
             context_name: nonempty_opt(&self.snmp_context),
@@ -321,7 +321,7 @@ impl GuiApp {
         };
 
         let env_key = std::env::var("OTSERVER_API_KEY").ok();
-        let options: ScanOptions = match resolve_scan(args, config, env_key) {
+        let mut options: ScanOptions = match resolve_scan(args, config, env_key) {
             Ok(opts) => opts,
             Err(err) => {
                 self.status = format!("Configuration error: {err}");
@@ -330,6 +330,8 @@ impl GuiApp {
                 return;
             }
         };
+        options.protocols.snmp = self.snmp_enabled;
+        options.protocols.lldp = self.lldp_enabled;
 
         let (tx, rx) = mpsc::channel::<String>();
         let cancellation = Arc::new(AtomicBool::new(false));
@@ -533,28 +535,33 @@ impl eframe::App for GuiApp {
 
                     ui.label("Enabled protocols:");
                     let mut protocol_changed = false;
-                    ui.horizontal_wrapped(|ui| {
-                        protocol_changed |= ui.toggle_value(&mut self.arp_enabled, "ARP").changed();
-                        protocol_changed |= ui
-                            .toggle_value(&mut self.profinet_enabled, "PROFINET DCP")
-                            .changed();
-                        protocol_changed |= ui.toggle_value(&mut self.s7_enabled, "S7").changed();
-                        protocol_changed |= ui
-                            .toggle_value(&mut self.enip_enabled, "EtherNet/IP")
-                            .changed();
-                        protocol_changed |= ui
-                            .toggle_value(&mut self.bacnet_enabled, "BACnet")
-                            .changed();
-                        protocol_changed |=
-                            ui.toggle_value(&mut self.fins_enabled, "FINS").changed();
-                        protocol_changed |=
-                            ui.toggle_value(&mut self.fox_enabled, "Fox").changed();
-                        protocol_changed |=
-                            ui.toggle_value(&mut self.opcua_enabled, "OPC UA").changed();
-                        protocol_changed |=
-                            ui.toggle_value(&mut self.snmp_enabled, "SNMP").changed();
-                        protocol_changed |=
-                            ui.toggle_value(&mut self.lldp_enabled, "LLDP").changed();
+                    ui.add_enabled_ui(!self.is_scanning, |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            protocol_changed |=
+                                ui.toggle_value(&mut self.arp_enabled, "ARP").changed();
+                            protocol_changed |= ui
+                                .toggle_value(&mut self.profinet_enabled, "PROFINET DCP")
+                                .changed();
+                            protocol_changed |=
+                                ui.toggle_value(&mut self.s7_enabled, "S7").changed();
+                            protocol_changed |= ui
+                                .toggle_value(&mut self.enip_enabled, "EtherNet/IP")
+                                .changed();
+                            protocol_changed |= ui
+                                .toggle_value(&mut self.bacnet_enabled, "BACnet")
+                                .changed();
+                            protocol_changed |=
+                                ui.toggle_value(&mut self.fins_enabled, "FINS").changed();
+                            protocol_changed |=
+                                ui.toggle_value(&mut self.fox_enabled, "Fox").changed();
+                            protocol_changed |= ui
+                                .toggle_value(&mut self.opcua_enabled, "OPC UA")
+                                .changed();
+                            protocol_changed |=
+                                ui.toggle_value(&mut self.snmp_enabled, "SNMP").changed();
+                            protocol_changed |=
+                                ui.toggle_value(&mut self.lldp_enabled, "LLDP").changed();
+                        });
                     });
                     ui.small("Highlighted protocols are enabled. All protocols are enabled by default.");
                     if protocol_changed {
@@ -646,7 +653,7 @@ impl eframe::App for GuiApp {
                             ui,
                             "snmp-version",
                             &mut self.snmp_version,
-                            &[("2c", "SNMPv2c"), ("3", "SNMPv3")],
+                            &[("1", "SNMPv1"), ("2c", "SNMPv2c"), ("3", "SNMPv3")],
                         ) {
                             self.save_config();
                         }
