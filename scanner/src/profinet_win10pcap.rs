@@ -306,43 +306,33 @@ pub fn capture(interface: &str, request: &[u8], wait: Duration) -> Result<Vec<Ve
     let mut receive_buffer = vec![0_u8; RECEIVE_BUFFER_SIZE];
     let receive_length = u32::try_from(receive_buffer.len()).expect("bounded receive buffer");
 
+    // Send one Identify-All request. Its standards-compliant response delay factor spreads
+    // replies across the capture window; repeating it would multiply traffic on a busy OT cell.
+    // Win10Pcap 10.2's PacketSendPacket consumes the supplied data pointer through SeFree, so use
+    // a spare allocation from Packet.dll rather than crossing allocators with a Rust buffer.
+    // SAFETY: PacketAllocatePacket returns at least size_of::<Packet>() owned bytes.
+    let send_buffer = unsafe { (api.allocate_packet)() };
+    if send_buffer.is_null() {
+        return Err("Win10Pcap could not allocate the DCP transmit buffer.".into());
+    }
+    // SAFETY: the size guard above proves the allocation can hold request.len() bytes and the
+    // source and destination do not overlap.
+    unsafe {
+        std::ptr::copy_nonoverlapping(request.as_ptr(), send_buffer.cast::<u8>(), request.len())
+    };
+    // SAFETY: tx_packet is a descriptor owned by Packet.dll and send_buffer is readable for
+    // request_length. PacketSendPacket consumes send_buffer through SeFree.
+    unsafe { (api.init_packet)(tx_packet.packet, send_buffer.cast(), request_length) };
+    // SAFETY: adapter and packet remain valid; synchronous send completes before returning.
+    if unsafe { (api.send_packet)(adapter.handle, tx_packet.packet, 1) } == 0 {
+        return Err(format!(
+            "Win10Pcap could not transmit DCP Identify on {interface}."
+        ));
+    }
+
     let started = Instant::now();
-    let mut next_request = started;
-    let retry = Duration::from_secs(1);
     let mut frames = Vec::new();
     while started.elapsed() < wait {
-        let now = Instant::now();
-        if now >= next_request {
-            // Win10Pcap 10.2's PacketSendPacket takes ownership of the supplied data pointer and
-            // releases it with its private allocator. Use a spare PacketAllocatePacket allocation
-            // as the 60-byte x64 transmit buffer so no Rust or foreign allocator is crossed.
-            // SAFETY: PacketAllocatePacket returns at least size_of::<Packet>() owned bytes.
-            let send_buffer = unsafe { (api.allocate_packet)() };
-            if send_buffer.is_null() {
-                return Err("Win10Pcap could not allocate the DCP transmit buffer.".into());
-            }
-            // SAFETY: the size guard above proves the allocation can hold request.len() bytes and
-            // the source and destination do not overlap.
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    request.as_ptr(),
-                    send_buffer.cast::<u8>(),
-                    request.len(),
-                )
-            };
-            // SAFETY: tx_packet is a descriptor owned by Packet.dll and send_buffer is readable for
-            // request_length. PacketSendPacket consumes send_buffer even though Packet32.h does not
-            // document this Win10Pcap-specific implementation detail.
-            unsafe { (api.init_packet)(tx_packet.packet, send_buffer.cast(), request_length) };
-            // SAFETY: adapter and packet remain valid; synchronous send completes before returning.
-            if unsafe { (api.send_packet)(adapter.handle, tx_packet.packet, 1) } == 0 {
-                return Err(format!(
-                    "Win10Pcap could not transmit DCP Identify on {interface}."
-                ));
-            }
-            next_request = now + retry;
-        }
-
         // SAFETY: packet is allocated by Packet.dll and buffer is writable for receive_length.
         unsafe {
             (api.init_packet)(

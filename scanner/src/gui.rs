@@ -5,6 +5,7 @@ use crate::{
     save_config_sync, scan, upload_scan,
 };
 use eframe::egui;
+use otserver_scanner::contract::normalize_mac;
 use otserver_scanner::profinet::{self, CaptureInterface};
 use otserver_scanner::snmp::Settings as SnmpSettings;
 use std::net::IpAddr;
@@ -35,6 +36,13 @@ fn bound_ip_addresses(interfaces: &[CaptureInterface], selected: &str) -> Vec<St
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn interface_mac(interface: &CaptureInterface) -> Option<String> {
+    interface
+        .addresses
+        .iter()
+        .find_map(|address| normalize_mac(address))
 }
 
 fn protocol_combo(
@@ -127,7 +135,7 @@ impl GuiApp {
                 interfaces
                     .iter()
                     .find(|i| i.name == interface)
-                    .and_then(|i| i.addresses.first().cloned())
+                    .and_then(interface_mac)
             })
             .unwrap_or_default();
 
@@ -477,7 +485,15 @@ impl eframe::App for GuiApp {
                                         selected_changed = Some(iface.name.clone());
                                     }
                                 }
-                                if selected_changed.is_some() {
+                                if let Some(selected) = selected_changed {
+                                    if let Some(mac) = self
+                                        .interfaces
+                                        .iter()
+                                        .find(|iface| iface.name == selected)
+                                        .and_then(interface_mac)
+                                    {
+                                        self.source_mac = mac;
+                                    }
                                     #[cfg(windows)]
                                     self.refresh_win10pcap();
                                     self.save_config();
@@ -526,9 +542,9 @@ impl eframe::App for GuiApp {
                         if ui.button("Auto-fill from Interface").clicked()
                             && let Some(iface) =
                                 self.interfaces.iter().find(|i| i.name == self.interface)
-                            && let Some(mac) = iface.addresses.first()
+                            && let Some(mac) = interface_mac(iface)
                         {
-                            self.source_mac = mac.clone();
+                            self.source_mac = mac;
                             self.save_config();
                         }
                     });
@@ -912,7 +928,7 @@ pub fn run_gui() -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::bound_ip_addresses;
+    use super::{bound_ip_addresses, interface_mac};
     use otserver_scanner::profinet::CaptureInterface;
 
     #[test]
@@ -932,5 +948,9 @@ mod tests {
             ["192.0.2.10", "2001:db8::10"]
         );
         assert!(bound_ip_addresses(&interfaces, "missing").is_empty());
+        assert_eq!(
+            interface_mac(&interfaces[0]).as_deref(),
+            Some("00:11:22:33:44:55")
+        );
     }
 }

@@ -63,7 +63,13 @@ def respond_dcp(packet: Ether) -> None:
         or request[26:30] != bytes.fromhex("FFFF0000")
     ):
         return
+    response_delay_factor = int.from_bytes(request[22:24], "big")
+    if not 1 <= response_delay_factor <= 0x1900:
+        return
     mac = bytes.fromhex(get_if_hwaddr(INTERFACE).replace(":", ""))
+    if response_delay_factor > 1:
+        spread = int.from_bytes(mac[-2:], "big") % response_delay_factor
+        time.sleep(spread * 0.01)
     data = dcp_blocks(mac)
     response = (
         request[6:12]

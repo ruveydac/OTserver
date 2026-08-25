@@ -13,6 +13,11 @@ dynamically loads the installed `Packet.dll` from the Windows system directory, 
 physical interface by GUID, transmits DCP Identify, and captures only PROFINET Ethernet frames. The
 corresponding Win10Pcap project information is at <https://www.win10pcap.org/>.
 
+Active DCP verifies that the configured source MAC belongs to the selected physical interface before
+opening the selected Win10Pcap adapter. Identify-All is sent once with an engineering-tool response
+delay factor so device replies are spread over the capture window instead of creating a synchronized
+response burst.
+
 ## Linux
 
 ```bash
