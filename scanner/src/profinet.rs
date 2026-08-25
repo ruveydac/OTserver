@@ -23,8 +23,11 @@ pub struct CaptureInterface {
 #[cfg(any(windows, target_os = "linux", test))]
 const DCP_MULTICAST: [u8; 6] = [0x01, 0x0e, 0xcf, 0x00, 0x00, 0x00];
 const PROFINET_ETHERTYPE: [u8; 2] = [0x88, 0x92];
-#[cfg(target_os = "linux")]
-const DCP_RETRY_INTERVAL: Duration = Duration::from_secs(1);
+// Engineering tools must use a value from 0x0002 through 0x1900. A factor of 128 spreads
+// device responses over at most 1.27 seconds and gives the requester a three-second response
+// window. Never use zero: it is reserved and can make non-conforming devices reply at once.
+#[cfg(any(windows, target_os = "linux", test))]
+const DCP_RESPONSE_DELAY_FACTOR: u16 = 0x0080;
 
 #[cfg(windows)]
 pub fn interfaces() -> Result<Vec<CaptureInterface>, String> {
@@ -177,13 +180,14 @@ pub fn interfaces() -> Result<Vec<CaptureInterface>, String> {
 
 #[cfg(windows)]
 pub fn scan(interface: &str, source_mac: &str, wait: Duration) -> Result<Vec<Device>, String> {
-    windows_scan_interface(interface)?;
+    let selected = windows_scan_interface(interface)?;
     let source = mac_bytes(source_mac)
         .ok_or_else(|| "A valid source MAC address is required.".to_string())?;
     let xid = new_xid();
     if win10pcap::available() {
+        validate_source_mac(&selected, source_mac)?;
         let request = identify_request(source, xid);
-        let frames = win10pcap::capture(interface, &request, wait)?;
+        let frames = win10pcap::capture(&selected.name, &request, wait)?;
         return Ok(parse_active_frames(frames, source, xid));
     }
     let mut devices = BTreeMap::new();
@@ -462,14 +466,9 @@ pub fn scan(interface: &str, source_mac: &str, wait: Duration) -> Result<Vec<Dev
     send_request()?;
 
     let deadline = Instant::now() + wait;
-    let mut next_request = Instant::now() + DCP_RETRY_INTERVAL;
     let mut buffer = [0_u8; 65_536];
     let mut devices = BTreeMap::new();
     while Instant::now() < deadline {
-        if Instant::now() >= next_request {
-            send_request()?;
-            next_request += DCP_RETRY_INTERVAL;
-        }
         // SAFETY: buffer is writable for its full reported length and descriptor stays owned.
         let received = unsafe {
             libc::recv(
@@ -511,7 +510,8 @@ fn identify_request(source: [u8; 6], xid: u32) -> Vec<u8> {
     frame.extend(PROFINET_ETHERTYPE);
     frame.extend([0xfe, 0xfe, 0x05, 0x00]); // Identify request
     frame.extend(xid.to_be_bytes());
-    frame.extend([0x00, 0x00, 0x00, 0x04, 0xff, 0xff, 0x00, 0x00]); // Identify all
+    frame.extend(DCP_RESPONSE_DELAY_FACTOR.to_be_bytes());
+    frame.extend([0x00, 0x04, 0xff, 0xff, 0x00, 0x00]); // Identify all
     frame.resize(60, 0);
     frame
 }
@@ -802,14 +802,18 @@ pub fn win10pcap_available() -> bool {
 
 #[cfg(windows)]
 pub fn win10pcap_interface_available(interface: &str) -> bool {
-    windows_scan_interface(interface).is_ok() && win10pcap::interface_available(interface)
+    windows_scan_interface(interface)
+        .is_ok_and(|selected| win10pcap::interface_available(&selected.name))
 }
 
 #[cfg(windows)]
 fn windows_scan_interface(interface: &str) -> Result<CaptureInterface, String> {
     let selected = interfaces()?
         .into_iter()
-        .find(|item| item.name.eq_ignore_ascii_case(interface))
+        .find(|item| {
+            item.name.eq_ignore_ascii_case(interface)
+                || item.friendly_name.eq_ignore_ascii_case(interface)
+        })
         .ok_or_else(|| format!("Windows network interface {interface} was not found."))?;
     if is_obsolete_bridge(&selected) {
         return Err(
@@ -818,6 +822,33 @@ fn windows_scan_interface(interface: &str) -> Result<CaptureInterface, String> {
         );
     }
     Ok(selected)
+}
+
+#[cfg(any(windows, test))]
+fn interface_mac(interface: &CaptureInterface) -> Option<String> {
+    interface
+        .addresses
+        .iter()
+        .find_map(|address| normalize_mac(address))
+}
+
+#[cfg(any(windows, test))]
+fn validate_source_mac(interface: &CaptureInterface, source_mac: &str) -> Result<(), String> {
+    let actual = interface_mac(interface).ok_or_else(|| {
+        format!(
+            "Windows did not report a hardware MAC address for interface {}. Active PROFINET DCP was not started.",
+            interface.friendly_name
+        )
+    })?;
+    let configured = normalize_mac(source_mac)
+        .ok_or_else(|| "A valid source MAC address is required.".to_string())?;
+    if configured != actual {
+        return Err(format!(
+            "Source MAC {configured} does not belong to selected interface {} ({actual}). Active PROFINET DCP was not started because spoofing a source MAC can trigger switch port security and interrupt the network.",
+            interface.friendly_name
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(any(windows, test))]
@@ -884,6 +915,7 @@ mod tests {
         frame[6..12].copy_from_slice(&[0, 17, 34, 51, 68, 85]);
         frame[15] = 0xff;
         frame[17] = 0x01;
+        frame[22..24].fill(0);
         let blocks = [
             2, 1, 0, 9, 0, 0, b'E', b'T', b'2', b'0', b'0', b'S', b'P', 0, 2, 2, 0, 5, 0, 0, b'p',
             b'l', b'c', 0, 1, 2, 0, 14, 0, 0, 192, 0, 2, 1, 255, 255, 255, 0, 192, 0, 2, 254,
@@ -969,9 +1001,27 @@ mod tests {
             &request[..30],
             &[
                 1, 14, 207, 0, 0, 0, 0, 1, 2, 3, 4, 5, 0x88, 0x92, 0xfe, 0xfe, 5, 0, 0x12, 0x34,
-                0x56, 0x78, 0, 0, 0, 4, 0xff, 0xff, 0, 0,
+                0x56, 0x78, 0, 0x80, 0, 4, 0xff, 0xff, 0, 0,
             ]
         );
+    }
+
+    #[test]
+    fn rejects_a_source_mac_that_does_not_belong_to_the_selected_interface() {
+        let interface = CaptureInterface {
+            name: "{GUID}".into(),
+            friendly_name: "Ethernet 2".into(),
+            description: "Physical Ethernet".into(),
+            addresses: vec!["40:8D:5C:B7:93:F4".into(), "192.0.2.10".into()],
+        };
+        assert!(validate_source_mac(&interface, "40-8d-5c-b7-93-f4").is_ok());
+        let error = validate_source_mac(&interface, "00:11:22:33:44:55").unwrap_err();
+        assert!(error.contains("was not started"));
+        assert!(error.contains("port security"));
+
+        let mut missing = interface;
+        missing.addresses = vec!["192.0.2.10".into()];
+        assert!(validate_source_mac(&missing, "00:11:22:33:44:55").is_err());
     }
 
     #[test]
@@ -1066,6 +1116,7 @@ mod tests {
         frame[6..12].copy_from_slice(&[0, 17, 34, 51, 68, 85]);
         frame[15] = 0xff;
         frame[17] = 1;
+        frame[22..24].fill(0);
         frame[24..26].copy_from_slice(&(blocks.len() as u16).to_be_bytes());
         frame.truncate(26);
         frame.extend(blocks);

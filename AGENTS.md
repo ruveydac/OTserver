@@ -134,6 +134,9 @@ transaction only when real file sizes or atomicity requirements justify it.
   or Windows Network Bridge. Explicit elevated setup may install the bundled, unmodified, signed
   Win10Pcap GPLv2 MSI, but driver installation must never be a scan side effect. When Win10Pcap is
   absent, passive discovery uses Microsoft pktmon. Preserve these paths.
+- Active DCP must verify that its source MAC belongs to the selected physical interface. Identify-All
+  uses engineering-tool `ResponseDelayFactor` `0x0080` and is sent once per scan so responders spread
+  their replies; never use the reserved zero factor or rapid retries that can create a response storm.
 - Keep protocol framing and parsing in `scanner/src/protocols/` or the existing dedicated modules.
   Reject truncated, oversized, mismatched, or unsolicited responses.
 - SNMP and OPC UA settings, including credentials, live in the executable-adjacent
