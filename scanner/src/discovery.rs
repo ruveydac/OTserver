@@ -595,10 +595,11 @@ fn collect_fingerprints(
 
 #[cfg(any(target_os = "linux", test))]
 fn checksum(bytes: &[u8]) -> u16 {
-    let mut sum = bytes.chunks_exact(2).fold(0_u32, |sum, pair| {
+    let (pairs, remainder) = bytes.as_chunks::<2>();
+    let mut sum = pairs.iter().fold(0_u32, |sum, pair| {
         sum + u32::from(u16::from_be_bytes([pair[0], pair[1]]))
     });
-    if let Some(byte) = bytes.chunks_exact(2).remainder().first() {
+    if let Some(byte) = remainder.first() {
         sum += u32::from(*byte) << 8;
     }
     while sum > 0xffff {

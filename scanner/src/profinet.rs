@@ -655,7 +655,9 @@ pub fn parse_response(frame: &[u8], expected_xid: u32) -> Option<Device> {
                     "deviceOptions".into(),
                     json!(
                         payload
-                            .chunks_exact(2)
+                            .as_chunks::<2>()
+                            .0
+                            .iter()
                             .map(|pair| json!({ "option": pair[0], "suboption": pair[1] }))
                             .collect::<Vec<_>>()
                     ),
