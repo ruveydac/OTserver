@@ -35,6 +35,19 @@ sudo ./target/release/otserver-scanner scan \
 Linux Ethernet discovery uses a native `AF_PACKET` raw socket and therefore needs root or
 `CAP_NET_RAW`.
 
+### Raspberry Pi
+
+Tagged releases include `otserver-scanner-linux-aarch64.tar.gz` for Raspberry Pi 3, 4, 5, and
+Zero 2 W running 64-bit Raspberry Pi OS Bookworm or newer. This headless build omits the GUI; run a
+CLI subcommand such as `doctor`, `interfaces`, or `scan`. It requires the Raspberry Pi OS `libssl3`
+package and the same root or `CAP_NET_RAW` access as other Linux builds.
+
+To build the headless scanner natively instead:
+
+```bash
+cargo build --locked --release --no-default-features
+```
+
 ## Windows
 
 ```powershell

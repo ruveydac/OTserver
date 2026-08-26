@@ -1,3 +1,4 @@
+#[cfg(feature = "gui")]
 pub mod gui;
 pub mod win10pcap_install;
 
@@ -31,6 +32,7 @@ impl LogOutput for StdoutLogger {
     version,
     about = "Read-only OT discovery for OTserver — https://otserver.org"
 )]
+#[cfg_attr(not(feature = "gui"), command(subcommand_required = true))]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -48,6 +50,7 @@ pub enum Commands {
     Validate {
         file: PathBuf,
     },
+    #[cfg(feature = "gui")]
     Gui,
 }
 
@@ -270,7 +273,10 @@ async fn run() -> Result<(), String> {
             }
             Ok(())
         }
+        #[cfg(feature = "gui")]
         Some(Commands::Gui) | None => gui::run_gui(),
+        #[cfg(not(feature = "gui"))]
+        None => Err("A command is required; run otserver-scanner --help.".into()),
     }
 }
 
@@ -1158,6 +1164,12 @@ mod tests {
         assert!(args.no_opcua);
         assert!(args.no_snmp);
         assert!(args.no_lldp);
+    }
+
+    #[cfg(not(feature = "gui"))]
+    #[test]
+    fn cli_requires_subcommand_without_gui() {
+        assert!(Cli::try_parse_from(["otserver-scanner"]).is_err());
     }
 
     #[test]

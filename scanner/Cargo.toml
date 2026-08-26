@@ -5,13 +5,17 @@ edition = "2024"
 license = "AGPL-3.0-only"
 homepage = "https://otserver.org"
 
+[features]
+default = ["gui"]
+gui = ["dep:eframe", "dep:rfd"]
+
 [dependencies]
 async-snmp = { version = "0.16", default-features = false, features = ["crypto-rustcrypto", "rt-multi-thread"] }
 clap = { version = "4.5", features = ["derive"] }
 native-tls = "0.2"
 oui-data = "0.2.1"
 reqwest = { version = "0.13", default-features = false, features = ["json", "multipart", "native-tls"] }
-rfd = "0.15"
+rfd = { version = "0.15", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -19,7 +23,7 @@ time = { version = "0.3", features = ["formatting", "local-offset"] }
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-native-tls = "0.3"
 uuid = { version = "1", features = ["v4"] }
-eframe = "0.29"
+eframe = { version = "0.29", optional = true }
 async-opcua = { version = "0.19", features = ["client"] }
 
 
