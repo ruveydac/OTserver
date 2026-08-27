@@ -67,6 +67,19 @@ jobs:
       - uses: actions/checkout@v6
       - name: Build scanner for Windows
         run: cargo build --manifest-path scanner/Cargo.toml --locked --release
+      - name: Verify Windows scanner version metadata
+        shell: pwsh
+        run: |
+          $metadata = cargo metadata --manifest-path scanner/Cargo.toml --format-version 1 --no-deps | ConvertFrom-Json
+          $expected = ($metadata.packages | Where-Object { $_.name -eq 'otserver-scanner' }).version
+          $binary = (Resolve-Path 'scanner/target/release/otserver-scanner.exe').Path
+          $versionInfo = (Get-Item $binary).VersionInfo
+          if ($versionInfo.FileVersion -ne $expected -or $versionInfo.ProductVersion -ne $expected) {
+            throw "Expected Windows file/product version $expected, got $($versionInfo.FileVersion)/$($versionInfo.ProductVersion)"
+          }
+          if ((& $binary --version) -notmatch [regex]::Escape($expected)) {
+            throw 'Scanner CLI version does not match Cargo.toml'
+          }
       - name: Run Windows scanner tests
         run: cargo test --manifest-path scanner/Cargo.toml --locked
 
