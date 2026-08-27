@@ -1,0 +1,9 @@
+**
+!scanner/
+!scanner/Cargo.toml
+!scanner/Cargo.lock
+!scanner/build.rs
+!scanner/src/
+!scanner/src/**
+!scanner/lab/
+!scanner/lab/verify.py
