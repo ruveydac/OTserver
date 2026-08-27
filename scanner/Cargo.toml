@@ -4,6 +4,7 @@ version = "0.2.0"
 edition = "2024"
 license = "AGPL-3.0-only"
 homepage = "https://otserver.org"
+description = "Read-only OT discovery for OTserver"
 
 [features]
 default = ["gui"]
@@ -33,6 +34,7 @@ windows-sys = { version = "0.59", features = [
     "Win32_NetworkManagement_IpHelper",
     "Win32_NetworkManagement_Ndis",
     "Win32_Networking_WinSock",
+    "Win32_System_Console",
     "Win32_System_LibraryLoader",
     "Win32_System_SystemInformation",
     "Win32_UI_Shell",
@@ -40,6 +42,9 @@ windows-sys = { version = "0.59", features = [
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
+
+[build-dependencies]
+winresource = { version = "0.1", default-features = false }
 
 [dev-dependencies]
 async-opcua = { version = "0.19", features = ["server"] }

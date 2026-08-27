@@ -16,12 +16,16 @@ use std::time::Duration;
 use uuid::Uuid;
 
 pub trait LogOutput: Send + Sync {
-    fn log(&self, msg: String);
+    fn write(&self, msg: String);
+
+    fn log(&self, msg: String) {
+        self.write(format_log_line(&msg));
+    }
 }
 
 pub struct StdoutLogger;
 impl LogOutput for StdoutLogger {
-    fn log(&self, msg: String) {
+    fn write(&self, msg: String) {
         println!("{msg}");
     }
 }
@@ -54,7 +58,7 @@ pub enum Commands {
     Gui,
 }
 
-#[derive(Args, Clone)]
+#[derive(Args, Clone, Default)]
 pub struct ScanArgs {
     #[arg(long = "target")]
     pub targets: Vec<String>,
@@ -97,6 +101,8 @@ pub struct ScanArgs {
 #[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct ScannerConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub targets: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -143,6 +149,82 @@ pub struct ScannerConfig {
     pub api_key: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum ScannerConfigs {
+    Multiple(Vec<ScannerConfig>),
+    Single(Box<ScannerConfig>),
+}
+
+impl Default for ScannerConfigs {
+    fn default() -> Self {
+        Self::Single(Box::default())
+    }
+}
+
+impl ScannerConfigs {
+    pub fn configs(&self) -> &[ScannerConfig] {
+        match self {
+            Self::Single(config) => std::slice::from_ref(config.as_ref()),
+            Self::Multiple(configs) => configs,
+        }
+    }
+
+    pub fn configs_mut(&mut self) -> &mut [ScannerConfig] {
+        match self {
+            Self::Single(config) => std::slice::from_mut(config.as_mut()),
+            Self::Multiple(configs) => configs,
+        }
+    }
+
+    pub fn is_multiple(&self) -> bool {
+        matches!(self, Self::Multiple(_))
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if self.configs().is_empty() {
+            return Err("Configuration list must contain at least one entry.".into());
+        }
+
+        let mut names = BTreeSet::new();
+        for (index, config) in self.configs().iter().enumerate() {
+            let Some(name) = config.name.as_deref() else {
+                if self.is_multiple() {
+                    return Err(format!("Configuration {} requires a name.", index + 1));
+                }
+                continue;
+            };
+            if name.is_empty() || name.trim() != name || name.chars().any(char::is_control) {
+                return Err(format!(
+                    "Configuration {} name must be non-empty, trimmed, and contain no control characters.",
+                    index + 1
+                ));
+            }
+            if self.is_multiple() && !names.insert(name) {
+                return Err(format!("Configuration name {name:?} must be unique."));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn named_configs(&self) -> Vec<(String, ScannerConfig)> {
+        self.configs()
+            .iter()
+            .enumerate()
+            .map(|(index, config)| {
+                let name = config.name.clone().unwrap_or_else(|| {
+                    if self.is_multiple() {
+                        format!("Configuration {}", index + 1)
+                    } else {
+                        "Configuration".into()
+                    }
+                });
+                (name, config.clone())
+            })
+            .collect()
+    }
+}
+
 pub struct UploadOptions {
     pub endpoint: reqwest::Url,
     pub site: String,
@@ -158,6 +240,19 @@ pub struct ScanOptions {
     pub snmp: snmp::Settings,
     pub opcua: otserver_scanner::protocols::OpcuaSettings,
     pub upload: Option<UploadOptions>,
+}
+
+pub struct ConfiguredScan {
+    pub name: String,
+    pub options: ScanOptions,
+}
+
+#[derive(Default, Debug, PartialEq, Eq)]
+pub struct BatchResult {
+    pub completed: usize,
+    pub partial: usize,
+    pub failures: Vec<String>,
+    pub cancelled: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -260,15 +355,27 @@ async fn run() -> Result<(), String> {
             Ok(())
         }
         Some(Commands::Scan(args)) => {
-            let config = load_config().await?;
-            let options = resolve_scan(args, config, std::env::var("OTSERVER_API_KEY").ok())?;
+            let configs = load_config().await?;
             let logger = StdoutLogger;
             let cancelled = AtomicBool::new(false);
-            let partial = scan(&options, &logger, &cancelled).await?;
-            if let Some(upload) = &options.upload {
-                upload_scan(upload, &options.output, &logger).await?;
+            let (scans, mut failures) = prepare_scans(
+                args,
+                configs.named_configs(),
+                std::env::var("OTSERVER_API_KEY").ok(),
+            )?;
+            for failure in &failures {
+                logger.log(failure.clone());
             }
-            if partial {
+            let result = run_scan_batch(&scans, &logger, &cancelled).await;
+            failures.extend(result.failures);
+            if !failures.is_empty() {
+                return Err(format!(
+                    "{} configuration(s) failed: {}",
+                    failures.len(),
+                    failures.join("; ")
+                ));
+            }
+            if result.partial > 0 {
                 std::process::exit(2);
             }
             Ok(())
@@ -288,36 +395,74 @@ pub fn get_config_path() -> Result<PathBuf, String> {
     }
 }
 
-pub async fn load_config() -> Result<ScannerConfig, String> {
+pub async fn load_config() -> Result<ScannerConfigs, String> {
     let path = get_config_path()?;
     match tokio::fs::read(&path).await {
         Ok(data) => parse_config(&data)
             .map_err(|error| format!("Could not read {}: {error}", path.display())),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(ScannerConfig::default()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(ScannerConfigs::default()),
         Err(error) => Err(format!("Could not read {}: {error}", path.display())),
     }
 }
 
-pub fn load_config_sync() -> Result<ScannerConfig, String> {
+pub fn load_config_sync() -> Result<ScannerConfigs, String> {
     let path = get_config_path()?;
     match std::fs::read(&path) {
         Ok(data) => parse_config(&data)
             .map_err(|error| format!("Could not read {}: {error}", path.display())),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(ScannerConfig::default()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(ScannerConfigs::default()),
         Err(error) => Err(format!("Could not read {}: {error}", path.display())),
     }
 }
 
-pub fn save_config_sync(config: &ScannerConfig) -> Result<(), String> {
+pub fn save_config_sync(configs: &ScannerConfigs) -> Result<(), String> {
+    configs.validate()?;
     let path = get_config_path()?;
-    let data = serde_json::to_vec_pretty(config)
+    let data = serde_json::to_vec_pretty(configs)
         .map_err(|error| format!("Could not serialize config: {error}"))?;
     std::fs::write(&path, data)
         .map_err(|error| format!("Could not write {}: {error}", path.display()))
 }
 
-pub fn parse_config(data: &[u8]) -> Result<ScannerConfig, String> {
-    serde_json::from_slice(data).map_err(|error| error.to_string())
+pub fn parse_config(data: &[u8]) -> Result<ScannerConfigs, String> {
+    let configs: ScannerConfigs =
+        serde_json::from_slice(data).map_err(|error| error.to_string())?;
+    configs.validate()?;
+    Ok(configs)
+}
+
+pub fn prepare_scans(
+    args: ScanArgs,
+    configs: Vec<(String, ScannerConfig)>,
+    environment_api_key: Option<String>,
+) -> Result<(Vec<ConfiguredScan>, Vec<String>), String> {
+    let mut scans = Vec::new();
+    let mut failures = Vec::new();
+    let mut outputs = BTreeMap::<PathBuf, String>::new();
+
+    for (name, config) in configs {
+        match resolve_scan(args.clone(), config, environment_api_key.clone()) {
+            Ok(options) => {
+                if let Some(existing) = outputs.insert(options.output.clone(), name.clone()) {
+                    return Err(format!(
+                        "Configurations {existing:?} and {name:?} resolve to the same output path {}.",
+                        options.output.display()
+                    ));
+                }
+                scans.push(ConfiguredScan { name, options });
+            }
+            Err(error) => failures.push(format!("Configuration {name:?}: {error}")),
+        }
+    }
+
+    if scans.is_empty() {
+        return Err(if failures.is_empty() {
+            "No configurations are available to scan.".into()
+        } else {
+            failures.join("; ")
+        });
+    }
+    Ok((scans, failures))
 }
 
 pub fn resolve_scan(
@@ -403,10 +548,13 @@ fn timestamp() -> String {
     format!("[{:02}:{:02}]", now.hour(), now.minute())
 }
 
+pub fn format_log_line(message: &str) -> String {
+    format!("{} {message}", timestamp())
+}
+
 pub fn log_probe(logger: &dyn LogOutput, ip: &str, protocol: &str, success: bool) {
     logger.log(format!(
-        "{} {ip} Protocol {protocol} {}",
-        timestamp(),
+        "{ip} Protocol {protocol} {}",
         if success { "Success" } else { "Fail" }
     ));
 }
@@ -663,6 +811,69 @@ pub async fn scan(
     Ok(scan.scan.partial)
 }
 
+pub async fn run_scan_batch(
+    scans: &[ConfiguredScan],
+    logger: &dyn LogOutput,
+    cancelled: &AtomicBool,
+) -> BatchResult {
+    let mut result = BatchResult::default();
+    for (index, configured) in scans.iter().enumerate() {
+        if cancelled.load(Ordering::Relaxed) {
+            result.cancelled = true;
+            break;
+        }
+
+        logger.log(format!(
+            "Starting configuration {:?} ({}/{}).",
+            configured.name,
+            index + 1,
+            scans.len()
+        ));
+        match scan(&configured.options, logger, cancelled).await {
+            Ok(_) if cancelled.load(Ordering::Relaxed) => {
+                logger.log(format!("Configuration {:?} stopped.", configured.name));
+                result.cancelled = true;
+                break;
+            }
+            Ok(partial) => {
+                if let Some(upload) = &configured.options.upload
+                    && let Err(error) =
+                        upload_scan(upload, &configured.options.output, logger).await
+                {
+                    let failure =
+                        format!("Configuration {:?} upload failed: {error}", configured.name);
+                    logger.log(failure.clone());
+                    result.failures.push(failure);
+                    continue;
+                }
+                if partial {
+                    result.partial += 1;
+                    logger.log(format!(
+                        "Configuration {:?} completed with partial errors.",
+                        configured.name
+                    ));
+                } else {
+                    result.completed += 1;
+                    logger.log(format!(
+                        "Configuration {:?} completed successfully.",
+                        configured.name
+                    ));
+                }
+            }
+            Err(error) => {
+                let failure = format!("Configuration {:?} failed: {error}", configured.name);
+                logger.log(failure.clone());
+                result.failures.push(failure);
+                if cancelled.load(Ordering::Relaxed) {
+                    result.cancelled = true;
+                    break;
+                }
+            }
+        }
+    }
+    result
+}
+
 pub async fn upload_scan(
     options: &UploadOptions,
     path: &Path,
@@ -832,8 +1043,9 @@ async fn probe_snmp(
         let settings = settings.clone();
         let local_mac = identities.get(&ip).cloned();
         tasks.spawn(async move {
-            let result = snmp::query(&ip, local_mac.as_deref(), &settings, selection).await;
-            (ip, result)
+            let (attempts, result) =
+                snmp::query_with_attempts(&ip, local_mac.as_deref(), &settings, selection).await;
+            (ip, attempts, result)
         });
     }
     while !tasks.is_empty() {
@@ -878,14 +1090,28 @@ fn apply_snmp_probe(
     logger: &dyn LogOutput,
     selection: snmp::QuerySelection,
     result: Option<
-        Result<(String, Result<snmp::ResultData, snmp::QueryError>), tokio::task::JoinError>,
+        Result<
+            (
+                String,
+                Vec<snmp::QueryAttempt>,
+                Result<snmp::ResultData, snmp::QueryError>,
+            ),
+            tokio::task::JoinError,
+        >,
     >,
 ) -> bool {
     let Some(result) = result else { return false };
-    let Ok((ip, result)) = result else {
+    let Ok((ip, attempts, result)) = result else {
         warnings.push("An SNMP probe task failed.".into());
         return true;
     };
+    for attempt in attempts {
+        logger.log(format!(
+            "{ip} SNMP attempt {} {}",
+            attempt.description,
+            if attempt.success { "Success" } else { "Fail" }
+        ));
+    }
     let mut result = match result {
         Ok(result) => result,
         Err(error) => {
@@ -1037,6 +1263,7 @@ mod tests {
             }"#,
         )
         .unwrap();
+        let config = config.configs()[0].clone();
         let mut cli = args();
         cli.interface = Some("cli-interface".into());
         let resolved = resolve_scan(cli, config, Some("environment-key".into())).unwrap();
@@ -1068,6 +1295,7 @@ mod tests {
     #[test]
     fn serializes_and_deserializes_config_roundtrip() {
         let config = ScannerConfig {
+            name: None,
             targets: Some(vec!["192.168.1.0/24".into()]),
             interface: Some("eth0".into()),
             source_mac: Some("00:11:22:33:44:55".into()),
@@ -1095,9 +1323,111 @@ mod tests {
             site: Some("site-1".into()),
             api_key: Some("key-123".into()),
         };
-        let bytes = serde_json::to_vec_pretty(&config).unwrap();
+        let configs = ScannerConfigs::Single(Box::new(config));
+        let bytes = serde_json::to_vec_pretty(&configs).unwrap();
         let parsed = parse_config(&bytes).unwrap();
-        assert_eq!(config, parsed);
+        assert_eq!(configs, parsed);
+    }
+
+    #[test]
+    fn parses_named_configuration_list_in_order() {
+        let configs = parse_config(
+            br#"[
+                {"name":"Line A","targets":["192.0.2.1"]},
+                {"name":"Line B","targets":["192.0.2.2"]}
+            ]"#,
+        )
+        .unwrap();
+
+        assert!(configs.is_multiple());
+        assert_eq!(
+            configs
+                .configs()
+                .iter()
+                .filter_map(|config| config.name.as_deref())
+                .collect::<Vec<_>>(),
+            ["Line A", "Line B"]
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_configuration_lists() {
+        assert!(parse_config(br#"[]"#).is_err());
+        assert!(parse_config(br#"[{"targets":["192.0.2.1"]}]"#).is_err());
+        assert!(parse_config(br#"[{"name":" "}]"#).is_err());
+        assert!(parse_config(br#"[{"name":"Line A"},{"name":"Line A"}]"#).is_err());
+    }
+
+    fn complete_config(name: &str, target: &str, output: &str) -> ScannerConfig {
+        ScannerConfig {
+            name: Some(name.into()),
+            targets: Some(vec![target.into()]),
+            interface: Some("test-interface".into()),
+            source_mac: Some("00:11:22:33:44:55".into()),
+            output: Some(output.into()),
+            ..ScannerConfig::default()
+        }
+    }
+
+    #[test]
+    fn prepares_valid_configs_and_reports_invalid_entries() {
+        let configs = vec![
+            (
+                "Invalid".into(),
+                ScannerConfig {
+                    name: Some("Invalid".into()),
+                    ..ScannerConfig::default()
+                },
+            ),
+            (
+                "Valid".into(),
+                complete_config("Valid", "192.0.2.1", "valid.json"),
+            ),
+        ];
+        let (scans, failures) = prepare_scans(args(), configs, None).unwrap();
+
+        assert_eq!(scans.len(), 1);
+        assert_eq!(scans[0].name, "Valid");
+        assert_eq!(failures.len(), 1);
+    }
+
+    #[test]
+    fn rejects_duplicate_batch_outputs() {
+        let configs = vec![
+            (
+                "Line A".into(),
+                complete_config("Line A", "192.0.2.1", "a.json"),
+            ),
+            (
+                "Line B".into(),
+                complete_config("Line B", "192.0.2.2", "b.json"),
+            ),
+        ];
+        let mut cli = args();
+        cli.output = Some("same.json".into());
+
+        assert!(prepare_scans(cli, configs, None).is_err());
+    }
+
+    #[tokio::test]
+    async fn batch_continues_after_scan_failure() {
+        let configs = vec![
+            (
+                "Line A".into(),
+                complete_config("Line A", "invalid-a", "a.json"),
+            ),
+            (
+                "Line B".into(),
+                complete_config("Line B", "invalid-b", "b.json"),
+            ),
+        ];
+        let (scans, failures) = prepare_scans(args(), configs, None).unwrap();
+        assert!(failures.is_empty());
+
+        let result = run_scan_batch(&scans, &StdoutLogger, &AtomicBool::new(false)).await;
+
+        assert_eq!(result.failures.len(), 2);
+        assert!(!result.cancelled);
     }
 
     #[test]
@@ -1221,7 +1551,7 @@ mod tests {
                 inventory: true,
                 lldp: false,
             },
-            Some(Ok(("192.0.2.10".into(), Ok(result)))),
+            Some(Ok(("192.0.2.10".into(), vec![], Ok(result)))),
         ));
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0].mac_address, "00:11:22:33:44:55");
@@ -1262,7 +1592,7 @@ mod tests {
                 inventory: true,
                 lldp: false,
             },
-            Some(Ok(("127.0.0.1".into(), Err(error)))),
+            Some(Ok(("127.0.0.1".into(), vec![], Err(error)))),
         ));
     }
 
@@ -1273,7 +1603,7 @@ mod tests {
             lines: std::sync::Mutex<Vec<String>>,
         }
         impl LogOutput for CapturingLogger {
-            fn log(&self, msg: String) {
+            fn write(&self, msg: String) {
                 self.lines.lock().unwrap().push(msg);
             }
         }

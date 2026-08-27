@@ -13,6 +13,9 @@ dynamically loads the installed `Packet.dll` from the Windows system directory, 
 physical interface by GUID, transmits DCP Identify, and captures only PROFINET Ethernet frames. The
 corresponding Win10Pcap project information is at <https://www.win10pcap.org/>.
 
+The Windows executable exposes its Cargo package version in Explorer file properties and in the GUI.
+Starting the GUI detaches its console window; CLI commands keep normal terminal input and output.
+
 Active DCP verifies that the configured source MAC belongs to the selected physical interface before
 opening the selected Win10Pcap adapter. Identify-All is sent once with an engineering-tool response
 delay factor so device replies are spread over the capture window instead of creating a synchronized
@@ -73,10 +76,16 @@ All discovery protocols are enabled by default. Disable individual protocols on 
 `--no-snmp` and `--no-lldp`. SNMP inventory and LLDP topology queries share the same SNMP settings
 but can be enabled independently. The GUI exposes the same choices as highlighted on/off toggle
 buttons. The scan log records one entry per probed IP and protocol, for example
-`[12:43] 192.168.1.10 Protocol snmp Success`.
+`[12:43] 192.168.1.10 Protocol snmp Success`. Every log line is timestamped. SNMP attempts also show
+the version and sanitized security choices, such as
+`[12:43] 192.168.1.10 SNMP attempt version=3 security=authPriv authentication=SHA-256 encryption=AES-128 Success`.
 
-The GUI output field accepts a filename directly or opens the native save-file picker. Stopping a
-running scan writes a valid partial export containing all results collected before cancellation.
+The GUI keeps a selectable, auto-scrolling log panel to the right of its configuration, with an
+always-visible clear action, scan status, and configuration-save result. The output field accepts a
+filename directly or opens the native save-file picker. Stopping a running scan writes a valid
+partial export containing all results collected before cancellation. When `otscanner.json` contains
+multiple configurations, the GUI can run the selected configuration or run all configurations
+sequentially. A stopped batch skips its remaining configurations.
 
 SNMP settings and credentials live in the `snmp` block of `otscanner.json` and are fully editable
 in the GUI. Without any settings, SNMPv2c with the community `public` is used, so SNMP never blocks
@@ -84,7 +93,9 @@ a scan. Set `version` to `1` for a legacy SNMPv1 agent. For SNMPv3 set `version`
 `username`, optional `contextName`, and the
 `authProtocol`/`authPassword` and `privacyProtocol`/`privacyPassword` pairs. Credentials are stored
 in plaintext in `otscanner.json`; keep the file out of source control and restrict its permissions.
-Credentials are never written to logs or scan exports.
+Credentials are never written to logs or scan exports. Set `version` to `auto` to opt into fallback:
+the scanner tries SNMPv3 first when a username is configured, then SNMPv2c, then SNMPv1, stopping at
+the first successful version. Explicit `1`, `2c`, and `3` selections never fall back.
 
 SNMP uses bounded, read-only queries for system identity, IF-MIB/IP-MIB interfaces, ENTITY-MIB
 components, BRIDGE/Q-BRIDGE ports and VLANs, LLDP topology, and the generic Siemens
@@ -106,8 +117,10 @@ Validate an export before uploading it:
 .\otserver-scanner.exe validate .\scan.otserver.json
 ```
 
-Exit code `0` means a complete scan, `2` means the valid output contains partial failures, and `1`
-means no valid output was produced. Windows ARP discovery needs no additional driver. Windows
+Exit code `0` means every scan completed, `2` means at least one valid output contains partial
+failures, and `1` means a configuration, scan, or upload failed. A multi-configuration run continues
+after failures and reports exit code `1` after attempting the remaining configurations. Windows ARP
+discovery needs no additional driver. Windows
 active PROFINET discovery requires Win10Pcap (GPLv2) and Administrator rights. Install the bundled
 package explicitly from the GUI or by running `otserver-scanner install-win10pcap` in an elevated
 terminal. The scanner opens the selected physical adapter directly; no virtual adapter or bridge is
@@ -117,7 +130,7 @@ Pktmon requires Administrator rights and cannot transmit DCP Identify frames.
 ## Configuration and direct import
 
 Place an optional `otscanner.json` beside the scanner executable to provide scan defaults and an
-OTserver destination:
+OTserver destination. The existing single-object form remains supported:
 
 ```json
 {
@@ -148,6 +161,35 @@ OTserver destination:
 }
 ```
 
+The root can instead be an array of configurations. Every array entry requires a unique, non-empty
+`name`, and resolved output paths must be unique so one scan cannot overwrite another:
+
+```json
+[
+  {
+    "name": "Line A",
+    "targets": ["192.168.10.0/24"],
+    "interface": "eth0",
+    "sourceMac": "00:11:22:33:44:55",
+    "output": "line-a.otserver.json"
+  },
+  {
+    "name": "Line B",
+    "targets": ["192.168.20.0/24"],
+    "interface": "eth1",
+    "sourceMac": "00:11:22:33:44:66",
+    "output": "line-b.otserver.json"
+  }
+]
+```
+
+The GUI exposes **Add Configuration**, a configuration selector, **Run Selected**, and **Run All**.
+Adding a configuration clones the selected settings, assigns a unique name and output filename, and
+converts a single-object file to the array form when necessary. The CLI `scan` command runs array
+entries sequentially in file order. Both continue with later entries after a configuration, scan, or
+upload failure. In the GUI, **Stop Scan** stops the current scan, writes its partial output when
+possible, and skips all pending entries.
+
 An SNMPv3 block looks like this instead:
 
 ```json
@@ -164,11 +206,12 @@ An SNMPv3 block looks like this instead:
 }
 ```
 
-Command-line values override the file, and `OTSERVER_API_KEY` overrides its `apiKey`. Relative paths
-are resolved from the current working directory. The config contains credentials in plaintext; keep
-it out of source control and restrict its permissions (for example, `chmod 600 otscanner.json`).
-The safer automation setup omits `apiKey` from the file and supplies `OTSERVER_API_KEY` through the
-process environment.
+Command-line values override every selected file entry, and `OTSERVER_API_KEY` overrides every
+entry's `apiKey`. A shared `--output` override therefore cannot be used for a multi-entry run because
+the resolved paths would collide. Relative paths are resolved from the current working directory.
+The config contains credentials in plaintext; keep it out of source control and restrict its
+permissions (for example, `chmod 600 otscanner.json`). The safer automation setup omits `apiKey`
+from the file and supplies `OTSERVER_API_KEY` through the process environment.
 
 When `serverUrl`, `site`, and an API key are present, `scan` writes and validates the local JSON and
 then posts it to OTserver's REST API. The local file remains available if the upload fails. The site
