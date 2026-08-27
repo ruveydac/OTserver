@@ -1,4 +1,5 @@
 .git/
+.githooks/
 .next/
 node_modules/
 .env*
@@ -6,3 +7,13 @@ import-files/
 public/media/
 test-results/
 playwright-report/
+scanner/
+contracts/
+tests/
+scripts/
+coverage/
+tmp/
+*.tsbuildinfo
+otserver-scan.json
+docker-compose.yml
+Dockerfile
