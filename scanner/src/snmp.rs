@@ -82,6 +82,12 @@ pub struct QuerySelection {
     pub lldp: bool,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct QueryAttempt {
+    pub description: String,
+    pub success: bool,
+}
+
 pub fn resolved_version(settings: &Settings) -> &str {
     settings
         .version
@@ -104,7 +110,7 @@ pub fn auth(settings: &Settings) -> Result<Auth, String> {
             Auth::v2c(community)
         });
     }
-    if version != "3" {
+    if !version.eq_ignore_ascii_case("3") {
         return Err(format!("Unsupported SNMP version {version}."));
     }
     let username = settings
@@ -115,7 +121,7 @@ pub fn auth(settings: &Settings) -> Result<Auth, String> {
     let mut builder = Auth::usm(username);
     if let Some(protocol) = &settings.auth_protocol {
         builder = builder.auth(
-            auth_protocol(protocol)?,
+            auth_protocol(protocol)?.0,
             password(
                 settings.auth_password.as_deref(),
                 &format!("SNMPv3 authentication protocol {protocol}"),
@@ -124,7 +130,7 @@ pub fn auth(settings: &Settings) -> Result<Auth, String> {
     }
     if let Some(protocol) = &settings.privacy_protocol {
         builder = builder.privacy(
-            privacy_protocol(protocol)?,
+            privacy_protocol(protocol)?.0,
             password(
                 settings.privacy_password.as_deref(),
                 &format!("SNMPv3 privacy protocol {protocol}"),
@@ -140,30 +146,90 @@ pub fn auth(settings: &Settings) -> Result<Auth, String> {
 fn password(value: Option<&str>, context: &str) -> Result<String, String> {
     value
         .map(str::to_owned)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| format!("{context} needs a password."))
+        .filter(|value| value.len() >= 8)
+        .ok_or_else(|| format!("{context} needs a password of at least 8 bytes."))
 }
 
-fn auth_protocol(value: &str) -> Result<AuthProtocol, String> {
+fn auth_protocol(value: &str) -> Result<(AuthProtocol, &'static str), String> {
     match value.to_ascii_lowercase().as_str() {
-        "md5" => Ok(AuthProtocol::Md5),
-        "sha1" => Ok(AuthProtocol::Sha1),
-        "sha224" => Ok(AuthProtocol::Sha224),
-        "sha256" => Ok(AuthProtocol::Sha256),
-        "sha384" => Ok(AuthProtocol::Sha384),
-        "sha512" => Ok(AuthProtocol::Sha512),
+        "md5" => Ok((AuthProtocol::Md5, "MD5")),
+        "sha1" => Ok((AuthProtocol::Sha1, "SHA-1")),
+        "sha224" => Ok((AuthProtocol::Sha224, "SHA-224")),
+        "sha256" => Ok((AuthProtocol::Sha256, "SHA-256")),
+        "sha384" => Ok((AuthProtocol::Sha384, "SHA-384")),
+        "sha512" => Ok((AuthProtocol::Sha512, "SHA-512")),
         _ => Err(format!("Unsupported SNMP authentication protocol: {value}")),
     }
 }
 
-fn privacy_protocol(value: &str) -> Result<PrivProtocol, String> {
+fn privacy_protocol(value: &str) -> Result<(PrivProtocol, &'static str), String> {
     match value.to_ascii_lowercase().as_str() {
-        "des" => Ok(PrivProtocol::Des),
-        "aes128" => Ok(PrivProtocol::Aes128),
-        "aes192" => Ok(PrivProtocol::Aes192),
-        "aes256" => Ok(PrivProtocol::Aes256),
+        "des" => Ok((PrivProtocol::Des, "DES")),
+        "aes128" => Ok((PrivProtocol::Aes128, "AES-128")),
+        "aes192" => Ok((PrivProtocol::Aes192, "AES-192")),
+        "aes256" => Ok((PrivProtocol::Aes256, "AES-256")),
         _ => Err(format!("Unsupported SNMP privacy protocol: {value}")),
     }
+}
+
+fn query_settings(settings: &Settings) -> Vec<Settings> {
+    if !resolved_version(settings).eq_ignore_ascii_case("auto") {
+        return vec![settings.clone()];
+    }
+
+    let mut attempts = Vec::with_capacity(3);
+    let mut v3 = settings.clone();
+    v3.version = Some("3".into());
+    if attempt_description(&v3).is_ok() && auth(&v3).is_ok() {
+        attempts.push(v3);
+    }
+    for version in ["2c", "1"] {
+        let mut community = settings.clone();
+        community.version = Some(version.into());
+        attempts.push(community);
+    }
+    attempts
+}
+
+pub fn attempt_description(settings: &Settings) -> Result<String, String> {
+    let version = resolved_version(settings);
+    if version.eq_ignore_ascii_case("1") || version.eq_ignore_ascii_case("2c") {
+        return Ok(format!(
+            "version={} security=community authentication=none encryption=none",
+            if version.eq_ignore_ascii_case("1") {
+                "1"
+            } else {
+                "2c"
+            }
+        ));
+    }
+    if !version.eq_ignore_ascii_case("3") {
+        return Err(format!("Unsupported SNMP version {version}."));
+    }
+
+    let authentication = settings
+        .auth_protocol
+        .as_deref()
+        .map(auth_protocol)
+        .transpose()?
+        .map(|(_, name)| name);
+    let encryption = settings
+        .privacy_protocol
+        .as_deref()
+        .map(privacy_protocol)
+        .transpose()?
+        .map(|(_, name)| name);
+    let security = match (authentication, encryption) {
+        (None, None) => "noAuthNoPriv",
+        (Some(_), None) => "authNoPriv",
+        (Some(_), Some(_)) => "authPriv",
+        (None, Some(_)) => return Err("SNMPv3 privacy requires authentication.".into()),
+    };
+    Ok(format!(
+        "version=3 security={security} authentication={} encryption={}",
+        authentication.unwrap_or("none"),
+        encryption.unwrap_or("none")
+    ))
 }
 
 pub async fn query(
@@ -172,37 +238,94 @@ pub async fn query(
     settings: &Settings,
     selection: QuerySelection,
 ) -> Result<ResultData, QueryError> {
-    let authentication = auth(settings).map_err(|message| QueryError {
-        message,
-        no_response: false,
-    })?;
+    query_with_attempts(target, local_mac, settings, selection)
+        .await
+        .1
+}
+
+pub async fn query_with_attempts(
+    target: &str,
+    local_mac: Option<&str>,
+    settings: &Settings,
+    selection: QuerySelection,
+) -> (Vec<QueryAttempt>, Result<ResultData, QueryError>) {
+    let settings = query_settings(settings);
+    let settings_len = settings.len();
+    let mut attempts = Vec::with_capacity(settings.len());
+    let deadline = tokio::time::Instant::now() + QUERY_TIMEOUT;
     let responded = AtomicBool::new(false);
-    match tokio::time::timeout(
-        QUERY_TIMEOUT,
-        query_inner(
-            target,
-            local_mac,
-            settings,
-            selection,
-            authentication,
-            &responded,
-        ),
-    )
+    let mut network_attempted = false;
+    let result = match tokio::time::timeout(QUERY_TIMEOUT, async {
+        let mut last_error = None;
+        for (index, settings) in settings.into_iter().enumerate() {
+            let attempts_left = u32::try_from(settings_len - index).unwrap_or(1);
+            let attempt_timeout =
+                deadline.saturating_duration_since(tokio::time::Instant::now()) / attempts_left;
+            let description = match attempt_description(&settings) {
+                Ok(description) => description,
+                Err(error) => {
+                    last_error = Some(error);
+                    continue;
+                }
+            };
+            let authentication = match auth(&settings) {
+                Ok(authentication) => authentication,
+                Err(error) => {
+                    last_error = Some(error);
+                    continue;
+                }
+            };
+            network_attempted = true;
+            attempts.push(QueryAttempt {
+                description,
+                success: false,
+            });
+            match tokio::time::timeout(
+                attempt_timeout,
+                query_inner(
+                    target,
+                    local_mac,
+                    &settings,
+                    selection,
+                    authentication,
+                    &responded,
+                ),
+            )
+            .await
+            {
+                Ok(Ok(result)) => {
+                    if let Some(attempt) = attempts.last_mut() {
+                        attempt.success = true;
+                    }
+                    return Ok(result);
+                }
+                Ok(Err(error)) => last_error = Some(error),
+                Err(_) => {
+                    last_error = Some(format!(
+                        "SNMP {target}: query exceeded its {} second version budget.",
+                        attempt_timeout.as_secs()
+                    ));
+                }
+            }
+        }
+        Err(last_error.unwrap_or_else(|| "No usable SNMP version was configured.".into()))
+    })
     .await
     {
         Ok(Ok(result)) => Ok(result),
         Ok(Err(message)) => Err(QueryError {
             message,
-            no_response: !responded.load(Ordering::Relaxed),
+            no_response: network_attempted && !responded.load(Ordering::Relaxed),
         }),
         Err(_) => Err(QueryError {
             message: format!(
                 "SNMP {target}: query exceeded {} seconds.",
                 QUERY_TIMEOUT.as_secs()
             ),
-            no_response: !responded.load(Ordering::Relaxed),
+            no_response: network_attempted && !responded.load(Ordering::Relaxed),
         }),
-    }
+    };
+    (attempts, result)
 }
 
 async fn query_inner(
@@ -1315,8 +1438,12 @@ mod tests {
         assert!(auth(&v3).is_err());
         v3.auth_protocol = Some("sha256".into());
         assert!(auth(&v3).is_err());
+        v3.auth_password = Some("short".into());
+        assert!(auth(&v3).is_err());
         v3.auth_password = Some("auth-secret".into());
         v3.privacy_protocol = Some("aes128".into());
+        assert!(auth(&v3).is_err());
+        v3.privacy_password = Some("short".into());
         assert!(auth(&v3).is_err());
         v3.privacy_password = Some("privacy-secret".into());
         v3.context_name = Some("lab-context".into());
@@ -1344,6 +1471,70 @@ mod tests {
         assert_eq!(parsed.username.as_deref(), Some("inventory"));
         assert_eq!(serde_json::to_value(&parsed).unwrap(), value);
         assert!(serde_json::from_str::<Settings>(r#"{"unknown":true}"#).is_err());
+    }
+
+    #[test]
+    fn auto_orders_only_usable_protocol_versions() {
+        let mut auto = settings("auto");
+        assert_eq!(
+            query_settings(&auto)
+                .iter()
+                .map(resolved_version)
+                .collect::<Vec<_>>(),
+            ["2c", "1"]
+        );
+        auto.username = Some("inventory".into());
+        assert_eq!(
+            query_settings(&auto)
+                .iter()
+                .map(resolved_version)
+                .collect::<Vec<_>>(),
+            ["3", "2c", "1"]
+        );
+        auto.auth_protocol = Some("sha256".into());
+        assert_eq!(
+            query_settings(&auto)
+                .iter()
+                .map(resolved_version)
+                .collect::<Vec<_>>(),
+            ["2c", "1"]
+        );
+        auto.auth_protocol = None;
+        auto.privacy_protocol = Some("aes128".into());
+        auto.privacy_password = Some("privacy-secret".into());
+        assert_eq!(
+            query_settings(&auto)
+                .iter()
+                .map(resolved_version)
+                .collect::<Vec<_>>(),
+            ["2c", "1"]
+        );
+        assert_eq!(
+            query_settings(&Settings::default())
+                .iter()
+                .map(resolved_version)
+                .collect::<Vec<_>>(),
+            ["2c"]
+        );
+    }
+
+    #[test]
+    fn describes_snmp_security_without_credentials() {
+        let settings = Settings {
+            version: Some("3".into()),
+            community: Some("private-community".into()),
+            username: Some("inventory-user".into()),
+            context_name: Some("private-context".into()),
+            auth_protocol: Some("sha256".into()),
+            auth_password: Some("auth-secret".into()),
+            privacy_protocol: Some("aes128".into()),
+            privacy_password: Some("privacy-secret".into()),
+        };
+
+        assert_eq!(
+            attempt_description(&settings).unwrap(),
+            "version=3 security=authPriv authentication=SHA-256 encryption=AES-128"
+        );
     }
 
     #[test]
@@ -1609,6 +1800,33 @@ mod tests {
         .unwrap();
         assert_eq!(v1.identity_mac.as_deref(), Some("06:07:08:09:0A:0B"));
 
+        let auto = Settings {
+            version: Some("auto".into()),
+            community: Some("public".into()),
+            username: Some("inventory".into()),
+            auth_protocol: Some("sha256".into()),
+            ..Settings::default()
+        };
+        let (attempts, auto_result) = query_with_attempts(
+            "127.0.0.1",
+            None,
+            &auto,
+            QuerySelection {
+                inventory: true,
+                lldp: false,
+            },
+        )
+        .await;
+        assert!(auto_result.is_ok());
+        assert_eq!(
+            attempts,
+            [QueryAttempt {
+                description: "version=2c security=community authentication=none encryption=none"
+                    .into(),
+                success: true,
+            }]
+        );
+
         let lldp_only = query(
             "127.0.0.1",
             Some("00:11:22:33:44:55"),
@@ -1653,10 +1871,12 @@ mod tests {
     #[tokio::test]
     async fn bounds_the_whole_query_time() {
         let _sink = UdpSocket::bind(("127.0.0.2", SNMP_PORT)).await.unwrap();
-        let result = query(
+        let mut auto = settings("auto");
+        auto.username = Some("inventory".into());
+        let (attempts, result) = query_with_attempts(
             "127.0.0.2",
             None,
-            &settings("2c"),
+            &auto,
             QuerySelection {
                 inventory: false,
                 lldp: true,
@@ -1669,6 +1889,7 @@ mod tests {
 
         assert!(error.to_string().contains("query exceeded"));
         assert!(error.is_no_response());
+        assert_eq!(attempts.len(), 3);
     }
 
     #[test]

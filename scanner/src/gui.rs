@@ -1,8 +1,8 @@
 #[cfg(windows)]
 use crate::win10pcap_install;
 use crate::{
-    LogOutput, ScanArgs, ScanOptions, ScannerConfig, load_config_sync, nonempty_opt, resolve_scan,
-    save_config_sync, scan, upload_scan,
+    BatchResult, LogOutput, ScanArgs, ScannerConfig, ScannerConfigs, format_log_line,
+    load_config_sync, nonempty_opt, prepare_scans, run_scan_batch, save_config_sync,
 };
 use eframe::egui;
 use otserver_scanner::contract::normalize_mac;
@@ -15,12 +15,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 
 pub struct GuiLogger {
-    sender: Sender<String>,
+    sender: Sender<ScanMessage>,
+}
+
+enum ScanMessage {
+    Log(String),
+    Finished(BatchResult),
 }
 
 impl LogOutput for GuiLogger {
-    fn log(&self, msg: String) {
-        let _ = self.sender.send(msg);
+    fn write(&self, msg: String) {
+        let _ = self.sender.send(ScanMessage::Log(msg));
     }
 }
 
@@ -43,6 +48,60 @@ fn interface_mac(interface: &CaptureInterface) -> Option<String> {
         .addresses
         .iter()
         .find_map(|address| normalize_mac(address))
+}
+
+fn with_added_configuration(
+    configs: &ScannerConfigs,
+    selected: usize,
+    edited: ScannerConfig,
+) -> ScannerConfigs {
+    let mut values = configs.configs().to_vec();
+    values[selected] = edited;
+    if !configs.is_multiple() && values[0].name.is_none() {
+        values[0].name = Some("Configuration 1".into());
+    }
+
+    let mut number = values.len() + 1;
+    let name = loop {
+        let candidate = format!("Configuration {number}");
+        if values
+            .iter()
+            .all(|config| config.name.as_deref() != Some(&candidate))
+        {
+            break candidate;
+        }
+        number += 1;
+    };
+
+    let mut added = values[selected].clone();
+    added.name = Some(name);
+    let base = added
+        .output
+        .as_deref()
+        .unwrap_or_else(|| Path::new("otserver-scan.json"));
+    for suffix in 2.. {
+        let stem = base
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("otserver-scan");
+        let filename = match base.extension().and_then(|value| value.to_str()) {
+            Some(extension) => format!("{stem}-{suffix}.{extension}"),
+            None => format!("{stem}-{suffix}"),
+        };
+        let candidate = base.with_file_name(filename);
+        if values.iter().all(|config| {
+            config
+                .output
+                .as_deref()
+                .unwrap_or_else(|| Path::new("otserver-scan.json"))
+                != candidate
+        }) {
+            added.output = Some(candidate);
+            break;
+        }
+    }
+    values.push(added);
+    ScannerConfigs::Multiple(values)
 }
 
 fn protocol_combo(
@@ -68,6 +127,9 @@ fn protocol_combo(
 }
 
 pub struct GuiApp {
+    configs: ScannerConfigs,
+    selected_config: usize,
+    config_name: String,
     targets: String,
     interface: String,
     source_mac: String,
@@ -100,9 +162,10 @@ pub struct GuiApp {
     interfaces: Vec<CaptureInterface>,
     log_text: String,
     status: String,
+    config_save_result: Option<Result<String, String>>,
     is_scanning: bool,
     cancellation: Option<Arc<AtomicBool>>,
-    log_rx: Option<Receiver<String>>,
+    log_rx: Option<Receiver<ScanMessage>>,
     install_rx: Option<Receiver<Result<String, String>>>,
     is_installing: bool,
     #[cfg(windows)]
@@ -112,100 +175,46 @@ pub struct GuiApp {
 }
 
 impl GuiApp {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        let config = load_config_sync().unwrap_or_default();
+    pub fn new(configs: ScannerConfigs) -> Self {
         let interfaces = profinet::interfaces().unwrap_or_default();
-
-        let targets = config
-            .targets
-            .as_ref()
-            .map(|t| t.join(", "))
-            .unwrap_or_else(|| "192.168.1.0/24".to_string());
-
-        let interface = config
-            .interface
-            .clone()
-            .or_else(|| interfaces.first().map(|i| i.name.clone()))
-            .unwrap_or_default();
-
-        let source_mac = config
-            .source_mac
-            .clone()
-            .or_else(|| {
-                interfaces
-                    .iter()
-                    .find(|i| i.name == interface)
-                    .and_then(interface_mac)
-            })
-            .unwrap_or_default();
-
-        let output = config
-            .output
-            .as_ref()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|| "otserver-scan.json".to_string());
-
-        let snmp = config.snmp.unwrap_or_default();
-        let snmp_version = otserver_scanner::snmp::resolved_version(&snmp).to_string();
-        let snmp_community = snmp.community.unwrap_or_default();
-        let snmp_username = snmp.username.unwrap_or_default();
-        let snmp_context = snmp.context_name.unwrap_or_default();
-        let snmp_auth_protocol = snmp.auth_protocol.unwrap_or_default();
-        let snmp_auth_password = snmp.auth_password.unwrap_or_default();
-        let snmp_privacy_protocol = snmp.privacy_protocol.unwrap_or_default();
-        let snmp_privacy_password = snmp.privacy_password.unwrap_or_default();
-
-        let legacy_native_disabled = config.no_protocols.unwrap_or(false);
-        let arp_enabled = !config.no_arp.unwrap_or(false);
-        let profinet_enabled = !config.no_profinet.unwrap_or(false);
-        let s7_enabled = !(legacy_native_disabled || config.no_s7.unwrap_or(false));
-        let enip_enabled = !(legacy_native_disabled || config.no_enip.unwrap_or(false));
-        let bacnet_enabled = !(legacy_native_disabled || config.no_bacnet.unwrap_or(false));
-        let fins_enabled = !(legacy_native_disabled || config.no_fins.unwrap_or(false));
-        let fox_enabled = !(legacy_native_disabled || config.no_fox.unwrap_or(false));
-        let opcua_enabled = !(legacy_native_disabled || config.no_opcua.unwrap_or(false));
-        let snmp_enabled = !config.no_snmp.unwrap_or(false);
-        let lldp_enabled = !config.no_lldp.unwrap_or(false);
-        let server_url = config.server_url.clone().unwrap_or_default();
-        let site = config.site.clone().unwrap_or_default();
-        let api_key = config.api_key.clone().unwrap_or_default();
         #[cfg(windows)]
         let win10pcap_available = profinet::win10pcap_available();
-        #[cfg(windows)]
-        let win10pcap_interface_available =
-            win10pcap_available && profinet::win10pcap_interface_available(&interface);
-        Self {
-            targets,
-            interface,
-            source_mac,
-            output,
-            snmp_version,
-            snmp_community,
-            snmp_username,
-            snmp_context,
-            snmp_auth_protocol,
-            snmp_auth_password,
-            snmp_privacy_protocol,
-            snmp_privacy_password,
-            opcua_username: config.opcua_username.unwrap_or_default(),
-            opcua_password: config.opcua_password.unwrap_or_default(),
-            arp_enabled,
-            profinet_enabled,
-            s7_enabled,
-            enip_enabled,
-            bacnet_enabled,
-            fins_enabled,
-            fox_enabled,
-            opcua_enabled,
-            snmp_enabled,
-            lldp_enabled,
-            server_url,
-            site,
-            api_key,
+        let mut app = Self {
+            configs,
+            selected_config: 0,
+            config_name: String::new(),
+            targets: String::new(),
+            interface: String::new(),
+            source_mac: String::new(),
+            output: String::new(),
+            snmp_version: "2c".into(),
+            snmp_community: String::new(),
+            snmp_username: String::new(),
+            snmp_context: String::new(),
+            snmp_auth_protocol: String::new(),
+            snmp_auth_password: String::new(),
+            snmp_privacy_protocol: String::new(),
+            snmp_privacy_password: String::new(),
+            opcua_username: String::new(),
+            opcua_password: String::new(),
+            arp_enabled: true,
+            profinet_enabled: true,
+            s7_enabled: true,
+            enip_enabled: true,
+            bacnet_enabled: true,
+            fins_enabled: true,
+            fox_enabled: true,
+            opcua_enabled: true,
+            snmp_enabled: true,
+            lldp_enabled: true,
+            server_url: String::new(),
+            site: String::new(),
+            api_key: String::new(),
             ack_authorized: false,
             interfaces,
-            log_text: "OTserver Scanner GUI Ready.\n".to_string(),
+            log_text: format!("{}\n", format_log_line("OTserver Scanner GUI ready.")),
             status: "Ready".to_string(),
+            config_save_result: None,
             is_scanning: false,
             cancellation: None,
             log_rx: None,
@@ -214,8 +223,69 @@ impl GuiApp {
             #[cfg(windows)]
             win10pcap_available,
             #[cfg(windows)]
-            win10pcap_interface_available,
-        }
+            win10pcap_interface_available: false,
+        };
+        app.apply_selected_config();
+        app
+    }
+
+    fn apply_selected_config(&mut self) {
+        let config = self.configs.configs()[self.selected_config].clone();
+        self.config_name = config.name.clone().unwrap_or_default();
+        self.targets = config
+            .targets
+            .as_ref()
+            .map(|targets| targets.join(", "))
+            .unwrap_or_else(|| "192.168.1.0/24".into());
+        self.interface = config
+            .interface
+            .clone()
+            .or_else(|| self.interfaces.first().map(|item| item.name.clone()))
+            .unwrap_or_default();
+        self.source_mac = config
+            .source_mac
+            .clone()
+            .or_else(|| {
+                self.interfaces
+                    .iter()
+                    .find(|item| item.name == self.interface)
+                    .and_then(interface_mac)
+            })
+            .unwrap_or_default();
+        self.output = config
+            .output
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "otserver-scan.json".into());
+
+        let snmp = config.snmp.unwrap_or_default();
+        self.snmp_version = otserver_scanner::snmp::resolved_version(&snmp).to_string();
+        self.snmp_community = snmp.community.unwrap_or_default();
+        self.snmp_username = snmp.username.unwrap_or_default();
+        self.snmp_context = snmp.context_name.unwrap_or_default();
+        self.snmp_auth_protocol = snmp.auth_protocol.unwrap_or_default();
+        self.snmp_auth_password = snmp.auth_password.unwrap_or_default();
+        self.snmp_privacy_protocol = snmp.privacy_protocol.unwrap_or_default();
+        self.snmp_privacy_password = snmp.privacy_password.unwrap_or_default();
+
+        let legacy_native_disabled = config.no_protocols.unwrap_or(false);
+        self.arp_enabled = !config.no_arp.unwrap_or(false);
+        self.profinet_enabled = !config.no_profinet.unwrap_or(false);
+        self.s7_enabled = !(legacy_native_disabled || config.no_s7.unwrap_or(false));
+        self.enip_enabled = !(legacy_native_disabled || config.no_enip.unwrap_or(false));
+        self.bacnet_enabled = !(legacy_native_disabled || config.no_bacnet.unwrap_or(false));
+        self.fins_enabled = !(legacy_native_disabled || config.no_fins.unwrap_or(false));
+        self.fox_enabled = !(legacy_native_disabled || config.no_fox.unwrap_or(false));
+        self.opcua_enabled = !(legacy_native_disabled || config.no_opcua.unwrap_or(false));
+        self.snmp_enabled = !config.no_snmp.unwrap_or(false);
+        self.lldp_enabled = !config.no_lldp.unwrap_or(false);
+        self.opcua_username = config.opcua_username.unwrap_or_default();
+        self.opcua_password = config.opcua_password.unwrap_or_default();
+        self.server_url = config.server_url.unwrap_or_default();
+        self.site = config.site.unwrap_or_default();
+        self.api_key = config.api_key.unwrap_or_default();
+        #[cfg(windows)]
+        self.refresh_win10pcap();
     }
 
     fn snmp_settings(&self) -> Option<SnmpSettings> {
@@ -240,46 +310,72 @@ impl GuiApp {
             .filter(|s| !s.is_empty())
             .collect();
 
-        ScannerConfig {
-            targets: if targets_vec.is_empty() {
-                None
-            } else {
-                Some(targets_vec)
-            },
-            interface: nonempty_opt(&self.interface),
-            source_mac: nonempty_opt(&self.source_mac),
-            output: nonempty_opt(&self.output).map(PathBuf::from),
-            snmp: self.snmp_settings(),
-            no_protocols: None,
-            no_arp: (!self.arp_enabled).then_some(true),
-            no_profinet: (!self.profinet_enabled).then_some(true),
-            no_s7: (!self.s7_enabled).then_some(true),
-            no_enip: (!self.enip_enabled).then_some(true),
-            no_bacnet: (!self.bacnet_enabled).then_some(true),
-            no_fins: (!self.fins_enabled).then_some(true),
-            no_fox: (!self.fox_enabled).then_some(true),
-            no_opcua: (!self.opcua_enabled).then_some(true),
-            no_snmp: (!self.snmp_enabled).then_some(true),
-            no_lldp: (!self.lldp_enabled).then_some(true),
-            opcua_ports: None,
-            opcua_username: nonempty_opt(&self.opcua_username),
-            opcua_password: nonempty_opt(&self.opcua_password),
-            server_url: nonempty_opt(&self.server_url),
-            site: nonempty_opt(&self.site),
-            api_key: nonempty_opt(&self.api_key),
+        let mut config = self.configs.configs()[self.selected_config].clone();
+        config.name = nonempty_opt(&self.config_name);
+        config.targets = (!targets_vec.is_empty()).then_some(targets_vec);
+        config.interface = nonempty_opt(&self.interface);
+        config.source_mac = nonempty_opt(&self.source_mac);
+        config.output = nonempty_opt(&self.output).map(PathBuf::from);
+        config.snmp = self.snmp_settings();
+        config.no_protocols = None;
+        config.no_arp = (!self.arp_enabled).then_some(true);
+        config.no_profinet = (!self.profinet_enabled).then_some(true);
+        config.no_s7 = (!self.s7_enabled).then_some(true);
+        config.no_enip = (!self.enip_enabled).then_some(true);
+        config.no_bacnet = (!self.bacnet_enabled).then_some(true);
+        config.no_fins = (!self.fins_enabled).then_some(true);
+        config.no_fox = (!self.fox_enabled).then_some(true);
+        config.no_opcua = (!self.opcua_enabled).then_some(true);
+        config.no_snmp = (!self.snmp_enabled).then_some(true);
+        config.no_lldp = (!self.lldp_enabled).then_some(true);
+        config.opcua_username = nonempty_opt(&self.opcua_username);
+        config.opcua_password = nonempty_opt(&self.opcua_password);
+        config.server_url = nonempty_opt(&self.server_url);
+        config.site = nonempty_opt(&self.site);
+        config.api_key = nonempty_opt(&self.api_key);
+        config
+    }
+
+    fn save_config(&mut self) -> bool {
+        let mut configs = self.configs.clone();
+        configs.configs_mut()[self.selected_config] = self.to_config();
+        self.persist_configs(configs)
+    }
+
+    fn persist_configs(&mut self, configs: ScannerConfigs) -> bool {
+        match save_config_sync(&configs) {
+            Ok(_) => {
+                self.configs = configs;
+                self.config_save_result = Some(Ok(format_log_line(
+                    "Configuration saved to otscanner.json.",
+                )));
+                true
+            }
+            Err(err) => {
+                self.config_save_result = Some(Err(format_log_line(&format!(
+                    "Configuration save failed: {err}",
+                ))));
+                false
+            }
         }
     }
 
-    fn save_config(&mut self) {
-        let config = self.to_config();
-        match save_config_sync(&config) {
-            Ok(_) => {
-                self.status = "Config saved to otscanner.json".to_string();
-            }
-            Err(err) => {
-                self.status = format!("Failed to save config: {err}");
-            }
+    fn add_configuration(&mut self) {
+        let configs =
+            with_added_configuration(&self.configs, self.selected_config, self.to_config());
+        let selected = configs.configs().len() - 1;
+        if self.persist_configs(configs) {
+            self.selected_config = selected;
+            self.apply_selected_config();
+            self.config_save_result = Some(Ok(format_log_line(
+                "Configuration added to otscanner.json.",
+            )));
         }
+    }
+
+    fn append_log(&mut self, message: &str) {
+        self.log_text.push_str(&format_log_line(message));
+        self.log_text.push('\n');
     }
 
     #[cfg(windows)]
@@ -289,65 +385,53 @@ impl GuiApp {
             self.win10pcap_available && profinet::win10pcap_interface_available(&self.interface);
     }
 
-    fn start_scan(&mut self) {
+    fn start_scan(&mut self, run_all: bool) {
         if !self.ack_authorized {
             self.status = "Error: --ack-authorized required to start scan!".to_string();
-            self.log_text
-                .push_str("Error: You must check the authorization box before scanning.\n");
+            self.append_log("Error: You must check the authorization box before scanning.");
             return;
         }
 
-        self.save_config();
+        if !self.save_config() {
+            self.status = "Configuration could not be saved.".into();
+            self.append_log("Configuration could not be saved; scan not started.");
+            return;
+        }
 
-        let config = self.to_config();
-        let targets_vec: Vec<String> = self
-            .targets
-            .split(&[',', '\n', ';'][..])
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-
-        let args = ScanArgs {
-            targets: targets_vec,
-            interface: nonempty_opt(&self.interface),
-            source_mac: nonempty_opt(&self.source_mac),
-            output: nonempty_opt(&self.output).map(PathBuf::from),
-            ack_authorized: true,
-            no_protocols: false,
-            no_arp: !self.arp_enabled,
-            no_profinet: !self.profinet_enabled,
-            no_s7: !self.s7_enabled,
-            no_enip: !self.enip_enabled,
-            no_bacnet: !self.bacnet_enabled,
-            no_fins: !self.fins_enabled,
-            no_fox: !self.fox_enabled,
-            no_opcua: !self.opcua_enabled,
-            no_snmp: !self.snmp_enabled,
-            no_lldp: !self.lldp_enabled,
-            server_url: nonempty_opt(&self.server_url),
-            site: nonempty_opt(&self.site),
+        let configs = if run_all {
+            self.configs.named_configs()
+        } else {
+            let config = self.configs.configs()[self.selected_config].clone();
+            vec![(
+                config
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "Configuration".into()),
+                config,
+            )]
         };
-
+        let args = ScanArgs {
+            ack_authorized: true,
+            ..ScanArgs::default()
+        };
         let env_key = std::env::var("OTSERVER_API_KEY").ok();
-        let mut options: ScanOptions = match resolve_scan(args, config, env_key) {
-            Ok(opts) => opts,
+        let (scans, failures) = match prepare_scans(args, configs, env_key) {
+            Ok(prepared) => prepared,
             Err(err) => {
                 self.status = format!("Configuration error: {err}");
-                self.log_text
-                    .push_str(&format!("Configuration error: {err}\n"));
+                self.append_log(&format!("Configuration error: {err}"));
                 return;
             }
         };
-        options.protocols.snmp = self.snmp_enabled;
-        options.protocols.lldp = self.lldp_enabled;
 
-        let (tx, rx) = mpsc::channel::<String>();
+        let scan_count = scans.len();
+        let (tx, rx) = mpsc::channel::<ScanMessage>();
         let cancellation = Arc::new(AtomicBool::new(false));
         self.log_rx = Some(rx);
         self.cancellation = Some(Arc::clone(&cancellation));
         self.is_scanning = true;
-        self.status = "Scan running...".to_string();
-        self.log_text.push_str("\n--- Starting Scan ---\n");
+        self.status = format!("Running {scan_count} configuration(s)...");
+        self.append_log(&format!("Starting {scan_count} configuration(s)."));
 
         std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_multi_thread()
@@ -356,60 +440,50 @@ impl GuiApp {
                 .expect("Failed to build tokio runtime for scan thread");
 
             let logger = GuiLogger { sender: tx.clone() };
-
-            let marker = rt.block_on(async {
-                match scan(&options, &logger, &cancellation).await {
-                    Ok(partial) => {
-                        if !cancellation.load(Ordering::Relaxed)
-                            && let Some(upload) = &options.upload
-                            && let Err(err) = upload_scan(upload, &options.output, &logger).await
-                        {
-                            logger.log(format!("Upload error: {err}"));
-                        }
-                        if cancellation.load(Ordering::Relaxed) {
-                            logger.log("Scan stopped. Partial results were written.".to_string());
-                        } else if partial {
-                            logger.log("Scan completed with partial errors.".to_string());
-                        } else {
-                            logger.log("Scan completed successfully.".to_string());
-                        }
-                        if cancellation.load(Ordering::Relaxed) {
-                            "[STOPPED]"
-                        } else {
-                            "[FINISHED]"
-                        }
-                    }
-                    Err(err) => {
-                        logger.log(format!("Scan error: {err}"));
-                        "[FAILED]"
-                    }
-                }
-            });
-
-            let _ = tx.send(marker.to_string());
+            for failure in &failures {
+                logger.log(failure.clone());
+            }
+            let mut result = rt.block_on(run_scan_batch(&scans, &logger, &cancellation));
+            let mut all_failures = failures;
+            all_failures.append(&mut result.failures);
+            result.failures = all_failures;
+            let _ = tx.send(ScanMessage::Finished(result));
         });
     }
 }
 
 impl eframe::App for GuiApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if let Some(rx) = &self.log_rx {
-            while let Ok(msg) = rx.try_recv() {
-                if msg == "[FINISHED]" {
-                    self.is_scanning = false;
-                    self.cancellation = None;
-                    self.status = "Scan completed.".to_string();
-                } else if msg == "[STOPPED]" {
-                    self.is_scanning = false;
-                    self.cancellation = None;
-                    self.status = "Scan stopped; partial output written.".to_string();
-                } else if msg == "[FAILED]" {
-                    self.is_scanning = false;
-                    self.cancellation = None;
-                    self.status = "Scan failed.".to_string();
-                } else {
-                    self.log_text.push_str(&msg);
+        let scan_messages: Vec<_> = self
+            .log_rx
+            .as_ref()
+            .map(|rx| rx.try_iter().collect())
+            .unwrap_or_default();
+        for message in scan_messages {
+            match message {
+                ScanMessage::Log(message) => {
+                    self.log_text.push_str(&message);
                     self.log_text.push('\n');
+                }
+                ScanMessage::Finished(result) => {
+                    self.is_scanning = false;
+                    self.cancellation = None;
+                    self.log_rx = None;
+                    let summary = format!(
+                        "{} complete, {} partial, {} failed.",
+                        result.completed,
+                        result.partial,
+                        result.failures.len()
+                    );
+                    if result.cancelled {
+                        self.status = format!("Batch stopped: {summary}");
+                        self.append_log(&format!(
+                            "Batch stopped; pending configurations were skipped. {summary}"
+                        ));
+                    } else {
+                        self.status = format!("Batch finished: {summary}");
+                        self.append_log(&format!("Batch finished: {summary}"));
+                    }
                 }
             }
         }
@@ -420,15 +494,14 @@ impl eframe::App for GuiApp {
             self.is_installing = false;
             match result {
                 Ok(message) => {
-                    self.log_text.push_str(&format!("\n{message}\n"));
+                    self.append_log(&message);
                     self.interfaces = profinet::interfaces().unwrap_or_default();
                     #[cfg(windows)]
                     self.refresh_win10pcap();
                     self.status = "Win10Pcap installation completed.".into();
                 }
                 Err(error) => {
-                    self.log_text
-                        .push_str(&format!("\nWin10Pcap installation error: {error}\n"));
+                    self.append_log(&format!("Win10Pcap installation error: {error}"));
                     self.status = "Win10Pcap installation failed.".into();
                 }
             }
@@ -438,12 +511,167 @@ impl eframe::App for GuiApp {
             ctx.request_repaint();
         }
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("OTserver Scanner");
+        egui::TopBottomPanel::top("app-header").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.heading("OTserver Scanner");
+                ui.weak(concat!("Version ", env!("CARGO_PKG_VERSION")));
+            });
             ui.label("Read-only OT asset discovery tool");
-            ui.separator();
+        });
 
+        egui::TopBottomPanel::bottom("app-controls").show(ctx, |ui| {
+            let controls_enabled = !self.is_scanning && !self.is_installing;
+            ui.horizontal_wrapped(|ui| {
+                ui.add_enabled(
+                    controls_enabled,
+                    egui::Checkbox::new(
+                        &mut self.ack_authorized,
+                        "I confirm I am authorized to scan these networks (--ack-authorized)",
+                    ),
+                );
+
+                if self.configs.is_multiple() {
+                    if ui
+                        .add_enabled(
+                            controls_enabled && self.ack_authorized,
+                            egui::Button::new("Run Selected"),
+                        )
+                        .clicked()
+                    {
+                        self.start_scan(false);
+                    }
+                    if ui
+                        .add_enabled(
+                            controls_enabled && self.ack_authorized,
+                            egui::Button::new("Run All"),
+                        )
+                        .clicked()
+                    {
+                        self.start_scan(true);
+                    }
+                } else if ui
+                    .add_enabled(
+                        controls_enabled && self.ack_authorized,
+                        egui::Button::new("Start Scan"),
+                    )
+                    .clicked()
+                {
+                    self.start_scan(false);
+                }
+                if ui
+                    .add_enabled(self.is_scanning, egui::Button::new("Stop Scan"))
+                    .clicked()
+                    && let Some(cancellation) = &self.cancellation
+                {
+                    cancellation.store(true, Ordering::Relaxed);
+                    self.status = "Stopping scan...".to_string();
+                }
+                if ui
+                    .add_enabled(controls_enabled, egui::Button::new("Save Config"))
+                    .clicked()
+                {
+                    self.save_config();
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                ui.label(format!("Status: {}", self.status));
+                if let Some(result) = &self.config_save_result {
+                    ui.separator();
+                    match result {
+                        Ok(message) => {
+                            ui.colored_label(
+                                egui::Color32::LIGHT_GREEN,
+                                format!("Config: {message}"),
+                            );
+                        }
+                        Err(message) => {
+                            ui.colored_label(
+                                egui::Color32::LIGHT_RED,
+                                format!("Config error: {message}"),
+                            );
+                        }
+                    }
+                }
+            });
+        });
+
+        egui::SidePanel::right("scan-log")
+            .default_width(400.0)
+            .min_width(300.0)
+            .max_width(650.0)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading("Scan Log");
+                    if ui
+                        .add_enabled(!self.log_text.is_empty(), egui::Button::new("Clear Log"))
+                        .clicked()
+                    {
+                        self.log_text.clear();
+                    }
+                });
+                ui.separator();
+                egui::ScrollArea::vertical()
+                    .id_salt("scan-log-scroll")
+                    .stick_to_bottom(true)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(self.log_text.as_str()).monospace(),
+                            )
+                            .selectable(true)
+                            .wrap(),
+                        );
+                    });
+            });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            if self.is_scanning || self.is_installing {
+                ui.disable();
+            }
             egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.group(|ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.heading("Configurations");
+                    if self.configs.is_multiple() {
+                        let names: Vec<_> = self
+                            .configs
+                            .configs()
+                            .iter()
+                            .filter_map(|config| config.name.clone())
+                            .collect();
+                        let mut selected = self.selected_config;
+                        ui.horizontal(|ui| {
+                            ui.label("Selected:");
+                            egui::ComboBox::from_id_salt("scanner-configuration")
+                                .selected_text(&names[self.selected_config])
+                                .show_ui(ui, |ui| {
+                                    for (index, name) in names.iter().enumerate() {
+                                        ui.selectable_value(&mut selected, index, name);
+                                    }
+                                });
+                        });
+                        if selected != self.selected_config && self.save_config() {
+                            self.selected_config = selected;
+                            self.apply_selected_config();
+                        }
+                        ui.horizontal(|ui| {
+                            ui.label("Name:");
+                            if ui
+                                .add(egui::TextEdit::singleline(&mut self.config_name))
+                                .changed()
+                            {
+                                self.save_config();
+                            }
+                        });
+                    } else {
+                        ui.label("This file currently contains one configuration.");
+                    }
+                    if ui.button("Add Configuration").clicked() {
+                        self.add_configuration();
+                    }
+                });
+                ui.add_space(8.0);
                 ui.group(|ui| {
                     ui.set_min_width(ui.available_width());
                     ui.heading("Network Target Settings");
@@ -603,8 +831,8 @@ impl eframe::App for GuiApp {
                         {
                             self.is_installing = true;
                             self.status = "Installing Win10Pcap...".into();
-                            self.log_text.push_str(
-                                "\nInstalling the bundled, signed Win10Pcap GPLv2 package...\n",
+                            self.append_log(
+                                "Installing the bundled, signed Win10Pcap GPLv2 package...",
                             );
                             let (tx, rx) = mpsc::channel();
                             self.install_rx = Some(rx);
@@ -669,12 +897,22 @@ impl eframe::App for GuiApp {
                             ui,
                             "snmp-version",
                             &mut self.snmp_version,
-                            &[("1", "SNMPv1"), ("2c", "SNMPv2c"), ("3", "SNMPv3")],
+                            &[
+                                ("auto", "Auto (v3, v2c, v1)"),
+                                ("1", "SNMPv1"),
+                                ("2c", "SNMPv2c"),
+                                ("3", "SNMPv3"),
+                            ],
                         ) {
                             self.save_config();
                         }
                     });
-                    if self.snmp_version == "3" {
+                    if self.snmp_version == "auto" {
+                        ui.small(
+                            "Auto tries configured SNMPv3 credentials when present, then SNMPv2c and SNMPv1 with the configured community.",
+                        );
+                    }
+                    if self.snmp_version == "3" || self.snmp_version == "auto" {
                         ui.horizontal(|ui| {
                             ui.label("Username:");
                             if ui
@@ -759,7 +997,8 @@ impl eframe::App for GuiApp {
                                 }
                             });
                         }
-                    } else {
+                    }
+                    if self.snmp_version != "3" {
                         ui.horizontal(|ui| {
                             ui.label("Community:");
                             if ui
@@ -843,92 +1082,47 @@ impl eframe::App for GuiApp {
                         }
                     });
                 });
-
-                ui.add_space(8.0);
-
-                ui.group(|ui| {
-                    ui.set_min_width(ui.available_width());
-                    ui.heading("Scan Authorization & Controls");
-                    ui.checkbox(
-                        &mut self.ack_authorized,
-                        "I confirm I am authorized to scan these networks (--ack-authorized)",
-                    );
-
-                    ui.horizontal(|ui| {
-                        let scan_btn = ui.add_enabled(
-                            !self.is_scanning && !self.is_installing && self.ack_authorized,
-                            egui::Button::new("▶ Start Scan"),
-                        );
-                        if scan_btn.clicked() {
-                            self.start_scan();
-                        }
-
-                        if ui
-                            .add_enabled(self.is_scanning, egui::Button::new("Stop Scan"))
-                            .clicked()
-                            && let Some(cancellation) = &self.cancellation
-                        {
-                            cancellation.store(true, Ordering::Relaxed);
-                            self.status = "Stopping scan...".to_string();
-                        }
-
-                        if ui.button("💾 Save Config").clicked() {
-                            self.save_config();
-                        }
-
-                        if ui.button("🗑 Clear Logs").clicked() {
-                            self.log_text.clear();
-                        }
-                    });
                 });
-
-                ui.add_space(8.0);
-
-                ui.group(|ui| {
-                    ui.set_min_width(ui.available_width());
-                    ui.heading("Scan Log Output");
-                    egui::ScrollArea::vertical()
-                        .max_height(220.0)
-                        .stick_to_bottom(true)
-                        .show(ui, |ui| {
-                            ui.add(
-                                egui::TextEdit::multiline(&mut self.log_text)
-                                    .font(egui::TextStyle::Monospace)
-                                    .desired_width(f32::INFINITY)
-                                    .lock_focus(true),
-                            );
-                        });
-                });
-            });
-
-            ui.separator();
-            ui.horizontal(|ui| {
-                ui.label(format!("Status: {}", self.status));
-            });
         });
     }
 }
 
 pub fn run_gui() -> Result<(), String> {
+    let configs = load_config_sync()?;
+    #[cfg(windows)]
+    unsafe {
+        // SAFETY: FreeConsole has no arguments or pointer preconditions.
+        windows_sys::Win32::System::Console::FreeConsole();
+    }
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([720.0, 720.0])
+            .with_inner_size([1200.0, 760.0])
             .with_min_inner_size([500.0, 500.0])
-            .with_title("OTserver Scanner"),
+            .with_title(concat!("OTserver Scanner v", env!("CARGO_PKG_VERSION"))),
         ..Default::default()
     };
 
     eframe::run_native(
         "OTserver Scanner",
         options,
-        Box::new(|cc| Ok(Box::new(GuiApp::new(cc)))),
+        Box::new(move |_cc| Ok(Box::new(GuiApp::new(configs)))),
     )
-    .map_err(|err| format!("GUI error: {err}"))
+    .map_err(|err| {
+        let message = format!("GUI error: {err}");
+        rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Error)
+            .set_title("OTserver Scanner")
+            .set_description(&message)
+            .show();
+        message
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{bound_ip_addresses, interface_mac};
+    use super::{GuiApp, bound_ip_addresses, interface_mac, with_added_configuration};
+    use crate::{ScannerConfig, ScannerConfigs};
     use otserver_scanner::profinet::CaptureInterface;
 
     #[test]
@@ -952,5 +1146,58 @@ mod tests {
             interface_mac(&interfaces[0]).as_deref(),
             Some("00:11:22:33:44:55")
         );
+    }
+
+    #[test]
+    fn editing_selected_config_preserves_other_configs_and_hidden_fields() {
+        let first = ScannerConfig {
+            name: Some("Line A".into()),
+            targets: Some(vec!["192.0.2.1".into()]),
+            interface: Some("interface-1".into()),
+            source_mac: Some("00:11:22:33:44:55".into()),
+            output: Some("line-a.json".into()),
+            opcua_ports: Some(vec![4841, 48400]),
+            ..ScannerConfig::default()
+        };
+        let second = ScannerConfig {
+            name: Some("Line B".into()),
+            targets: Some(vec!["192.0.2.2".into()]),
+            interface: Some("interface-2".into()),
+            source_mac: Some("00:11:22:33:44:66".into()),
+            output: Some("line-b.json".into()),
+            ..ScannerConfig::default()
+        };
+        let mut app = GuiApp::new(ScannerConfigs::Multiple(vec![
+            first.clone(),
+            second.clone(),
+        ]));
+        app.targets = "198.51.100.1".into();
+
+        let mut saved = app.configs.clone();
+        saved.configs_mut()[app.selected_config] = app.to_config();
+
+        assert_eq!(saved.configs()[0].opcua_ports, first.opcua_ports);
+        assert_eq!(saved.configs()[1], second);
+    }
+
+    #[test]
+    fn adding_to_single_config_creates_named_array_with_unique_output() {
+        let original = ScannerConfig {
+            output: Some("scan.json".into()),
+            opcua_ports: Some(vec![4841]),
+            ..ScannerConfig::default()
+        };
+        let configs = ScannerConfigs::Single(Box::new(original.clone()));
+
+        let added = with_added_configuration(&configs, 0, original);
+
+        assert!(added.is_multiple());
+        assert_eq!(added.configs()[0].name.as_deref(), Some("Configuration 1"));
+        assert_eq!(added.configs()[1].name.as_deref(), Some("Configuration 2"));
+        assert_eq!(
+            added.configs()[1].output.as_deref(),
+            Some(std::path::Path::new("scan-2.json"))
+        );
+        assert_eq!(added.configs()[1].opcua_ports, Some(vec![4841]));
     }
 }

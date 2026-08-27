@@ -143,14 +143,22 @@ transaction only when real file sizes or atomicity requirements justify it.
   `otscanner.json` and are fully editable in the GUI. There are no separate SNMP profile files,
   credential environment variables, or interactive credential prompts. Without SNMP settings, scans
   default to SNMPv2c with community `public`, so SNMP must never gate or block a scan. Credentials
-  must never appear in logs or scan exports.
+  must never appear in logs or scan exports. SNMP `auto` mode is opt-in: try usable v3 settings,
+  then v2c, then v1 within the existing per-target timeout and stop at the first successful version.
+  Explicit version selections do not fall back.
 - Direct scanner imports use Payload's existing `asset-imports` REST upload with a native per-user API
   key so site authorization, validation, merging, and auditing remain shared with manual imports.
 - `otscanner.json` lives beside the scanner executable and holds all scan defaults, SNMP and OPC UA
-  credentials, and upload settings, but `--ack-authorized` must remain an explicit flag on every
-  scan. `OTSERVER_API_KEY` overrides the config-file key. The scan log records one
-  `[HH:MM] <ip> Protocol <name> Success/Fail` entry per probed IP and protocol; keep credentials out
-  of it.
+  credentials, and upload settings. It may contain one config object or an ordered list whose entries
+  have unique names and output paths; the GUI can convert a single object into a list by cloning the
+  selected config, and GUI and CLI batch runs are sequential. `--ack-authorized` must remain explicit
+  for every invocation. `OTSERVER_API_KEY` overrides the config-file key. Every scan-log line starts
+  with `[HH:MM]`.
+  Keep the per-IP `<ip> Protocol <name> Success/Fail` result and sanitized SNMP attempt details, but
+  never log communities, usernames, contexts, or passwords.
+- The scanner version in `scanner/Cargo.toml` is authoritative for CLI output, GUI display, exports,
+  uploads, and Windows file properties. Windows GUI startup may detach from the console, but CLI
+  commands must retain normal terminal behavior.
 - The Docker lab uses maintained stacks where available and minimal fixed responders for FINS and
   Fox. It must not publish OT ports to a physical adapter or use host networking. The Windows-host
   harness may bind its test ports only to Docker/WSL's host-only Hyper-V adapter and must clean up
