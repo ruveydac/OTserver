@@ -19,7 +19,6 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "mul
 rfd = { version = "0.15", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-thiserror = "2"
 time = { version = "0.3", features = ["formatting", "local-offset"] }
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-native-tls = "0.3"

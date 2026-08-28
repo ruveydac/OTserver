@@ -90,9 +90,11 @@ fn build_client() -> Result<Client, String> {
 }
 
 pub async fn probe(target: Ipv4Addr, settings: &ProbeSettings) -> Result<Option<Finding>, String> {
-    let ports = ProbeSettings::ports_or_default(
-        (!settings.ports.is_empty()).then(|| settings.ports.clone()),
-    );
+    let ports = if settings.ports.is_empty() {
+        DEFAULT_PORTS.as_slice()
+    } else {
+        settings.ports.as_slice()
+    };
     let mut client = build_client()?;
     for (index, port_number) in ports.iter().enumerate() {
         if index > 0 {
@@ -817,13 +819,10 @@ fn base_fields() -> BTreeMap<String, Value> {
 fn finding(
     endpoint_url: &str,
     port_number: u16,
-    mut fields: BTreeMap<String, Value>,
+    fields: BTreeMap<String, Value>,
     mut raw: Map<String, Value>,
     warnings: Vec<String>,
 ) -> Finding {
-    if !fields.contains_key("protocols") {
-        fields.insert("protocols".into(), json!(["opc-ua"]));
-    }
     raw.insert("endpointUrl".into(), json!(endpoint_url));
     Finding {
         source: Source::OpcUa,

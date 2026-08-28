@@ -1,5 +1,5 @@
 use crate::contract::{
-    Endpoint, NetworkInterface, Observation, Port, Source, TopologyLink, normalize_mac,
+    Endpoint, NetworkInterface, Observation, Port, Source, TopologyLink, format_mac, normalize_mac,
 };
 use async_snmp::{
     Auth, AuthProtocol, Client, PrivProtocol, Retry, Transport, Value, VarBind, oid::Oid,
@@ -461,7 +461,7 @@ async fn query_inner(
                 .value
                 .as_bytes()
                 .filter(|value| value.len() == 6)
-                .map(mac);
+                .map(format_mac);
         }
         if let Ok(values) = client
             .get_many(&[
@@ -542,7 +542,7 @@ async fn query_inner(
                         .value
                         .as_bytes()
                         .filter(|value| value.len() == 6)
-                        .map(mac)
+                        .map(format_mac)
                 }
                 "4" => interface.mtu = item.value.as_u64(),
                 "7" => interface.admin_status = item.value.as_i32().map(status),
@@ -829,6 +829,17 @@ async fn query_inner(
                 port.vlans.dedup();
             }
         }
+        match collect_walk(&client, "1.0.62439.1", MAX_TABLE_ROWS).await {
+            Ok(values) => {
+                for item in values {
+                    raw.insert(item.oid.to_string(), value_json(&item.value));
+                }
+            }
+            Err(error) => {
+                inventory_complete = false;
+                warnings.push(format!("SNMP MRP-MIB {target}: {error}"));
+            }
+        }
         for interface in interfaces.values_mut() {
             interface.ip_addresses.sort();
             interface.ip_addresses.dedup();
@@ -873,7 +884,7 @@ async fn query_inner(
                     lldp_chassis_mac = chassis_id
                         .as_deref()
                         .filter(|value| value.len() == 6)
-                        .map(mac);
+                        .map(format_mac);
                 }
             }
             Err(error) => {
@@ -907,7 +918,7 @@ async fn query_inner(
                                     item.value
                                         .as_bytes()
                                         .filter(|value| value.len() == 6)
-                                        .map(mac)
+                                        .map(format_mac)
                                 } else {
                                     item.value.as_str().map(str::to_owned)
                                 }
@@ -924,6 +935,43 @@ async fn query_inner(
                     ));
                     break;
                 }
+            }
+        }
+        let mut local_extension_values = vec![];
+        for (label, root) in [
+            ("LLDP-EXT-DOT1-MIB", "1.0.8802.1.1.2.1.5.32962.1.2"),
+            ("LLDP-EXT-DOT3-MIB", "1.0.8802.1.1.2.1.5.4623.1.2"),
+            ("LLDP-EXT-PNO-MIB", "1.0.8802.1.1.2.1.5.3791.1.2"),
+        ] {
+            match collect_walk(&client, root, MAX_TABLE_ROWS).await {
+                Ok(values) => local_extension_values.extend(values),
+                Err(error) => {
+                    lldp_complete = false;
+                    warnings.push(format!("SNMP {label} {target}: {error}"));
+                }
+            }
+        }
+        let dot3_local = dot3_tables("1.0.8802.1.1.2.1.5.4623.1.2");
+        let pno_local = pno_table("1.0.8802.1.1.2.1.5.3791.1.2");
+        for item in local_extension_values {
+            let key = item.oid.to_string();
+            raw.insert(key.clone(), value_json(&item.value));
+            if let Some(("1", index)) = table_cell(&key, DOT1_LOCAL_PVID_ROOT) {
+                if let Some(vlan) = vlan_id(&item.value) {
+                    local_ports.entry(index).or_default().port_vlan_id = Some(vlan);
+                }
+            } else if let Some((index, name)) = named_cell(&key, &dot3_local) {
+                local_ports
+                    .entry(index)
+                    .or_default()
+                    .dot3
+                    .insert(name.into(), value_json(&item.value));
+            } else if let Some((index, name)) = named_cell(&key, &pno_local) {
+                local_ports
+                    .entry(index)
+                    .or_default()
+                    .pno
+                    .insert(name.into(), value_json(&item.value));
             }
         }
         for (index, local_port) in &mut local_ports {
@@ -966,6 +1014,21 @@ async fn query_inner(
             }
             if port.description.is_none() {
                 port.description.clone_from(&local_port.description);
+            }
+            if let Some(vlan) = local_port.port_vlan_id
+                && !port.vlans.contains(&vlan)
+            {
+                port.vlans.push(vlan);
+                port.vlans.sort_unstable();
+                port.vlans.dedup();
+            }
+            if let Some(raw) = port.raw.as_object_mut() {
+                if !local_port.dot3.is_empty() && !raw.contains_key("lldpDot3") {
+                    raw.insert("lldpDot3".into(), json!(local_port.dot3));
+                }
+                if !local_port.pno.is_empty() && !raw.contains_key("lldpPno") {
+                    raw.insert("lldpPno".into(), json!(local_port.pno));
+                }
             }
         }
 
@@ -1024,7 +1087,7 @@ async fn query_inner(
                         item.value
                             .as_bytes()
                             .filter(|value| value.len() == 6)
-                            .map(mac)
+                            .map(format_mac)
                     } else {
                         item.value.as_str().map(str::to_owned)
                     }
@@ -1062,6 +1125,43 @@ async fn query_inner(
                 warnings.push(format!(
                     "SNMP LLDP remote management table {target}: {error}"
                 ));
+            }
+        }
+        let mut remote_extension_values = vec![];
+        for (label, root) in [
+            ("LLDP-EXT-DOT1-MIB", "1.0.8802.1.1.2.1.5.32962.1.3"),
+            ("LLDP-EXT-DOT3-MIB", "1.0.8802.1.1.2.1.5.4623.1.3"),
+            ("LLDP-EXT-PNO-MIB", "1.0.8802.1.1.2.1.5.3791.1.3"),
+        ] {
+            match collect_walk(&client, root, MAX_TABLE_ROWS).await {
+                Ok(values) => remote_extension_values.extend(values),
+                Err(error) => {
+                    lldp_complete = false;
+                    warnings.push(format!("SNMP {label} {target}: {error}"));
+                }
+            }
+        }
+        let dot3_remote = dot3_tables("1.0.8802.1.1.2.1.5.4623.1.3");
+        let pno_remote = pno_table("1.0.8802.1.1.2.1.5.3791.1.3");
+        for item in remote_extension_values {
+            let key = item.oid.to_string();
+            raw.insert(key.clone(), value_json(&item.value));
+            if let Some(("1", index)) = table_cell(&key, DOT1_REMOTE_PVID_ROOT) {
+                if let Some(vlan) = vlan_id(&item.value) {
+                    neighbors.entry(index).or_default().remote_port_vlan_id = Some(vlan);
+                }
+            } else if let Some((index, name)) = named_cell(&key, &dot3_remote) {
+                neighbors
+                    .entry(index)
+                    .or_default()
+                    .remote_dot3
+                    .insert(name.into(), value_json(&item.value));
+            } else if let Some((index, name)) = named_cell(&key, &pno_remote) {
+                neighbors
+                    .entry(index)
+                    .or_default()
+                    .remote_pno
+                    .insert(name.into(), value_json(&item.value));
             }
         }
     }
@@ -1112,6 +1212,11 @@ async fn query_inner(
                         "remoteCapabilitiesSupported": neighbor.capabilities_supported,
                         "remoteCapabilitiesEnabled": neighbor.capabilities_enabled,
                         "remoteManagementAddresses": neighbor.management_addresses,
+                        "remotePortVlanId": neighbor.remote_port_vlan_id,
+                        "remoteDot3": (!neighbor.remote_dot3.is_empty())
+                            .then_some(neighbor.remote_dot3),
+                        "remotePno": (!neighbor.remote_pno.is_empty())
+                            .then_some(neighbor.remote_pno),
                     }),
                 })
             })
@@ -1252,6 +1357,9 @@ struct LocalPort {
     id: Option<String>,
     description: Option<String>,
     interface_key: Option<String>,
+    port_vlan_id: Option<u16>,
+    dot3: Map<String, serde_json::Value>,
+    pno: Map<String, serde_json::Value>,
 }
 
 #[derive(Default)]
@@ -1267,12 +1375,15 @@ struct Neighbor {
     capabilities_supported: Option<serde_json::Value>,
     capabilities_enabled: Option<serde_json::Value>,
     management_addresses: BTreeSet<String>,
+    remote_port_vlan_id: Option<u16>,
+    remote_dot3: Map<String, serde_json::Value>,
+    remote_pno: Map<String, serde_json::Value>,
 }
 
 impl Neighbor {
     fn chassis_mac(&self) -> Option<String> {
         let value = self.chassis_id.as_deref()?;
-        (self.chassis_subtype == Some(4) && value.len() == 6).then(|| mac(value))
+        (self.chassis_subtype == Some(4) && value.len() == 6).then(|| format_mac(value))
     }
 }
 
@@ -1280,6 +1391,64 @@ fn table_cell<'a>(oid: &'a str, prefix: &str) -> Option<(&'a str, String)> {
     let suffix = oid.strip_prefix(prefix)?.strip_prefix('.')?;
     let (column, index) = suffix.split_once('.')?;
     Some((column, index.to_owned()))
+}
+
+const DOT1_LOCAL_PVID_ROOT: &str = "1.0.8802.1.1.2.1.5.32962.1.2.1.1";
+const DOT1_REMOTE_PVID_ROOT: &str = "1.0.8802.1.1.2.1.5.32962.1.3.1.1";
+const DOT3_PORT_COLUMNS: &[(&str, &str)] = &[
+    ("1", "autoNegSupported"),
+    ("2", "autoNegEnabled"),
+    ("3", "autoNegAdvertisedCap"),
+    ("4", "operMauType"),
+];
+const DOT3_LINK_AGG_COLUMNS: &[(&str, &str)] = &[("1", "linkAggStatus"), ("2", "linkAggPortId")];
+const DOT3_MAX_FRAME_COLUMNS: &[(&str, &str)] = &[("1", "maxFrameSize")];
+const PNO_PORT_COLUMNS: &[(&str, &str)] = &[
+    ("1", "lpdValue"),
+    ("2", "portTxDValue"),
+    ("3", "portRxDValue"),
+    ("4", "portStatusRT2"),
+    ("5", "portStatusRT3"),
+    ("6", "portNoS"),
+    ("7", "mrpUuId"),
+    ("8", "mrrtStatus"),
+];
+
+type ExtensionTables = [(String, &'static [(&'static str, &'static str)]); 3];
+
+fn dot3_tables(data_root: &str) -> ExtensionTables {
+    [
+        (format!("{data_root}.1.1"), DOT3_PORT_COLUMNS),
+        (format!("{data_root}.3.1"), DOT3_LINK_AGG_COLUMNS),
+        (format!("{data_root}.4.1"), DOT3_MAX_FRAME_COLUMNS),
+    ]
+}
+
+fn pno_table(data_root: &str) -> [(String, &'static [(&'static str, &'static str)]); 1] {
+    [(format!("{data_root}.1.1"), PNO_PORT_COLUMNS)]
+}
+
+fn named_cell(
+    key: &str,
+    tables: &[(String, &'static [(&'static str, &'static str)])],
+) -> Option<(String, &'static str)> {
+    for (root, columns) in tables {
+        if let Some((column, index)) = table_cell(key, root)
+            && let Some(name) = columns
+                .iter()
+                .find_map(|(candidate, name)| (*candidate == column).then_some(*name))
+        {
+            return Some((index, name));
+        }
+    }
+    None
+}
+
+fn vlan_id(value: &Value) -> Option<u16> {
+    value
+        .as_u64()
+        .and_then(|value| u16::try_from(value).ok())
+        .filter(|vlan| (1..=4094).contains(vlan))
 }
 
 fn ip_address_index(index: &str) -> Option<String> {
@@ -1309,7 +1478,7 @@ fn indexed_mac(index: &str) -> Option<String> {
         .map(str::parse::<u8>)
         .collect::<Result<Vec<_>, _>>()
         .ok()?;
-    (bytes.len() == 6).then(|| mac(&bytes))
+    (bytes.len() == 6).then(|| format_mac(&bytes))
 }
 
 fn bitmap_ports(bitmap: &[u8]) -> Vec<u64> {
@@ -1385,13 +1554,6 @@ fn reported_os(value: &str) -> Option<&'static str> {
             "freebsd" => "FreeBSD",
             _ => "QNX",
         })
-}
-fn mac(value: &[u8]) -> String {
-    value
-        .iter()
-        .map(|byte| format!("{byte:02X}"))
-        .collect::<Vec<_>>()
-        .join(":")
 }
 fn value_json(value: &Value) -> serde_json::Value {
     if let Some(text) = value.as_str() {
@@ -1685,6 +1847,66 @@ mod tests {
             ("1.0.8802.1.1.2.1.3.7.1.2.7", Value::Integer(5)),
             ("1.0.8802.1.1.2.1.3.7.1.3.7", string("port-1")),
             ("1.0.8802.1.1.2.1.3.7.1.4.7", string("uplink")),
+            ("1.0.8802.1.1.2.1.5.32962.1.2.1.1.1.7", Value::Integer(300)),
+            (
+                "1.0.8802.1.1.2.1.5.32962.1.2.3.1.2.7.300",
+                string("lab-vlan"),
+            ),
+            (
+                "1.0.8802.1.1.2.1.5.32962.1.3.1.1.1.0.7.1",
+                Value::Integer(200),
+            ),
+            ("1.0.8802.1.1.2.1.5.4623.1.2.1.1.1.7", Value::Integer(1)),
+            ("1.0.8802.1.1.2.1.5.4623.1.2.1.1.2.7", Value::Integer(1)),
+            (
+                "1.0.8802.1.1.2.1.5.4623.1.2.1.1.3.7",
+                Value::OctetString(vec![0x80, 0x36].into()),
+            ),
+            ("1.0.8802.1.1.2.1.5.4623.1.2.1.1.4.7", Value::Integer(30)),
+            (
+                "1.0.8802.1.1.2.1.5.4623.1.2.3.1.1.7",
+                Value::OctetString(vec![0xC0].into()),
+            ),
+            ("1.0.8802.1.1.2.1.5.4623.1.2.3.1.2.7", Value::Integer(9)),
+            ("1.0.8802.1.1.2.1.5.4623.1.2.4.1.1.7", Value::Integer(1500)),
+            ("1.0.8802.1.1.2.1.5.4623.1.3.1.1.1.0.7.1", Value::Integer(1)),
+            ("1.0.8802.1.1.2.1.5.4623.1.3.1.1.2.0.7.1", Value::Integer(1)),
+            (
+                "1.0.8802.1.1.2.1.5.4623.1.3.1.1.3.0.7.1",
+                Value::OctetString(vec![0xC0, 0x36].into()),
+            ),
+            (
+                "1.0.8802.1.1.2.1.5.4623.1.3.1.1.4.0.7.1",
+                Value::Integer(16),
+            ),
+            (
+                "1.0.8802.1.1.2.1.5.4623.1.3.4.1.1.0.7.1",
+                Value::Integer(1500),
+            ),
+            ("1.0.8802.1.1.2.1.5.3791.1.2.1.1.1.7", Value::Gauge32(550)),
+            (
+                "1.0.8802.1.1.2.1.5.3791.1.2.1.1.6.7",
+                string("port-001.lab-plc"),
+            ),
+            (
+                "1.0.8802.1.1.2.1.5.3791.1.2.1.1.7.7",
+                Value::OctetString(
+                    vec![
+                        0x90, 0x7A, 0x1F, 0x8B, 0x4C, 0x02, 0x9E, 0xD5, 0x33, 0x64, 0xA8, 0x77,
+                        0xC1, 0x50, 0x2E, 0x0F,
+                    ]
+                    .into(),
+                ),
+            ),
+            ("1.0.8802.1.1.2.1.5.3791.1.2.1.1.8.7", Value::Integer(1)),
+            (
+                "1.0.8802.1.1.2.1.5.3791.1.3.1.1.1.0.7.1",
+                Value::Gauge32(600),
+            ),
+            (
+                "1.0.8802.1.1.2.1.5.3791.1.3.1.1.6.0.7.1",
+                string("peer-port"),
+            ),
             ("1.0.8802.1.1.2.1.4.1.1.4.0.7.1", Value::Integer(4)),
             (
                 "1.0.8802.1.1.2.1.4.1.1.5.0.7.1",
@@ -1700,6 +1922,17 @@ mod tests {
                 Value::Integer(2),
             ),
             ("1.0.8802.1.1.2.1.5.1", Value::IpAddress([192, 0, 2, 1])),
+            ("1.0.62439.1.1.1.1.1.1", Value::Integer(1)),
+            (
+                "1.0.62439.1.1.1.1.2.1",
+                Value::OctetString(
+                    vec![
+                        0xAB, 0x3C, 0x99, 0x51, 0x0E, 0x74, 0xB2, 0x68, 0xD0, 0x47, 0x1B, 0x83,
+                        0xF6, 0x25, 0x5A, 0xC9,
+                    ]
+                    .into(),
+                ),
+            ),
             ("1.3.6.1.2.1.1.1.0", string("Linux industrial controller")),
             (
                 "1.3.6.1.2.1.1.2.0",
@@ -1861,11 +2094,73 @@ mod tests {
         );
         assert_eq!(result.ports.len(), 1);
         assert_eq!(result.ports[0].key, "bridgePort:7");
-        assert_eq!(result.ports[0].vlans, [100]);
+        assert_eq!(result.ports[0].vlans, [100, 300]);
         assert_eq!(
             result.ports[0].raw["forwardingMacs"][0],
             "00:01:02:03:04:05"
         );
+        assert_eq!(
+            result.ports[0].raw["lldpDot3"],
+            json!({
+                "autoNegSupported": 1,
+                "autoNegEnabled": 1,
+                "autoNegAdvertisedCap": "8036",
+                "operMauType": 30,
+                "linkAggStatus": "C0",
+                "linkAggPortId": 9,
+                "maxFrameSize": 1500
+            })
+        );
+        assert_eq!(result.ports[0].raw["lldpPno"]["lpdValue"], 550);
+        assert_eq!(
+            result.ports[0].raw["lldpPno"]["portNoS"],
+            "port-001.lab-plc"
+        );
+        assert_eq!(
+            result.ports[0].raw["lldpPno"]["mrpUuId"],
+            "907A1F8B4C029ED53364A877C1502E0F"
+        );
+        assert_eq!(result.ports[0].raw["lldpPno"]["mrrtStatus"], 1);
+        assert_eq!(result.links[0].raw["remotePortVlanId"], 200);
+        assert_eq!(result.links[0].raw["remoteDot3"]["operMauType"], 16);
+        assert_eq!(
+            result.links[0].raw["remoteDot3"]["autoNegAdvertisedCap"],
+            "C036"
+        );
+        assert_eq!(result.links[0].raw["remoteDot3"]["maxFrameSize"], 1500);
+        assert_eq!(result.links[0].raw["remotePno"]["lpdValue"], 600);
+        assert_eq!(result.links[0].raw["remotePno"]["portNoS"], "peer-port");
+        assert_eq!(
+            observation.raw["1.0.8802.1.1.2.1.5.32962.1.2.3.1.2.7.300"],
+            "lab-vlan"
+        );
+        assert_eq!(observation.raw["1.0.62439.1.1.1.1.1.1"], 1);
+        assert_eq!(
+            observation.raw["1.0.62439.1.1.1.1.2.1"],
+            "AB3C99510E74B268D0471B83F6255AC9"
+        );
+        {
+            let requested = requested_oids.lock().unwrap();
+            for prefix in [
+                "1.3.6.1.2.1.1.",
+                "1.3.6.1.2.1.2.2.1.",
+                "1.3.6.1.2.1.4.20.1.",
+                "1.0.8802.1.1.2.1.3.",
+                "1.0.8802.1.1.2.1.4.",
+                "1.0.8802.1.1.2.1.5.32962.1.2",
+                "1.0.8802.1.1.2.1.5.32962.1.3",
+                "1.0.8802.1.1.2.1.5.4623.1.2",
+                "1.0.8802.1.1.2.1.5.4623.1.3",
+                "1.0.8802.1.1.2.1.5.3791.1.2",
+                "1.0.8802.1.1.2.1.5.3791.1.3",
+                "1.0.62439.1",
+            ] {
+                assert!(
+                    requested.iter().any(|oid| oid.starts_with(prefix)),
+                    "expected an SNMP request under {prefix}"
+                );
+            }
+        }
 
         let routed = query(
             "127.0.0.1",
@@ -1959,6 +2254,7 @@ mod tests {
         assert!(lldp_only.interfaces.is_empty());
         assert_eq!(lldp_only.links.len(), 1);
         assert_eq!(lldp_only.links[0].raw["version"], "2c");
+        requested_oids.lock().unwrap().clear();
         *failed_oid.lock().unwrap() = Some("1.3.6.1.2.1.2.2.1.2".into());
         let partial = query(
             "127.0.0.1",
@@ -1981,6 +2277,28 @@ mod tests {
                 .iter()
                 .any(|oid| oid.starts_with("1.0.8802.1.1.2.1.5"))
         );
+
+        *failed_oid.lock().unwrap() = Some("1.0.8802.1.1.2.1.5.4623.1.3".into());
+        let degraded = query(
+            "127.0.0.1",
+            Some("00:11:22:33:44:55"),
+            &settings("2c"),
+            QuerySelection {
+                inventory: false,
+                lldp: true,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(!degraded.lldp_complete);
+        assert!(
+            degraded
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("LLDP-EXT-DOT3-MIB"))
+        );
+        assert_eq!(degraded.links.len(), 1);
+        assert!(degraded.links[0].raw["remoteDot3"].is_null());
 
         task.abort();
     }

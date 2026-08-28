@@ -109,10 +109,19 @@ def assert_full(result: dict) -> None:
     assert interface["macAddress"] == DEVICES["siemens"]
     assert interface["speed"] == 1_000_000_000
     assert interface["adminStatus"] == interface["operStatus"] == "up"
+    assert snmp["raw"]["1.0.62439.1.1.1.1.2.1"] == "00112233445566778899AABBCCDDEEFF"
+    lldp_port = next(value for value in siemens["ports"] if value["key"] == "lldpPort:1")
+    assert lldp_port["vlans"] == [1]
+    assert lldp_port["raw"]["lldpDot3"]["maxFrameSize"] == 1500
+    assert lldp_port["raw"]["lldpPno"]["portNoS"] == "port-001.siemens-plc-1"
+    assert lldp_port["raw"]["lldpPno"]["lpdValue"] == 550
     assert any(
         link["source"] == "lldp"
         and link["local"]["macAddress"] == DEVICES["siemens"]
         and link["remote"]["macAddress"] == DEVICES["ethernet_ip"]
+        and link["raw"]["remotePortVlanId"] == 1
+        and link["raw"]["remoteDot3"]["maxFrameSize"] == 1500
+        and link["raw"]["remotePno"]["portNoS"] == "eth0"
         for link in result["links"]
     )
 
