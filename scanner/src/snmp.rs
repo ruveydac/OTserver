@@ -45,6 +45,22 @@ pub struct Settings {
     pub privacy_password: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Credentials {
+    Single(Settings),
+    Multiple(Vec<Settings>),
+}
+
+impl Credentials {
+    pub fn settings(&self) -> Vec<Settings> {
+        match self {
+            Self::Single(settings) => vec![settings.clone()],
+            Self::Multiple(settings) => settings.clone(),
+        }
+    }
+}
+
 pub struct ResultData {
     pub identity_mac: Option<String>,
     pub observation: Option<Observation>,
@@ -191,6 +207,37 @@ fn query_settings(settings: &Settings) -> Vec<Settings> {
     attempts
 }
 
+pub fn attempt_settings(credentials: &[Settings]) -> Vec<Settings> {
+    let mut attempts = Vec::new();
+    let mut seen = Vec::new();
+    for settings in credentials {
+        for attempt in query_settings(settings) {
+            let key = normalized_attempt(&attempt);
+            if !seen.contains(&key) {
+                seen.push(key);
+                attempts.push(attempt);
+            }
+        }
+    }
+    attempts
+}
+
+fn normalized_attempt(settings: &Settings) -> Settings {
+    let mut normalized = settings.clone();
+    normalized.version = Some(resolved_version(settings).to_string());
+    if normalized.version.as_deref() == Some("3") {
+        normalized.community = None;
+    } else {
+        normalized.username = None;
+        normalized.context_name = None;
+        normalized.auth_protocol = None;
+        normalized.auth_password = None;
+        normalized.privacy_protocol = None;
+        normalized.privacy_password = None;
+    }
+    normalized
+}
+
 pub fn attempt_description(settings: &Settings) -> Result<String, String> {
     let version = resolved_version(settings);
     if version.eq_ignore_ascii_case("1") || version.eq_ignore_ascii_case("2c") {
@@ -238,7 +285,7 @@ pub async fn query(
     settings: &Settings,
     selection: QuerySelection,
 ) -> Result<ResultData, QueryError> {
-    query_with_attempts(target, local_mac, settings, selection)
+    query_with_attempts(target, local_mac, std::slice::from_ref(settings), selection)
         .await
         .1
 }
@@ -246,10 +293,10 @@ pub async fn query(
 pub async fn query_with_attempts(
     target: &str,
     local_mac: Option<&str>,
-    settings: &Settings,
+    settings: &[Settings],
     selection: QuerySelection,
 ) -> (Vec<QueryAttempt>, Result<ResultData, QueryError>) {
-    let settings = query_settings(settings);
+    let settings = attempt_settings(settings);
     let settings_len = settings.len();
     let mut attempts = Vec::with_capacity(settings.len());
     let deadline = tokio::time::Instant::now() + QUERY_TIMEOUT;
@@ -1519,6 +1566,56 @@ mod tests {
     }
 
     #[test]
+    fn credentials_accept_object_or_list() {
+        let single: Credentials =
+            serde_json::from_str(r#"{"version":"2c","community":"public"}"#).unwrap();
+        assert_eq!(
+            single.settings(),
+            [Settings {
+                version: Some("2c".into()),
+                community: Some("public".into()),
+                ..Settings::default()
+            }]
+        );
+        let multiple: Credentials =
+            serde_json::from_str(r#"[{"community":"first"},{"version":"3","username":"ops"}]"#)
+                .unwrap();
+        let settings = multiple.settings();
+        assert_eq!(settings.len(), 2);
+        assert_eq!(settings[0].community.as_deref(), Some("first"));
+        assert_eq!(settings[1].username.as_deref(), Some("ops"));
+        assert_eq!(
+            serde_json::to_value(&single).unwrap()["community"],
+            "public"
+        );
+        assert!(serde_json::to_value(&multiple).unwrap().is_array());
+        assert!(
+            serde_json::from_str::<Credentials>(r#"{"community":"a","unknown":true}"#).is_err()
+        );
+    }
+
+    #[test]
+    fn attempt_settings_expands_and_dedupes_credentials() {
+        let mut auto = settings("auto");
+        auto.username = Some("inventory".into());
+        assert_eq!(
+            attempt_settings(&[auto.clone(), settings("2c"), settings("2c")])
+                .iter()
+                .map(resolved_version)
+                .collect::<Vec<_>>(),
+            ["3", "2c", "1"]
+        );
+        let other = Settings {
+            community: Some("other".into()),
+            ..Settings::default()
+        };
+        let attempts = attempt_settings(&[settings("2c"), other]);
+        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts[1].community.as_deref(), Some("other"));
+        assert!(attempt_settings(&[]).is_empty());
+    }
+
+    #[test]
     fn describes_snmp_security_without_credentials() {
         let settings = Settings {
             version: Some("3".into()),
@@ -1810,7 +1907,7 @@ mod tests {
         let (attempts, auto_result) = query_with_attempts(
             "127.0.0.1",
             None,
-            &auto,
+            &[auto],
             QuerySelection {
                 inventory: true,
                 lldp: false,
@@ -1826,6 +1923,26 @@ mod tests {
                 success: true,
             }]
         );
+
+        let (multi_attempts, multi_result) = query_with_attempts(
+            "127.0.0.1",
+            None,
+            &[
+                settings("2c"),
+                Settings {
+                    community: Some("other".into()),
+                    ..Settings::default()
+                },
+            ],
+            QuerySelection {
+                inventory: false,
+                lldp: true,
+            },
+        )
+        .await;
+        assert!(multi_result.is_ok());
+        assert_eq!(multi_attempts.len(), 1);
+        assert!(multi_attempts[0].success);
 
         let lldp_only = query(
             "127.0.0.1",
@@ -1876,7 +1993,7 @@ mod tests {
         let (attempts, result) = query_with_attempts(
             "127.0.0.2",
             None,
-            &auto,
+            &[auto],
             QuerySelection {
                 inventory: false,
                 lldp: true,

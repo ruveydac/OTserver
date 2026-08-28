@@ -20,6 +20,7 @@ use opcua::types::{
     NumericRange, ObjectId, QualifiedName, ReadValueId, ReferenceTypeId, StatusCode,
     TimeZoneDataType, TimestampsToReturn, UAString, UserTokenType, Variant,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
@@ -36,11 +37,35 @@ const MAX_ASSETS: usize = 8;
 const MAX_CHILDREN: u32 = 64;
 const MAX_READS: usize = 64;
 
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+pub struct Credential {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Credentials {
+    Single(Credential),
+    Multiple(Vec<Credential>),
+}
+
+impl Credentials {
+    pub fn credentials(&self) -> Vec<Credential> {
+        match self {
+            Self::Single(credential) => vec![credential.clone()],
+            Self::Multiple(credentials) => credentials.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ProbeSettings {
     pub ports: Vec<u16>,
-    pub username: Option<String>,
-    pub password: Option<String>,
+    pub credentials: Vec<Credential>,
 }
 
 impl ProbeSettings {
@@ -118,41 +143,45 @@ async fn probe_port(
     );
     raw.insert("userTokenPolicies".into(), json!(token_labels(&endpoints)));
 
-    // Use the configured credentials when the server supports username authentication;
-    // otherwise fall back to anonymous access when it is offered.
+    // Anonymous access is always tried first; the configured credentials are only
+    // used, in order, when it fails and the server supports username authentication.
     let username_supported = has_policy(&endpoints, UserTokenType::UserName);
     let anonymous_supported = has_policy(&endpoints, UserTokenType::Anonymous);
-    let configured_username = settings
-        .username
-        .as_deref()
-        .filter(|value| !value.is_empty());
-    let configured_password = settings
-        .password
-        .as_deref()
-        .filter(|value| !value.is_empty());
-    let identity = match (configured_username, configured_password) {
-        (Some(username), Some(password)) if username_supported => {
-            warnings.push(
-                "OPC UA username credentials are transmitted over an unencrypted channel because SecurityPolicy None is used."
-                    .into(),
-            );
-            IdentityToken::UserName(username.to_owned(), password.to_owned().into())
+    let mut attempts = Vec::new();
+    if anonymous_supported {
+        attempts.push(IdentityToken::Anonymous);
+    }
+    if username_supported {
+        for credential in &settings.credentials {
+            let username = credential
+                .username
+                .as_deref()
+                .filter(|value| !value.is_empty());
+            let password = credential
+                .password
+                .as_deref()
+                .filter(|value| !value.is_empty());
+            if let (Some(username), Some(password)) = (username, password) {
+                attempts.push(IdentityToken::UserName(
+                    username.to_owned(),
+                    password.to_owned().into(),
+                ));
+            }
         }
-        _ if anonymous_supported => IdentityToken::Anonymous,
-        _ => {
-            let supported = token_labels(&endpoints).join(", ");
-            warnings.push(format!(
-                "OPC UA server offers no usable authentication (supported: {supported}); configure opcuaUsername and opcuaPassword for username authentication."
-            ));
-            return Ok(Some(finding(
-                &url,
-                port_number,
-                base_fields(),
-                raw,
-                warnings,
-            )));
-        }
-    };
+    }
+    if attempts.is_empty() {
+        let supported = token_labels(&endpoints).join(", ");
+        warnings.push(format!(
+            "OPC UA server offers no usable authentication (supported: {supported}); configure opcuaCredentials with a username and password for username authentication."
+        ));
+        return Ok(Some(finding(
+            &url,
+            port_number,
+            base_fields(),
+            raw,
+            warnings,
+        )));
+    }
 
     // The scanner only uses unsecured channels. The endpoint a server advertises may carry a
     // hostname that is unreachable from the scanned address, so the client substitutes the host
@@ -176,42 +205,42 @@ async fn probe_port(
         )));
     };
 
-    let (session, event_loop) = match timeout(
-        SESSION_TIMEOUT,
-        client.connect_to_matching_endpoint(endpoint, identity),
-    )
-    .await
-    {
-        Ok(Ok(pair)) => pair,
-        Ok(Err(error)) => {
-            warnings.push(format!("OPC UA session: {error}"));
-            return Ok(Some(finding(
-                &url,
-                port_number,
-                base_fields(),
-                raw,
-                warnings,
-            )));
+    let mut connected_pair = None;
+    for identity in attempts {
+        if matches!(identity, IdentityToken::UserName(_, _)) {
+            warnings.push(
+                "OPC UA username credentials are transmitted over an unencrypted channel because SecurityPolicy None is used."
+                    .into(),
+            );
         }
-        Err(_) => {
-            warnings.push("OPC UA session establishment timed out.".into());
-            return Ok(Some(finding(
-                &url,
-                port_number,
-                base_fields(),
-                raw,
-                warnings,
-            )));
-        }
-    };
-    let handle = event_loop.spawn();
-    let abort_handle = handle.abort_handle();
-    let connected = timeout(SESSION_TIMEOUT, session.wait_for_connection())
+        let (session, event_loop) = match timeout(
+            SESSION_TIMEOUT,
+            client.connect_to_matching_endpoint(endpoint.clone(), identity),
+        )
         .await
-        .unwrap_or(false);
-    if !connected {
+        {
+            Ok(Ok(pair)) => pair,
+            Ok(Err(error)) => {
+                warnings.push(format!("OPC UA session: {error}"));
+                continue;
+            }
+            Err(_) => {
+                warnings.push("OPC UA session establishment timed out.".into());
+                continue;
+            }
+        };
+        let handle = event_loop.spawn();
+        let connected = timeout(SESSION_TIMEOUT, session.wait_for_connection())
+            .await
+            .unwrap_or(false);
+        if connected {
+            connected_pair = Some((session, handle));
+            break;
+        }
         warnings.push("OPC UA session could not be established.".into());
-        abort_handle.abort();
+        handle.abort();
+    }
+    let Some((session, handle)) = connected_pair else {
         return Ok(Some(finding(
             &url,
             port_number,
@@ -219,7 +248,8 @@ async fn probe_port(
             raw,
             warnings,
         )));
-    }
+    };
+    let abort_handle = handle.abort_handle();
 
     let mut fields = base_fields();
     match collect_assets(&session, &mut warnings).await {
@@ -1323,12 +1353,14 @@ mod tests {
             finding
                 .warnings
                 .iter()
-                .any(|warning| warning.contains("opcuaUsername"))
+                .any(|warning| warning.contains("opcuaCredentials"))
         );
 
         let mut settings = settings_for(&server);
-        settings.username = Some("lab-user".into());
-        settings.password = Some("lab-password".into());
+        settings.credentials = vec![Credential {
+            username: Some("lab-user".into()),
+            password: Some("lab-password".into()),
+        }];
         let finding = probe(Ipv4Addr::LOCALHOST, &settings)
             .await
             .unwrap()
@@ -1351,8 +1383,10 @@ mod tests {
         })
         .await;
         let mut settings = settings_for(&server);
-        settings.username = Some("lab-user".into());
-        settings.password = Some("wrong-password".into());
+        settings.credentials = vec![Credential {
+            username: Some("lab-user".into()),
+            password: Some("wrong-password".into()),
+        }];
         let finding = probe(Ipv4Addr::LOCALHOST, &settings)
             .await
             .unwrap()
@@ -1364,5 +1398,87 @@ mod tests {
                 .iter()
                 .any(|warning| warning.contains("OPC UA session"))
         );
+    }
+
+    #[tokio::test]
+    async fn prefers_anonymous_over_configured_credentials() {
+        let server = spawn_lab_server(LabConfig {
+            username: true,
+            aliases: true,
+            require_username: false,
+        })
+        .await;
+        let mut settings = settings_for(&server);
+        settings.credentials = vec![Credential {
+            username: Some("lab-user".into()),
+            password: Some("wrong-password".into()),
+        }];
+        let finding = probe(Ipv4Addr::LOCALHOST, &settings)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(finding.fields["name"], "LAB-ASSET-1");
+        assert!(
+            finding
+                .warnings
+                .iter()
+                .all(|warning| !warning.contains("OPC UA session"))
+        );
+        assert!(
+            finding
+                .warnings
+                .iter()
+                .all(|warning| !warning.contains("unencrypted channel"))
+        );
+    }
+
+    #[tokio::test]
+    async fn tries_configured_credentials_in_order() {
+        let server = spawn_lab_server(LabConfig {
+            username: false,
+            aliases: true,
+            require_username: true,
+        })
+        .await;
+        let mut settings = settings_for(&server);
+        settings.credentials = vec![
+            Credential {
+                username: Some("lab-user".into()),
+                password: Some("wrong-password".into()),
+            },
+            Credential {
+                username: Some("lab-user".into()),
+                password: Some("lab-password".into()),
+            },
+        ];
+        let finding = probe(Ipv4Addr::LOCALHOST, &settings)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(finding.fields["name"], "LAB-ASSET-1");
+        assert!(
+            finding
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("OPC UA session"))
+        );
+    }
+
+    #[test]
+    fn opcua_credentials_accept_object_or_list() {
+        let single: Credentials =
+            serde_json::from_str(r#"{"username":"ops","password":"secret"}"#).unwrap();
+        assert_eq!(
+            single.credentials(),
+            [Credential {
+                username: Some("ops".into()),
+                password: Some("secret".into()),
+            }]
+        );
+        let multiple: Credentials =
+            serde_json::from_str(r#"[{"username":"a"},{"username":"b","password":"p"}]"#).unwrap();
+        assert_eq!(multiple.credentials().len(), 2);
+        assert!(serde_json::from_str::<Credentials>(r#"{"unknown":true}"#).is_err());
+        assert!(serde_json::to_value(&multiple).unwrap().is_array());
     }
 }

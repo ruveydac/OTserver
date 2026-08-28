@@ -10,7 +10,10 @@ mod fox;
 mod opcua;
 mod s7;
 
-pub use opcua::{DEFAULT_PORTS as OPCUA_DEFAULT_PORTS, ProbeSettings as OpcuaSettings};
+pub use opcua::{
+    Credential as OpcuaCredential, Credentials as OpcuaCredentials,
+    DEFAULT_PORTS as OPCUA_DEFAULT_PORTS, ProbeSettings as OpcuaSettings,
+};
 
 const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
