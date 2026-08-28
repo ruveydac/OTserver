@@ -7,7 +7,8 @@ use crate::{
 use eframe::egui;
 use otserver_scanner::contract::normalize_mac;
 use otserver_scanner::profinet::{self, CaptureInterface};
-use otserver_scanner::snmp::Settings as SnmpSettings;
+use otserver_scanner::protocols::{OpcuaCredential, OpcuaCredentials};
+use otserver_scanner::snmp::{Credentials as SnmpCredentials, Settings as SnmpSettings};
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -126,6 +127,88 @@ fn protocol_combo(
         .changed()
 }
 
+fn snmp_version_label(version: &str) -> &'static str {
+    if version.eq_ignore_ascii_case("1") {
+        "SNMPv1"
+    } else if version.eq_ignore_ascii_case("3") {
+        "SNMPv3"
+    } else if version.eq_ignore_ascii_case("auto") {
+        "Auto (v3, v2c, v1)"
+    } else {
+        "SNMPv2c"
+    }
+}
+
+fn opcua_credential_label(credential: &OpcuaCredential) -> String {
+    match credential
+        .username
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        Some(username) => format!("User {username}"),
+        None => "Anonymous".into(),
+    }
+}
+
+fn opcua_credential_detail(credential: &OpcuaCredential) -> String {
+    match credential
+        .username
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        Some(_) => {
+            if credential
+                .password
+                .as_deref()
+                .is_some_and(|value| !value.is_empty())
+            {
+                "Password set".into()
+            } else {
+                "Password missing".into()
+            }
+        }
+        None => "No credentials (anonymous access)".into(),
+    }
+}
+
+fn snmp_credential_detail(settings: &SnmpSettings) -> String {
+    let version = otserver_scanner::snmp::resolved_version(settings);
+    if version.eq_ignore_ascii_case("auto") {
+        return "Fallback: v3 if configured, then v2c, then v1".into();
+    }
+    if version.eq_ignore_ascii_case("3") {
+        let user = settings
+            .username
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .unwrap_or("(username missing)");
+        let security = match (
+            settings
+                .auth_protocol
+                .as_deref()
+                .filter(|value| !value.is_empty()),
+            settings
+                .privacy_protocol
+                .as_deref()
+                .filter(|value| !value.is_empty()),
+        ) {
+            (None, None) => "no authentication",
+            (Some(_), None) => "authentication",
+            (Some(_), Some(_)) => "authentication + encryption",
+            (None, Some(_)) => "invalid: encryption requires authentication",
+        };
+        return format!("User {user}, {security}");
+    }
+    match settings
+        .community
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        Some(community) => format!("Community {community}"),
+        None => "Community \"public\" (default)".into(),
+    }
+}
+
 pub struct GuiApp {
     configs: ScannerConfigs,
     selected_config: usize,
@@ -134,6 +217,8 @@ pub struct GuiApp {
     interface: String,
     source_mac: String,
     output: String,
+    snmp_credentials: Vec<SnmpSettings>,
+    selected_snmp: usize,
     snmp_version: String,
     snmp_community: String,
     snmp_username: String,
@@ -142,6 +227,8 @@ pub struct GuiApp {
     snmp_auth_password: String,
     snmp_privacy_protocol: String,
     snmp_privacy_password: String,
+    opcua_credentials: Vec<OpcuaCredential>,
+    selected_opcua: usize,
     opcua_username: String,
     opcua_password: String,
     arp_enabled: bool,
@@ -187,6 +274,8 @@ impl GuiApp {
             interface: String::new(),
             source_mac: String::new(),
             output: String::new(),
+            snmp_credentials: vec![SnmpSettings::default()],
+            selected_snmp: 0,
             snmp_version: "2c".into(),
             snmp_community: String::new(),
             snmp_username: String::new(),
@@ -195,6 +284,8 @@ impl GuiApp {
             snmp_auth_password: String::new(),
             snmp_privacy_protocol: String::new(),
             snmp_privacy_password: String::new(),
+            opcua_credentials: vec![OpcuaCredential::default()],
+            selected_opcua: 0,
             opcua_username: String::new(),
             opcua_password: String::new(),
             arp_enabled: true,
@@ -258,15 +349,13 @@ impl GuiApp {
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_else(|| "otserver-scan.json".into());
 
-        let snmp = config.snmp.unwrap_or_default();
-        self.snmp_version = otserver_scanner::snmp::resolved_version(&snmp).to_string();
-        self.snmp_community = snmp.community.unwrap_or_default();
-        self.snmp_username = snmp.username.unwrap_or_default();
-        self.snmp_context = snmp.context_name.unwrap_or_default();
-        self.snmp_auth_protocol = snmp.auth_protocol.unwrap_or_default();
-        self.snmp_auth_password = snmp.auth_password.unwrap_or_default();
-        self.snmp_privacy_protocol = snmp.privacy_protocol.unwrap_or_default();
-        self.snmp_privacy_password = snmp.privacy_password.unwrap_or_default();
+        self.snmp_credentials = config
+            .snmp
+            .map(|credentials| credentials.settings())
+            .filter(|settings| !settings.is_empty())
+            .unwrap_or_else(|| vec![SnmpSettings::default()]);
+        self.selected_snmp = 0;
+        self.load_snmp_buffers();
 
         let legacy_native_disabled = config.no_protocols.unwrap_or(false);
         self.arp_enabled = !config.no_arp.unwrap_or(false);
@@ -279,8 +368,23 @@ impl GuiApp {
         self.opcua_enabled = !(legacy_native_disabled || config.no_opcua.unwrap_or(false));
         self.snmp_enabled = !config.no_snmp.unwrap_or(false);
         self.lldp_enabled = !config.no_lldp.unwrap_or(false);
-        self.opcua_username = config.opcua_username.unwrap_or_default();
-        self.opcua_password = config.opcua_password.unwrap_or_default();
+        let mut opcua = config
+            .opcua_credentials
+            .map(|credentials| credentials.credentials())
+            .unwrap_or_default();
+        if opcua.is_empty() && (config.opcua_username.is_some() || config.opcua_password.is_some())
+        {
+            opcua.push(OpcuaCredential {
+                username: config.opcua_username,
+                password: config.opcua_password,
+            });
+        }
+        if opcua.is_empty() {
+            opcua.push(OpcuaCredential::default());
+        }
+        self.opcua_credentials = opcua;
+        self.selected_opcua = 0;
+        self.load_opcua_buffers();
         self.server_url = config.server_url.unwrap_or_default();
         self.site = config.site.unwrap_or_default();
         self.api_key = config.api_key.unwrap_or_default();
@@ -288,8 +392,20 @@ impl GuiApp {
         self.refresh_win10pcap();
     }
 
-    fn snmp_settings(&self) -> Option<SnmpSettings> {
-        let settings = SnmpSettings {
+    fn load_snmp_buffers(&mut self) {
+        let snmp = self.snmp_credentials[self.selected_snmp].clone();
+        self.snmp_version = otserver_scanner::snmp::resolved_version(&snmp).to_string();
+        self.snmp_community = snmp.community.unwrap_or_default();
+        self.snmp_username = snmp.username.unwrap_or_default();
+        self.snmp_context = snmp.context_name.unwrap_or_default();
+        self.snmp_auth_protocol = snmp.auth_protocol.unwrap_or_default();
+        self.snmp_auth_password = snmp.auth_password.unwrap_or_default();
+        self.snmp_privacy_protocol = snmp.privacy_protocol.unwrap_or_default();
+        self.snmp_privacy_password = snmp.privacy_password.unwrap_or_default();
+    }
+
+    fn snmp_buffer_settings(&self) -> SnmpSettings {
+        SnmpSettings {
             version: (self.snmp_version != "2c").then(|| self.snmp_version.clone()),
             community: nonempty_opt(&self.snmp_community),
             username: nonempty_opt(&self.snmp_username),
@@ -298,8 +414,66 @@ impl GuiApp {
             auth_password: nonempty_opt(&self.snmp_auth_password),
             privacy_protocol: nonempty_opt(&self.snmp_privacy_protocol),
             privacy_password: nonempty_opt(&self.snmp_privacy_password),
-        };
-        (settings != SnmpSettings::default()).then_some(settings)
+        }
+    }
+
+    fn snmp_all_settings(&self) -> Vec<SnmpSettings> {
+        let mut settings = self.snmp_credentials.clone();
+        settings[self.selected_snmp] = self.snmp_buffer_settings();
+        settings
+    }
+
+    fn load_opcua_buffers(&mut self) {
+        let credential = self.opcua_credentials[self.selected_opcua].clone();
+        self.opcua_username = credential.username.unwrap_or_default();
+        self.opcua_password = credential.password.unwrap_or_default();
+    }
+
+    fn opcua_buffer_credential(&self) -> OpcuaCredential {
+        OpcuaCredential {
+            username: nonempty_opt(&self.opcua_username),
+            password: nonempty_opt(&self.opcua_password),
+        }
+    }
+
+    fn opcua_all_credentials(&self) -> Vec<OpcuaCredential> {
+        let mut credentials = self.opcua_credentials.clone();
+        credentials[self.selected_opcua] = self.opcua_buffer_credential();
+        credentials
+    }
+
+    fn opcua_credentials_config(&self) -> Option<OpcuaCredentials> {
+        let mut credentials = self.opcua_all_credentials();
+        if credentials.len() == 1 && credentials[0] == OpcuaCredential::default() {
+            return None;
+        }
+        if credentials.len() == 1 {
+            Some(OpcuaCredentials::Single(credentials.remove(0)))
+        } else {
+            Some(OpcuaCredentials::Multiple(credentials))
+        }
+    }
+
+    fn opcua_credential_row_labels(&self) -> Vec<String> {
+        self.opcua_all_credentials()
+            .iter()
+            .enumerate()
+            .map(|(index, credential)| {
+                format!("{}. {}", index + 1, opcua_credential_label(credential))
+            })
+            .collect()
+    }
+
+    fn snmp_credentials_config(&self) -> Option<SnmpCredentials> {
+        let mut settings = self.snmp_all_settings();
+        if settings.len() == 1 && settings[0] == SnmpSettings::default() {
+            return None;
+        }
+        if settings.len() == 1 {
+            Some(SnmpCredentials::Single(settings.remove(0)))
+        } else {
+            Some(SnmpCredentials::Multiple(settings))
+        }
     }
 
     fn to_config(&self) -> ScannerConfig {
@@ -316,7 +490,7 @@ impl GuiApp {
         config.interface = nonempty_opt(&self.interface);
         config.source_mac = nonempty_opt(&self.source_mac);
         config.output = nonempty_opt(&self.output).map(PathBuf::from);
-        config.snmp = self.snmp_settings();
+        config.snmp = self.snmp_credentials_config();
         config.no_protocols = None;
         config.no_arp = (!self.arp_enabled).then_some(true);
         config.no_profinet = (!self.profinet_enabled).then_some(true);
@@ -328,8 +502,9 @@ impl GuiApp {
         config.no_opcua = (!self.opcua_enabled).then_some(true);
         config.no_snmp = (!self.snmp_enabled).then_some(true);
         config.no_lldp = (!self.lldp_enabled).then_some(true);
-        config.opcua_username = nonempty_opt(&self.opcua_username);
-        config.opcua_password = nonempty_opt(&self.opcua_password);
+        config.opcua_credentials = self.opcua_credentials_config();
+        config.opcua_username = None;
+        config.opcua_password = None;
         config.server_url = nonempty_opt(&self.server_url);
         config.site = nonempty_opt(&self.site);
         config.api_key = nonempty_opt(&self.api_key);
@@ -889,8 +1064,56 @@ impl eframe::App for GuiApp {
                     ui.set_min_width(ui.available_width());
                     ui.heading("SNMP Settings");
                     ui.small(
-                        "Stored in otscanner.json. Without settings, SNMPv2c with community \"public\" is used.",
+                        "Stored in otscanner.json. Credentials are tried top to bottom until one succeeds. Without settings, SNMPv2c with community \"public\" is used.",
                     );
+                    let entries = self.snmp_all_settings();
+                    egui::Grid::new("snmp-credentials")
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for (index, entry) in entries.iter().enumerate() {
+                                let selected = index == self.selected_snmp;
+                                if ui
+                                    .selectable_label(
+                                        selected,
+                                        format!(
+                                            "{}. {}",
+                                            index + 1,
+                                            snmp_version_label(
+                                                otserver_scanner::snmp::resolved_version(entry)
+                                            )
+                                        ),
+                                    )
+                                    .clicked()
+                                    && !selected
+                                {
+                                    self.snmp_credentials[self.selected_snmp] =
+                                        self.snmp_buffer_settings();
+                                    self.selected_snmp = index;
+                                    self.load_snmp_buffers();
+                                    self.save_config();
+                                }
+                                ui.label(snmp_credential_detail(entry));
+                                if ui
+                                    .add_enabled(entries.len() > 1, egui::Button::new("Remove"))
+                                    .clicked()
+                                {
+                                    self.snmp_credentials.remove(index);
+                                    self.selected_snmp =
+                                        self.selected_snmp.min(self.snmp_credentials.len() - 1);
+                                    self.load_snmp_buffers();
+                                    self.save_config();
+                                }
+                                ui.end_row();
+                            }
+                        });
+                    ui.small("Select a row to edit it below.");
+                    if ui.button("Add Credential").clicked() {
+                        self.snmp_credentials[self.selected_snmp] = self.snmp_buffer_settings();
+                        self.snmp_credentials.push(SnmpSettings::default());
+                        self.selected_snmp = self.snmp_credentials.len() - 1;
+                        self.load_snmp_buffers();
+                        self.save_config();
+                    }
                     ui.horizontal(|ui| {
                         ui.label("Version:");
                         if protocol_combo(
@@ -1021,8 +1244,49 @@ impl eframe::App for GuiApp {
                     ui.set_min_width(ui.available_width());
                     ui.heading("OPC UA Credentials");
                     ui.small(
-                        "Stored in otscanner.json. Used only when a server requires username authentication. Passwords travel unencrypted because the scanner uses SecurityPolicy None.",
+                        "Stored in otscanner.json. Anonymous access is tried first; credentials are tried top to bottom only if it fails. Passwords travel unencrypted because the scanner uses SecurityPolicy None.",
                     );
+                    let entries = self.opcua_all_credentials();
+                    let labels = self.opcua_credential_row_labels();
+                    egui::Grid::new("opcua-credentials")
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for (index, entry) in entries.iter().enumerate() {
+                                let selected = index == self.selected_opcua;
+                                if ui
+                                    .selectable_label(selected, &labels[index])
+                                    .clicked()
+                                    && !selected
+                                {
+                                    self.opcua_credentials[self.selected_opcua] =
+                                        self.opcua_buffer_credential();
+                                    self.selected_opcua = index;
+                                    self.load_opcua_buffers();
+                                    self.save_config();
+                                }
+                                ui.label(opcua_credential_detail(entry));
+                                if ui
+                                    .add_enabled(entries.len() > 1, egui::Button::new("Remove"))
+                                    .clicked()
+                                {
+                                    self.opcua_credentials.remove(index);
+                                    self.selected_opcua =
+                                        self.selected_opcua.min(self.opcua_credentials.len() - 1);
+                                    self.load_opcua_buffers();
+                                    self.save_config();
+                                }
+                                ui.end_row();
+                            }
+                        });
+                    ui.small("Select a row to edit it below.");
+                    if ui.button("Add Credential").clicked() {
+                        self.opcua_credentials[self.selected_opcua] =
+                            self.opcua_buffer_credential();
+                        self.opcua_credentials.push(OpcuaCredential::default());
+                        self.selected_opcua = self.opcua_credentials.len() - 1;
+                        self.load_opcua_buffers();
+                        self.save_config();
+                    }
                     ui.horizontal(|ui| {
                         ui.label("Username:");
                         if ui
@@ -1121,7 +1385,11 @@ pub fn run_gui() -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{GuiApp, bound_ip_addresses, interface_mac, with_added_configuration};
+    use super::{
+        GuiApp, OpcuaCredential, OpcuaCredentials, SnmpCredentials, SnmpSettings,
+        bound_ip_addresses, interface_mac, opcua_credential_detail, opcua_credential_label,
+        snmp_credential_detail, snmp_version_label, with_added_configuration,
+    };
     use crate::{ScannerConfig, ScannerConfigs};
     use otserver_scanner::profinet::CaptureInterface;
 
@@ -1178,6 +1446,144 @@ mod tests {
 
         assert_eq!(saved.configs()[0].opcua_ports, first.opcua_ports);
         assert_eq!(saved.configs()[1], second);
+    }
+
+    #[test]
+    fn snmp_credential_list_survives_gui_roundtrip() {
+        let config = ScannerConfig {
+            snmp: Some(SnmpCredentials::Multiple(vec![
+                SnmpSettings {
+                    community: Some("first".into()),
+                    ..SnmpSettings::default()
+                },
+                SnmpSettings {
+                    version: Some("3".into()),
+                    username: Some("ops".into()),
+                    ..SnmpSettings::default()
+                },
+            ])),
+            ..ScannerConfig::default()
+        };
+        let app = GuiApp::new(ScannerConfigs::Single(Box::new(config)));
+        assert_eq!(app.snmp_credentials.len(), 2);
+        assert_eq!(app.snmp_community, "first");
+
+        let settings = app.to_config().snmp.unwrap().settings();
+        assert_eq!(settings.len(), 2);
+        assert_eq!(settings[0].community.as_deref(), Some("first"));
+        assert_eq!(settings[1].username.as_deref(), Some("ops"));
+    }
+
+    #[test]
+    fn lone_default_snmp_credential_is_omitted_from_config() {
+        let app = GuiApp::new(ScannerConfigs::Single(Box::default()));
+        assert!(app.to_config().snmp.is_none());
+    }
+
+    #[test]
+    fn snmp_credential_rows_describe_entries_without_passwords() {
+        assert_eq!(snmp_version_label("1"), "SNMPv1");
+        assert_eq!(snmp_version_label("2c"), "SNMPv2c");
+        assert_eq!(snmp_version_label("3"), "SNMPv3");
+        assert_eq!(snmp_version_label("auto"), "Auto (v3, v2c, v1)");
+
+        assert_eq!(
+            snmp_credential_detail(&SnmpSettings::default()),
+            "Community \"public\" (default)"
+        );
+        assert_eq!(
+            snmp_credential_detail(&SnmpSettings {
+                community: Some("lab-private".into()),
+                ..SnmpSettings::default()
+            }),
+            "Community lab-private"
+        );
+        let detail = snmp_credential_detail(&SnmpSettings {
+            version: Some("3".into()),
+            username: Some("ops".into()),
+            auth_protocol: Some("sha256".into()),
+            auth_password: Some("auth-secret".into()),
+            privacy_protocol: Some("aes128".into()),
+            privacy_password: Some("privacy-secret".into()),
+            ..SnmpSettings::default()
+        });
+        assert_eq!(detail, "User ops, authentication + encryption");
+        assert!(!detail.contains("auth-secret"));
+        assert!(!detail.contains("privacy-secret"));
+    }
+
+    #[test]
+    fn opcua_credential_list_survives_gui_roundtrip() {
+        let config = ScannerConfig {
+            opcua_credentials: Some(OpcuaCredentials::Multiple(vec![
+                OpcuaCredential {
+                    username: Some("first".into()),
+                    password: Some("first-password".into()),
+                },
+                OpcuaCredential {
+                    username: Some("second".into()),
+                    password: None,
+                },
+            ])),
+            ..ScannerConfig::default()
+        };
+        let app = GuiApp::new(ScannerConfigs::Single(Box::new(config)));
+        assert_eq!(app.opcua_credentials.len(), 2);
+        assert_eq!(app.opcua_username, "first");
+        assert_eq!(
+            app.opcua_credential_row_labels(),
+            ["1. User first", "2. User second"]
+        );
+
+        let credentials = app.to_config().opcua_credentials.unwrap().credentials();
+        assert_eq!(credentials.len(), 2);
+        assert_eq!(credentials[0].password.as_deref(), Some("first-password"));
+        assert_eq!(credentials[1].username.as_deref(), Some("second"));
+    }
+
+    #[test]
+    fn legacy_opcua_fields_load_into_credential_list() {
+        let config = ScannerConfig {
+            opcua_username: Some("legacy".into()),
+            opcua_password: Some("legacy-password".into()),
+            ..ScannerConfig::default()
+        };
+        let app = GuiApp::new(ScannerConfigs::Single(Box::new(config)));
+        assert_eq!(app.opcua_credentials.len(), 1);
+        assert_eq!(app.opcua_username, "legacy");
+        let saved = app.to_config();
+        assert!(saved.opcua_username.is_none());
+        assert_eq!(
+            saved.opcua_credentials.unwrap().credentials()[0]
+                .username
+                .as_deref(),
+            Some("legacy")
+        );
+    }
+
+    #[test]
+    fn opcua_credential_rows_describe_entries_without_passwords() {
+        assert_eq!(
+            opcua_credential_label(&OpcuaCredential::default()),
+            "Anonymous"
+        );
+        assert_eq!(
+            opcua_credential_label(&OpcuaCredential {
+                username: Some("ops".into()),
+                password: None,
+            }),
+            "User ops"
+        );
+        assert_eq!(
+            opcua_credential_detail(&OpcuaCredential::default()),
+            "No credentials (anonymous access)"
+        );
+        let detail = opcua_credential_detail(&OpcuaCredential {
+            username: Some("ops".into()),
+            password: Some("secret".into()),
+        });
+        assert_eq!(detail, "Password set");
+        assert!(!detail.contains("secret"));
     }
 
     #[test]

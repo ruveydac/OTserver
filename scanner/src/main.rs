@@ -112,7 +112,7 @@ pub struct ScannerConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub snmp: Option<snmp::Settings>,
+    pub snmp: Option<snmp::Credentials>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub no_protocols: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -137,6 +137,8 @@ pub struct ScannerConfig {
     pub no_lldp: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub opcua_ports: Option<Vec<u16>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opcua_credentials: Option<otserver_scanner::protocols::OpcuaCredentials>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub opcua_username: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -237,7 +239,7 @@ pub struct ScanOptions {
     pub source_mac: String,
     pub output: PathBuf,
     pub protocols: ProtocolOptions,
-    pub snmp: snmp::Settings,
+    pub snmp: Vec<snmp::Settings>,
     pub opcua: otserver_scanner::protocols::OpcuaSettings,
     pub upload: Option<UploadOptions>,
 }
@@ -521,7 +523,12 @@ pub fn resolve_scan(
             .or(config.output)
             .unwrap_or_else(|| PathBuf::from("otserver-scan.json")),
         protocols,
-        snmp: config.snmp.unwrap_or_default(),
+        snmp: config
+            .snmp
+            .as_ref()
+            .map(snmp::Credentials::settings)
+            .filter(|settings| !settings.is_empty())
+            .unwrap_or_else(|| vec![snmp::Settings::default()]),
         opcua,
         upload,
     })
@@ -534,12 +541,24 @@ fn opcua_probe_settings(config: &ScannerConfig) -> otserver_scanner::protocols::
             .filter(|value| !value.is_empty())
             .map(str::to_owned)
     };
+    let mut credentials = config
+        .opcua_credentials
+        .as_ref()
+        .map(|credentials| credentials.credentials())
+        .unwrap_or_default();
+    if credentials.is_empty()
+        && let Some(username) = config_value(config.opcua_username.as_deref())
+    {
+        credentials.push(otserver_scanner::protocols::OpcuaCredential {
+            username: Some(username),
+            password: config_value(config.opcua_password.as_deref()),
+        });
+    }
     otserver_scanner::protocols::OpcuaSettings {
         ports: otserver_scanner::protocols::OpcuaSettings::ports_or_default(
             config.opcua_ports.clone(),
         ),
-        username: config_value(config.opcua_username.as_deref()),
-        password: config_value(config.opcua_password.as_deref()),
+        credentials,
     }
 }
 
@@ -1019,7 +1038,7 @@ async fn probe_snmp(
     links: &mut Vec<otserver_scanner::contract::TopologyLink>,
     unresolved: &mut Vec<otserver_scanner::contract::Observation>,
     warnings: &mut Vec<String>,
-    settings: &snmp::Settings,
+    settings: &[snmp::Settings],
     selection: snmp::QuerySelection,
     logger: &dyn LogOutput,
     cancelled: &AtomicBool,
@@ -1040,7 +1059,7 @@ async fn probe_snmp(
                 devices, links, unresolved, warnings, logger, selection, result,
             );
         }
-        let settings = settings.clone();
+        let settings = settings.to_vec();
         let local_mac = identities.get(&ip).cloned();
         tasks.spawn(async move {
             let (attempts, result) =
@@ -1255,7 +1274,7 @@ mod tests {
                 "interface":"config-interface",
                 "sourceMac":"00:11:22:33:44:55",
                 "output":"configured.json",
-                "snmp":{"version":"3","username":"ops","authProtocol":"sha256","authPassword":"secret"},
+                "snmp":[{"version":"3","username":"ops","authProtocol":"sha256","authPassword":"secret"}],
                 "noProtocols":true,
                 "serverUrl":"https://otserver.example/base/",
                 "site":"site-1",
@@ -1281,8 +1300,8 @@ mod tests {
         assert!(!resolved.protocols.opcua);
         assert!(resolved.protocols.snmp);
         assert!(resolved.protocols.lldp);
-        assert_eq!(resolved.snmp.username.as_deref(), Some("ops"));
-        assert_eq!(resolved.snmp.auth_password.as_deref(), Some("secret"));
+        assert_eq!(resolved.snmp[0].username.as_deref(), Some("ops"));
+        assert_eq!(resolved.snmp[0].auth_password.as_deref(), Some("secret"));
         let upload = resolved.upload.unwrap();
         assert_eq!(
             upload.endpoint.as_str(),
@@ -1300,11 +1319,11 @@ mod tests {
             interface: Some("eth0".into()),
             source_mac: Some("00:11:22:33:44:55".into()),
             output: Some(PathBuf::from("output.json")),
-            snmp: Some(snmp::Settings {
+            snmp: Some(snmp::Credentials::Single(snmp::Settings {
                 version: Some("2c".into()),
                 community: Some("lab-public".into()),
                 ..snmp::Settings::default()
-            }),
+            })),
             no_protocols: None,
             no_arp: Some(true),
             no_profinet: None,
@@ -1317,6 +1336,7 @@ mod tests {
             no_snmp: Some(true),
             no_lldp: Some(true),
             opcua_ports: Some(vec![4840, 4841]),
+            opcua_credentials: None,
             opcua_username: Some("opc-user".into()),
             opcua_password: Some("opc-password".into()),
             server_url: Some("https://otserver.example".into()),
@@ -1440,16 +1460,41 @@ mod tests {
         };
         let settings = opcua_probe_settings(&config);
         assert_eq!(settings.ports, [4841, 48400]);
-        assert_eq!(settings.username.as_deref(), Some("opc-user"));
-        assert_eq!(settings.password.as_deref(), Some("opc-password"));
+        assert_eq!(settings.credentials.len(), 1);
+        assert_eq!(
+            settings.credentials[0].username.as_deref(),
+            Some("opc-user")
+        );
+        assert_eq!(
+            settings.credentials[0].password.as_deref(),
+            Some("opc-password")
+        );
 
         let settings = opcua_probe_settings(&ScannerConfig::default());
         assert_eq!(
             settings.ports,
             otserver_scanner::protocols::OPCUA_DEFAULT_PORTS
         );
-        assert_eq!(settings.username, None);
-        assert_eq!(settings.password, None);
+        assert!(settings.credentials.is_empty());
+    }
+
+    #[test]
+    fn resolves_opcua_credential_list_before_legacy_fields() {
+        let config = parse_config(
+            br#"{
+                "opcuaCredentials":[
+                    {"username":"first","password":"first-password"},
+                    {"username":"second","password":"second-password"}
+                ],
+                "opcuaUsername":"legacy",
+                "opcuaPassword":"legacy-password"
+            }"#,
+        )
+        .unwrap();
+        let settings = opcua_probe_settings(&config.configs()[0]);
+        assert_eq!(settings.credentials.len(), 2);
+        assert_eq!(settings.credentials[0].username.as_deref(), Some("first"));
+        assert_eq!(settings.credentials[1].username.as_deref(), Some("second"));
     }
 
     #[test]
@@ -1510,9 +1555,39 @@ mod tests {
         cli.source_mac = Some("00:11:22:33:44:55".into());
         let resolved = resolve_scan(cli, ScannerConfig::default(), None).unwrap();
         assert_eq!(resolved.protocols, ProtocolOptions::default());
-        assert_eq!(resolved.snmp, snmp::Settings::default());
-        assert_eq!(snmp::resolved_version(&resolved.snmp), "2c");
-        assert!(snmp::auth(&resolved.snmp).is_ok());
+        assert_eq!(resolved.snmp, vec![snmp::Settings::default()]);
+        assert_eq!(snmp::resolved_version(&resolved.snmp[0]), "2c");
+        assert!(snmp::auth(&resolved.snmp[0]).is_ok());
+    }
+
+    #[test]
+    fn resolves_snmp_credential_list_in_order() {
+        let config = parse_config(
+            br#"{
+                "targets":["192.0.2.1"],
+                "interface":"eth0",
+                "sourceMac":"00:11:22:33:44:55",
+                "snmp":[
+                    {"version":"3","username":"ops","authProtocol":"sha256","authPassword":"auth-secret"},
+                    {"version":"2c","community":"first"},
+                    {"version":"2c","community":"second"}
+                ]
+            }"#,
+        )
+        .unwrap();
+        let resolved = resolve_scan(args(), config.configs()[0].clone(), None).unwrap();
+        assert_eq!(resolved.snmp.len(), 3);
+        assert_eq!(resolved.snmp[0].username.as_deref(), Some("ops"));
+        assert_eq!(resolved.snmp[1].community.as_deref(), Some("first"));
+        assert_eq!(resolved.snmp[2].community.as_deref(), Some("second"));
+
+        let empty = parse_config(br#"{"snmp":[]}"#).unwrap();
+        let mut cli = args();
+        cli.targets.push("192.0.2.1".into());
+        cli.interface = Some("eth0".into());
+        cli.source_mac = Some("00:11:22:33:44:55".into());
+        let resolved = resolve_scan(cli, empty.configs()[0].clone(), None).unwrap();
+        assert_eq!(resolved.snmp, vec![snmp::Settings::default()]);
     }
 
     #[test]
@@ -1626,7 +1701,7 @@ mod tests {
             source_mac: "00:11:22:33:44:55".into(),
             output: output.clone(),
             protocols: ProtocolOptions::default(),
-            snmp: snmp::Settings::default(),
+            snmp: vec![snmp::Settings::default()],
             opcua: protocols::OpcuaSettings::default(),
             upload: None,
         };

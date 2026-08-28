@@ -88,9 +88,11 @@ multiple configurations, the GUI can run the selected configuration or run all c
 sequentially. A stopped batch skips its remaining configurations.
 
 SNMP settings and credentials live in the `snmp` block of `otscanner.json` and are fully editable
-in the GUI. Without any settings, SNMPv2c with the community `public` is used, so SNMP never blocks
-a scan. Set `version` to `1` for a legacy SNMPv1 agent. For SNMPv3 set `version` to `3` plus
-`username`, optional `contextName`, and the
+in the GUI. The `snmp` value is a single credential object or a list of credentials; a list is tried
+in order per target until one succeeds, so one configuration can combine an SNMPv3 user with several
+SNMPv1/v2c communities. Without any settings, SNMPv2c with the community `public` is used, so SNMP
+never blocks a scan. Set `version` to `1` for a legacy SNMPv1 agent. For SNMPv3 set `version` to `3`
+plus `username`, optional `contextName`, and the
 `authProtocol`/`authPassword` and `privacyProtocol`/`privacyPassword` pairs. Credentials are stored
 in plaintext in `otscanner.json`; keep the file out of source control and restrict its permissions.
 Credentials are never written to logs or scan exports. Set `version` to `auto` to opt into fallback:
@@ -106,8 +108,13 @@ identities.
 
 OPC UA discovery connects to ports 4840, 4841, and 48400 by default (configurable via `opcuaPorts`).
 The scanner prefers anonymous authentication; if the server requires username authentication, set
-`opcuaUsername` and `opcuaPassword` in the config or in the GUI. Passwords travel unencrypted
-because the scanner uses SecurityPolicy None, and are never written to logs or scan exports.
+`opcuaCredentials` in the config — a single `{ "username", "password" }` object or a list of them.
+Anonymous access is always tried first; the configured credentials are tried top to bottom only
+when it fails. The legacy single
+`opcuaUsername`/`opcuaPassword` pair remains supported. The GUI shows the same credential table as
+for SNMP: rows in try order with **Remove**, **Add Credential**, and the edit fields below.
+Passwords travel unencrypted because the scanner uses SecurityPolicy None, and are never written to
+logs or scan exports.
 The scanner reads only asset identification, health, and location variables; it never writes values
 or calls methods that modify server state.
 
@@ -151,8 +158,7 @@ OTserver destination. The existing single-object form remains supported:
   "noFox": false,
   "noOpcua": false,
   "opcuaPorts": [4840, 4841, 48400],
-  "opcuaUsername": "",
-  "opcuaPassword": "",
+  "opcuaCredentials": [{ "username": "inventory", "password": "..." }],
   "noSnmp": false,
   "noLldp": false,
   "serverUrl": "https://otserver.example",
@@ -205,6 +211,28 @@ An SNMPv3 block looks like this instead:
   }
 }
 ```
+
+To try several credentials in one scan, use a list. Entries are probed in order per target and
+duplicate entries are skipped:
+
+```json
+{
+  "snmp": [
+    {
+      "version": "3",
+      "username": "inventory",
+      "authProtocol": "sha256",
+      "authPassword": "..."
+    },
+    { "version": "2c", "community": "public" },
+    { "version": "2c", "community": "legacy-private" }
+  ]
+}
+```
+
+The GUI manages this list in the SNMP settings: a table shows every active credential in try order
+with its version and community or SNMPv3 user, each with a **Remove** button. Selecting a row edits
+it in the fields below, where **Add Credential** appends a new entry; passwords stay masked.
 
 Command-line values override every selected file entry, and `OTSERVER_API_KEY` overrides every
 entry's `apiKey`. A shared `--output` override therefore cannot be used for a multi-entry run because
