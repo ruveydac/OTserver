@@ -1,8 +1,8 @@
 #[cfg(windows)]
 use crate::win10pcap_install;
 use crate::{
-    BatchResult, LogOutput, ScanArgs, ScannerConfig, ScannerConfigs, format_log_line,
-    load_config_sync, nonempty_opt, prepare_scans, run_scan_batch, save_config_sync,
+    BatchResult, LogOutput, ScanArgs, ScannerConfig, ScannerConfigs, format_log_line, load_config,
+    nonempty_opt, prepare_scans, run_scan_batch, save_config_sync,
 };
 use eframe::egui;
 use otserver_scanner::contract::normalize_mac;
@@ -103,6 +103,14 @@ fn with_added_configuration(
     }
     values.push(added);
     ScannerConfigs::Multiple(values)
+}
+
+fn text_row(ui: &mut egui::Ui, label: &str, edit: egui::TextEdit) -> bool {
+    ui.horizontal(|ui| {
+        ui.label(label);
+        ui.add(edit).changed()
+    })
+    .inner
 }
 
 fn protocol_combo(
@@ -830,15 +838,13 @@ impl eframe::App for GuiApp {
                             self.selected_config = selected;
                             self.apply_selected_config();
                         }
-                        ui.horizontal(|ui| {
-                            ui.label("Name:");
-                            if ui
-                                .add(egui::TextEdit::singleline(&mut self.config_name))
-                                .changed()
-                            {
-                                self.save_config();
-                            }
-                        });
+                        if text_row(
+                            ui,
+                            "Name:",
+                            egui::TextEdit::singleline(&mut self.config_name),
+                        ) {
+                            self.save_config();
+                        }
                     } else {
                         ui.label("This file currently contains one configuration.");
                     }
@@ -850,18 +856,13 @@ impl eframe::App for GuiApp {
                 ui.group(|ui| {
                     ui.set_min_width(ui.available_width());
                     ui.heading("Network Target Settings");
-                    ui.horizontal(|ui| {
-                        ui.label("Targets (CIDR / IP):");
-                        if ui
-                            .add(
-                                egui::TextEdit::singleline(&mut self.targets)
-                                    .hint_text("192.168.1.0/24"),
-                            )
-                            .changed()
-                        {
-                            self.save_config();
-                        }
-                    });
+                    if text_row(
+                        ui,
+                        "Targets (CIDR / IP):",
+                        egui::TextEdit::singleline(&mut self.targets).hint_text("192.168.1.0/24"),
+                    ) {
+                        self.save_config();
+                    }
 
                     ui.horizontal(|ui| {
                         ui.label("Capture Interface:");
@@ -919,17 +920,15 @@ impl eframe::App for GuiApp {
                         }
                     });
 
-                    ui.horizontal(|ui| {
-                        ui.label("Custom Interface ID:");
-                        if ui
-                            .add(egui::TextEdit::singleline(&mut self.interface))
-                            .changed()
-                        {
-                            #[cfg(windows)]
-                            self.refresh_win10pcap();
-                            self.save_config();
-                        }
-                    });
+                    if text_row(
+                        ui,
+                        "Custom Interface ID:",
+                        egui::TextEdit::singleline(&mut self.interface),
+                    ) {
+                        #[cfg(windows)]
+                        self.refresh_win10pcap();
+                        self.save_config();
+                    }
 
                     ui.horizontal(|ui| {
                         ui.label("Source MAC Address:");
@@ -1136,24 +1135,20 @@ impl eframe::App for GuiApp {
                         );
                     }
                     if self.snmp_version == "3" || self.snmp_version == "auto" {
-                        ui.horizontal(|ui| {
-                            ui.label("Username:");
-                            if ui
-                                .add(egui::TextEdit::singleline(&mut self.snmp_username))
-                                .changed()
-                            {
-                                self.save_config();
-                            }
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("Context Name:");
-                            if ui
-                                .add(egui::TextEdit::singleline(&mut self.snmp_context))
-                                .changed()
-                            {
-                                self.save_config();
-                            }
-                        });
+                        if text_row(
+                            ui,
+                            "Username:",
+                            egui::TextEdit::singleline(&mut self.snmp_username),
+                        ) {
+                            self.save_config();
+                        }
+                        if text_row(
+                            ui,
+                            "Context Name:",
+                            egui::TextEdit::singleline(&mut self.snmp_context),
+                        ) {
+                            self.save_config();
+                        }
                         ui.horizontal(|ui| {
                             ui.label("Authentication Protocol:");
                             if protocol_combo(
@@ -1173,19 +1168,15 @@ impl eframe::App for GuiApp {
                                 self.save_config();
                             }
                         });
-                        if !self.snmp_auth_protocol.is_empty() {
-                            ui.horizontal(|ui| {
-                                ui.label("Authentication Password:");
-                                if ui
-                                    .add(
-                                        egui::TextEdit::singleline(&mut self.snmp_auth_password)
-                                            .password(true),
-                                    )
-                                    .changed()
-                                {
-                                    self.save_config();
-                                }
-                            });
+                        if !self.snmp_auth_protocol.is_empty()
+                            && text_row(
+                                ui,
+                                "Authentication Password:",
+                                egui::TextEdit::singleline(&mut self.snmp_auth_password)
+                                    .password(true),
+                            )
+                        {
+                            self.save_config();
                         }
                         ui.horizontal(|ui| {
                             ui.label("Privacy Protocol:");
@@ -1204,37 +1195,27 @@ impl eframe::App for GuiApp {
                                 self.save_config();
                             }
                         });
-                        if !self.snmp_privacy_protocol.is_empty() {
-                            ui.horizontal(|ui| {
-                                ui.label("Privacy Password:");
-                                if ui
-                                    .add(
-                                        egui::TextEdit::singleline(
-                                            &mut self.snmp_privacy_password,
-                                        )
-                                        .password(true),
-                                    )
-                                    .changed()
-                                {
-                                    self.save_config();
-                                }
-                            });
+                        if !self.snmp_privacy_protocol.is_empty()
+                            && text_row(
+                                ui,
+                                "Privacy Password:",
+                                egui::TextEdit::singleline(&mut self.snmp_privacy_password)
+                                    .password(true),
+                            )
+                        {
+                            self.save_config();
                         }
                     }
-                    if self.snmp_version != "3" {
-                        ui.horizontal(|ui| {
-                            ui.label("Community:");
-                            if ui
-                                .add(
-                                    egui::TextEdit::singleline(&mut self.snmp_community)
-                                        .password(true)
-                                        .hint_text("public"),
-                                )
-                                .changed()
-                            {
-                                self.save_config();
-                            }
-                        });
+                    if self.snmp_version != "3"
+                        && text_row(
+                            ui,
+                            "Community:",
+                            egui::TextEdit::singleline(&mut self.snmp_community)
+                                .password(true)
+                                .hint_text("public"),
+                        )
+                    {
+                        self.save_config();
                     }
                 });
 
@@ -1287,30 +1268,21 @@ impl eframe::App for GuiApp {
                         self.load_opcua_buffers();
                         self.save_config();
                     }
-                    ui.horizontal(|ui| {
-                        ui.label("Username:");
-                        if ui
-                            .add(
-                                egui::TextEdit::singleline(&mut self.opcua_username)
-                                    .hint_text("Use anonymous access when blank"),
-                            )
-                            .changed()
-                        {
-                            self.save_config();
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("Password:");
-                        if ui
-                            .add(
-                                egui::TextEdit::singleline(&mut self.opcua_password)
-                                    .password(true),
-                            )
-                            .changed()
-                        {
-                            self.save_config();
-                        }
-                    });
+                    if text_row(
+                        ui,
+                        "Username:",
+                        egui::TextEdit::singleline(&mut self.opcua_username)
+                            .hint_text("Use anonymous access when blank"),
+                    ) {
+                        self.save_config();
+                    }
+                    if text_row(
+                        ui,
+                        "Password:",
+                        egui::TextEdit::singleline(&mut self.opcua_password).password(true),
+                    ) {
+                        self.save_config();
+                    }
                 });
 
                 ui.add_space(8.0);
@@ -1318,33 +1290,24 @@ impl eframe::App for GuiApp {
                 ui.group(|ui| {
                     ui.set_min_width(ui.available_width());
                     ui.heading("OTserver Direct Upload (Optional)");
-                    ui.horizontal(|ui| {
-                        ui.label("Server Base URL:");
-                        if ui
-                            .add(
-                                egui::TextEdit::singleline(&mut self.server_url)
-                                    .hint_text("https://otserver.example"),
-                            )
-                            .changed()
-                        {
-                            self.save_config();
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("Site ID:");
-                        if ui.add(egui::TextEdit::singleline(&mut self.site)).changed() {
-                            self.save_config();
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("API Key:");
-                        if ui
-                            .add(egui::TextEdit::singleline(&mut self.api_key).password(true))
-                            .changed()
-                        {
-                            self.save_config();
-                        }
-                    });
+                    if text_row(
+                        ui,
+                        "Server Base URL:",
+                        egui::TextEdit::singleline(&mut self.server_url)
+                            .hint_text("https://otserver.example"),
+                    ) {
+                        self.save_config();
+                    }
+                    if text_row(ui, "Site ID:", egui::TextEdit::singleline(&mut self.site)) {
+                        self.save_config();
+                    }
+                    if text_row(
+                        ui,
+                        "API Key:",
+                        egui::TextEdit::singleline(&mut self.api_key).password(true),
+                    ) {
+                        self.save_config();
+                    }
                 });
                 });
         });
@@ -1352,7 +1315,7 @@ impl eframe::App for GuiApp {
 }
 
 pub fn run_gui() -> Result<(), String> {
-    let configs = load_config_sync()?;
+    let configs = load_config()?;
     #[cfg(windows)]
     unsafe {
         // SAFETY: FreeConsole has no arguments or pointer preconditions.

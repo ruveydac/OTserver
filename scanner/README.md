@@ -99,9 +99,11 @@ Credentials are never written to logs or scan exports. Set `version` to `auto` t
 the scanner tries SNMPv3 first when a username is configured, then SNMPv2c, then SNMPv1, stopping at
 the first successful version. Explicit `1`, `2c`, and `3` selections never fall back.
 
-SNMP uses bounded, read-only queries for system identity, IF-MIB/IP-MIB interfaces, ENTITY-MIB
-components, BRIDGE/Q-BRIDGE ports and VLANs, LLDP topology, and the generic Siemens
-AUTOMATION-SYSTEM-MIB identity scalars. It probes configured IPv4 targets even when Layer 2
+SNMP uses bounded, read-only queries covering MIB-II (RFC 1213) system and interface identity,
+LLDP-MIB topology (IEEE 802.1AB) with the LLDP-EXT-DOT1, LLDP-EXT-DOT3, and LLDP-EXT-PNO
+extensions (IEEE 802.1AB / IEC 61158-6-10), MRP media-redundancy monitoring (IEC 62439-2),
+IF-MIB/IP-MIB interfaces, ENTITY-MIB components, BRIDGE/Q-BRIDGE ports and VLANs, and the generic
+Siemens AUTOMATION-SYSTEM-MIB identity scalars. It probes configured IPv4 targets even when Layer 2
 discovery cannot see them, but creates an asset only after obtaining a valid MAC from an interface,
 bridge, or LLDP chassis identity. Forwarding-table MACs are port evidence only and never asset
 identities.

@@ -203,6 +203,23 @@ pub fn normalize_mac(value: &str) -> Option<String> {
     )
 }
 
+pub fn mac_bytes(value: &str) -> Option<[u8; 6]> {
+    let normalized = normalize_mac(value)?;
+    let mut bytes = [0; 6];
+    for (index, part) in normalized.split(':').enumerate() {
+        bytes[index] = u8::from_str_radix(part, 16).ok()?;
+    }
+    Some(bytes)
+}
+
+pub fn format_mac(value: &[u8]) -> String {
+    value
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
 pub fn merge_devices(devices: Vec<Device>) -> Vec<Device> {
     let mut merged = BTreeMap::<String, Device>::new();
     for mut device in devices {
@@ -365,6 +382,14 @@ mod tests {
         ]);
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0].ip_addresses.len(), 2);
+    }
+
+    #[test]
+    fn converts_between_mac_text_and_bytes() {
+        let bytes = mac_bytes("00-1a-2b-3c-4d-5e").unwrap();
+        assert_eq!(bytes, [0x00, 0x1A, 0x2B, 0x3C, 0x4D, 0x5E]);
+        assert_eq!(format_mac(&bytes), "00:1A:2B:3C:4D:5E");
+        assert!(mac_bytes("192.0.2.1").is_none());
     }
 
     #[test]

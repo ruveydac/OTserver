@@ -3,7 +3,7 @@
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 #[cfg(windows)]
-use std::path::{Path, PathBuf};
+use std::path::Path;
 #[cfg(windows)]
 use std::process::{Command, Stdio};
 #[cfg(windows)]
@@ -51,7 +51,7 @@ fn install_from(directory: &Path) -> Result<String, String> {
     let installer = directory.join("Win10Pcap-v10.2-5002.msi");
     std::fs::write(&installer, INSTALLER)
         .map_err(|error| format!("Could not extract the Win10Pcap installer: {error}"))?;
-    let msiexec = system_directory()?.join("msiexec.exe");
+    let msiexec = otserver_scanner::profinet::win10pcap_system_directory()?.join("msiexec.exe");
     let mut child = Command::new(msiexec)
         .args(["/i"])
         .arg(&installer)
@@ -117,22 +117,6 @@ fn install_from(directory: &Path) -> Result<String, String> {
                 .into(),
         )
     }
-}
-
-#[cfg(windows)]
-fn system_directory() -> Result<PathBuf, String> {
-    use windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW;
-
-    let mut buffer = [0_u16; 32_768];
-    // SAFETY: buffer is writable for the supplied element count.
-    let length = unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) } as usize;
-    if length == 0 || length >= buffer.len() {
-        return Err(format!(
-            "Could not locate the Windows system directory: {}",
-            std::io::Error::last_os_error()
-        ));
-    }
-    Ok(PathBuf::from(String::from_utf16_lossy(&buffer[..length])))
 }
 
 #[cfg(not(windows))]

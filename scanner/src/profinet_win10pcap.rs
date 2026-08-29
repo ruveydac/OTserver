@@ -479,7 +479,7 @@ fn align_packet(length: usize) -> usize {
     (length + PACKET_ALIGNMENT - 1) & !(PACKET_ALIGNMENT - 1)
 }
 
-fn system_directory() -> Result<PathBuf, String> {
+pub(crate) fn system_directory() -> Result<PathBuf, String> {
     let mut buffer = [0_u16; 32_768];
     // SAFETY: buffer is writable for the supplied element count.
     let length = unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) } as usize;

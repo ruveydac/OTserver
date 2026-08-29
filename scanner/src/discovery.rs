@@ -1,4 +1,4 @@
-use crate::contract::{Device, Observation, Source, normalize_mac};
+use crate::contract::{Device, Observation, Source, format_mac, mac_bytes};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv4Addr;
@@ -83,7 +83,7 @@ pub fn scan(
 }
 
 fn device(ip: Ipv4Addr, mac: [u8; 6], fingerprint: Option<Fingerprint>) -> Device {
-    let mac = format_mac(mac);
+    let mac = format_mac(&mac);
     let observed_at = crate::now();
     let mut fields = BTreeMap::from([
         ("ipAddress".into(), json!(ip)),
@@ -181,87 +181,15 @@ fn reply(
 
 #[cfg(windows)]
 fn source_ipv4(interface: &str) -> Result<Ipv4Addr, String> {
-    use windows_sys::Win32::NetworkManagement::IpHelper::{
-        GetAdaptersAddresses, IP_ADAPTER_ADDRESSES_LH,
-    };
-    use windows_sys::Win32::Networking::WinSock::AF_UNSPEC;
-
-    let mut size = 0_u32;
-    // SAFETY: Initial call to get buffer size.
-    unsafe {
-        GetAdaptersAddresses(
-            AF_UNSPEC as u32,
-            0,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            &mut size,
-        );
-    }
-    if size == 0 {
-        return Err(format!(
-            "Could not inspect Windows interfaces for {interface}."
-        ));
-    }
-
-    let mut buffer = vec![0_u8; size as usize];
-    let adapter_addresses = buffer.as_mut_ptr() as *mut IP_ADAPTER_ADDRESSES_LH;
-
-    // SAFETY: Buffer is allocated with size returned by GetAdaptersAddresses.
-    let status = unsafe {
-        GetAdaptersAddresses(
-            AF_UNSPEC as u32,
-            0,
-            std::ptr::null_mut(),
-            adapter_addresses,
-            &mut size,
-        )
-    };
-    if status != 0 {
-        return Err(format!(
-            "Could not inspect Windows interfaces (error code {status})."
-        ));
-    }
-
-    let mut current = adapter_addresses;
-    while !current.is_null() {
-        // SAFETY: current points to valid IP_ADAPTER_ADDRESSES_LH element.
-        let adapter = unsafe { &*current };
-        let name =
-            unsafe { std::ffi::CStr::from_ptr(adapter.AdapterName.cast()).to_string_lossy() };
-        let friendly_name = if !adapter.FriendlyName.is_null() {
-            let mut len = 0;
-            while unsafe { *adapter.FriendlyName.add(len) } != 0 {
-                len += 1;
-            }
-            let slice = unsafe { std::slice::from_raw_parts(adapter.FriendlyName, len) };
-            String::from_utf16_lossy(slice)
-        } else {
-            String::new()
-        };
-
-        if name == interface || friendly_name == interface {
-            let mut unicast = adapter.FirstUnicastAddress;
-            while !unicast.is_null() {
-                // SAFETY: unicast points to valid IP_ADAPTER_UNICAST_ADDRESS_LH.
-                let item = unsafe { &*unicast };
-                if !item.Address.lpSockaddr.is_null() {
-                    let family = unsafe { (*item.Address.lpSockaddr).sa_family as u32 };
-                    if family == windows_sys::Win32::Networking::WinSock::AF_INET as u32 {
-                        let sockaddr = unsafe {
-                            &*(item.Address.lpSockaddr
-                                as *const windows_sys::Win32::Networking::WinSock::SOCKADDR_IN)
-                        };
-                        let s_addr = unsafe { sockaddr.sin_addr.S_un.S_addr };
-                        return Ok(Ipv4Addr::from(u32::from_be(s_addr)));
-                    }
-                }
-                unicast = item.Next;
-            }
-        }
-        current = adapter.Next;
-    }
-
-    Err(format!("Interface {interface} has no IPv4 address."))
+    crate::profinet::interfaces()?
+        .into_iter()
+        .find(|item| item.name == interface || item.friendly_name == interface)
+        .and_then(|item| {
+            item.addresses
+                .iter()
+                .find_map(|address| address.parse::<Ipv4Addr>().ok())
+        })
+        .ok_or_else(|| format!("Interface {interface} has no IPv4 address."))
 }
 
 #[cfg(target_os = "linux")]
@@ -608,23 +536,6 @@ fn checksum(bytes: &[u8]) -> u16 {
     !(sum as u16)
 }
 
-fn mac_bytes(value: &str) -> Option<[u8; 6]> {
-    let normalized = normalize_mac(value)?;
-    let mut bytes = [0; 6];
-    for (index, part) in normalized.split(':').enumerate() {
-        bytes[index] = u8::from_str_radix(part, 16).ok()?;
-    }
-    Some(bytes)
-}
-
-fn format_mac(value: [u8; 6]) -> String {
-    value
-        .iter()
-        .map(|byte| format!("{byte:02X}"))
-        .collect::<Vec<_>>()
-        .join(":")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -776,7 +687,7 @@ mod tests {
                 .contains_key("operatingSystem")
         );
         assert_eq!(
-            format_mac(mac_bytes("00-11-22-33-44-55").unwrap()),
+            format_mac(&mac_bytes("00-11-22-33-44-55").unwrap()),
             "00:11:22:33:44:55"
         );
         assert!(mac_bytes("invalid").is_none());

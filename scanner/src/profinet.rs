@@ -1,4 +1,4 @@
-use crate::contract::{Device, Observation, Source, normalize_mac, object};
+use crate::contract::{Device, Observation, Source, format_mac, mac_bytes, normalize_mac, object};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -205,7 +205,7 @@ pub fn scan(interface: &str, source_mac: &str, wait: Duration) -> Result<Vec<Dev
             devices.insert(device.mac_address.clone(), device);
             continue;
         }
-        let mac = hex_mac(&frame[6..12]);
+        let mac = format_mac(&frame[6..12]);
         let Some(mac) = normalize_mac(&mac) else {
             continue;
         };
@@ -527,7 +527,7 @@ pub fn parse_response(frame: &[u8], expected_xid: u32) -> Option<Device> {
     {
         return None;
     }
-    let mac = normalize_mac(&hex_mac(&frame[6..12]))?;
+    let mac = normalize_mac(&format_mac(&frame[6..12]))?;
     let data_length = u16::from_be_bytes([frame[24], frame[25]]) as usize;
     let end = 26_usize.checked_add(data_length)?;
     if data_length == 0 || end > frame.len() {
@@ -573,7 +573,7 @@ pub fn parse_response(frame: &[u8], expected_xid: u32) -> Option<Device> {
                 if payload.len() < 6 {
                     return None;
                 }
-                let advertised_mac = normalize_mac(&hex_mac(&payload[..6]))?;
+                let advertised_mac = normalize_mac(&format_mac(&payload[..6]))?;
                 raw.insert("dcpMacAddress".into(), json!(advertised_mac));
                 if advertised_mac != mac {
                     warnings.push(format!(
@@ -809,6 +809,11 @@ pub fn win10pcap_interface_available(interface: &str) -> bool {
 }
 
 #[cfg(windows)]
+pub fn win10pcap_system_directory() -> Result<std::path::PathBuf, String> {
+    win10pcap::system_directory()
+}
+
+#[cfg(windows)]
 fn windows_scan_interface(interface: &str) -> Result<CaptureInterface, String> {
     let selected = interfaces()?
         .into_iter()
@@ -863,23 +868,6 @@ fn is_obsolete_bridge(interface: &CaptureInterface) -> bool {
             .eq_ignore_ascii_case("Network Bridge")
 }
 
-#[cfg(any(windows, target_os = "linux"))]
-fn mac_bytes(value: &str) -> Option<[u8; 6]> {
-    let normalized = normalize_mac(value)?;
-    let values = normalized
-        .split(':')
-        .map(|part| u8::from_str_radix(part, 16).ok())
-        .collect::<Option<Vec<_>>>()?;
-    values.try_into().ok()
-}
-
-fn hex_mac(value: &[u8]) -> String {
-    value
-        .iter()
-        .map(|byte| format!("{byte:02X}"))
-        .collect::<Vec<_>>()
-        .join(":")
-}
 fn hex(value: &[u8]) -> String {
     value.iter().map(|byte| format!("{byte:02X}")).collect()
 }

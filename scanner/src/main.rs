@@ -357,7 +357,7 @@ async fn run() -> Result<(), String> {
             Ok(())
         }
         Some(Commands::Scan(args)) => {
-            let configs = load_config().await?;
+            let configs = load_config()?;
             let logger = StdoutLogger;
             let cancelled = AtomicBool::new(false);
             let (scans, mut failures) = prepare_scans(
@@ -397,17 +397,7 @@ pub fn get_config_path() -> Result<PathBuf, String> {
     }
 }
 
-pub async fn load_config() -> Result<ScannerConfigs, String> {
-    let path = get_config_path()?;
-    match tokio::fs::read(&path).await {
-        Ok(data) => parse_config(&data)
-            .map_err(|error| format!("Could not read {}: {error}", path.display())),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(ScannerConfigs::default()),
-        Err(error) => Err(format!("Could not read {}: {error}", path.display())),
-    }
-}
-
-pub fn load_config_sync() -> Result<ScannerConfigs, String> {
+pub fn load_config() -> Result<ScannerConfigs, String> {
     let path = get_config_path()?;
     match std::fs::read(&path) {
         Ok(data) => parse_config(&data)
