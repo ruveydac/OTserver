@@ -1,0 +1,3 @@
+[submodule "otserver-otter"]
+	path = otserver-otter
+	url = https://github.com/ruveydac/otserver-otter.git

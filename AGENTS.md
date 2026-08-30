@@ -9,7 +9,7 @@ rule, command, contract, or architectural boundary.
   quick reference is insufficient.
 - Product setup and operator basics are in `README.md`.
 - OTserver Otter usage and its canonical wire contract live in the separate `otserver-otter`
-  repository.
+  repository, pinned here as the `otserver-otter/` submodule.
 
 ## Project Summary
 
@@ -27,6 +27,7 @@ Main locations:
 - `src/importers/`: PRONETA XML, Nmap XML, OTserver Otter JSON, source metadata, and quality merging.
 - `src/search/`: Lucene syntax translation and graphical-filter integration.
 - `src/components/`: custom Payload admin views and fields.
+- `otserver-otter/contracts/otserver-scan-v2.schema.json`: pinned canonical Otter wire contract.
 - `tests/int/`: application and importer integration tests.
 
 ## Non-Negotiable Domain Rules
@@ -107,8 +108,8 @@ To add an importer:
 PRONETA has no public stable schema: accept known paths and capitalization variants, tolerate missing
 and unknown fields, and preserve useful raw data. Nmap input must be XML produced with `-oX`.
 OTserver Otter JSON must validate against schema version 2. A contract change requires coordinated
-updates to the canonical schema and Rust implementation in `otserver-otter`, plus this repository's
-TypeScript importer, fixtures, and tests.
+updates to the canonical schema and Rust implementation in `otserver-otter`, an updated submodule
+pointer here, plus this repository's TypeScript importer, fixtures, and tests.
 
 Human-supplied bulk import fields are declared once in `userSuppliedAssetFields` in
 `src/collections/Assets.ts`; the asset and import UIs derive from it. Custom field definitions are

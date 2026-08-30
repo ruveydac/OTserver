@@ -2,14 +2,14 @@
 
 # OTserver
 
-### Self-hosted OT inventory with a purpose-built, read-only discovery scanner
+### Self-hosted OT inventory with automatic discovery in the separate [OTserver Otter repository](https://github.com/ruveydac/otserver-otter)
 
 Native OT discovery · Quality-aware inventory · Site-scoped access · Immutable history
 
 [![Website](https://img.shields.io/badge/otserver.org-111111?logo=firefoxbrowser&logoColor=white)](https://otserver.org)
 [![Next.js](https://img.shields.io/badge/Next.js-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![MongoDB](https://img.shields.io/badge/MongoDB-001E2B?logo=mongodb&logoColor=47A248)](https://www.mongodb.com/)
-[![Rust](https://img.shields.io/badge/Otter-Rust-000000?logo=rust&logoColor=white)](https://otserver.org/scanner/)
+[![Rust](https://img.shields.io/badge/Otter-Rust-000000?logo=rust&logoColor=white)](https://github.com/ruveydac/otserver-otter)
 [![AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENCE.md)
 
 [Quick start](#quick-start) · [How it works](#how-it-works) · [Imports](#discovery-and-imports) · [Otter](#otserver-otter) · [Development](#development)
@@ -18,11 +18,11 @@ Native OT discovery · Quality-aware inventory · Site-scoped access · Immutabl
 
 ---
 
-OTserver combines a trustworthy industrial inventory with its own native discovery tool. The
-**OTserver Otter** is a cross-platform Rust CLI built specifically for identifying industrial
-devices through fixed, read-only protocol requests. It collects structured evidence—not just a flat
-host list—and exports observations, interfaces, ports, and topology through a strict versioned
-contract understood directly by the manager.
+OTserver provides a trustworthy industrial inventory. Automatic discovery lives in the separate
+**[OTserver Otter](https://github.com/ruveydac/otserver-otter)** repository: a cross-platform Rust CLI
+built specifically for identifying industrial devices through fixed, read-only protocol requests.
+It collects structured evidence—not just a flat host list—and exports observations, interfaces,
+ports, and topology through a strict versioned contract understood directly by the manager.
 
 OTserver turns that evidence into a site-scoped inventory with provenance-aware
 field merging, flexible hierarchies, role-based access, search, and a complete audit trail.
@@ -112,8 +112,8 @@ are recorded as human provenance and survive future imports.
 
 Import files are treated as untrusted input: parsers enforce size and structure limits, tolerate
 optional vendor data, and report malformed or uncorrelatable observations as warnings. The canonical
-wire contract is maintained as `contracts/otserver-scan-v2.schema.json` in the separate
-`otserver-otter` repository.
+wire contract is pinned through the `otserver-otter` submodule at
+[`otserver-otter/contracts/otserver-scan-v2.schema.json`](otserver-otter/contracts/otserver-scan-v2.schema.json).
 
 Example searches:
 
@@ -163,7 +163,7 @@ JSON directly to the existing REST importer with the user's current site permiss
 scan file is retained.
 
 OTserver Otter, its platform guide, contract, tests, and interoperability lab are maintained in the
-separate `otserver-otter` repository.
+separate [`otserver-otter` repository](https://github.com/ruveydac/otserver-otter).
 
 ## Security and audit model
 
@@ -196,6 +196,7 @@ src/access/        Shared site-scoped authorization
 src/importers/     PRONETA, Nmap, Otter parsers, and quality merging
 src/search/        Lucene query translation and graphical-filter integration
 src/components/    OTserver admin views, branding, and fields
+otserver-otter/    Pinned scanner repository and canonical export contract
 tests/int/         Application and importer integration tests
 ```
 
