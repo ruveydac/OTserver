@@ -9,17 +9,17 @@ Native OT discovery · Quality-aware inventory · Site-scoped access · Immutabl
 [![Website](https://img.shields.io/badge/otserver.org-111111?logo=firefoxbrowser&logoColor=white)](https://otserver.org)
 [![Next.js](https://img.shields.io/badge/Next.js-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![MongoDB](https://img.shields.io/badge/MongoDB-001E2B?logo=mongodb&logoColor=47A248)](https://www.mongodb.com/)
-[![Rust](https://img.shields.io/badge/Scanner-Rust-000000?logo=rust&logoColor=white)](scanner/README.md)
+[![Rust](https://img.shields.io/badge/Otter-Rust-000000?logo=rust&logoColor=white)](https://otserver.org/scanner/)
 [![AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENCE.md)
 
-[Quick start](#quick-start) · [How it works](#how-it-works) · [Imports](#discovery-and-imports) · [Scanner](#otserver-scanner) · [Development](#development)
+[Quick start](#quick-start) · [How it works](#how-it-works) · [Imports](#discovery-and-imports) · [Otter](#otserver-otter) · [Development](#development)
 
 </div>
 
 ---
 
 OTserver combines a trustworthy industrial inventory with its own native discovery tool. The
-**OTserver Scanner** is a cross-platform Rust CLI built specifically for identifying industrial
+**OTserver Otter** is a cross-platform Rust CLI built specifically for identifying industrial
 devices through fixed, read-only protocol requests. It collects structured evidence—not just a flat
 host list—and exports observations, interfaces, ports, and topology through a strict versioned
 contract understood directly by the manager.
@@ -31,7 +31,7 @@ field merging, flexible hierarchies, role-based access, search, and a complete a
 
 ## What you get
 
-- **OTserver Scanner** — Discover devices on Windows and Linux using native ARP, PROFINET
+- **OTserver Otter** — Discover devices on Windows and Linux using native ARP, PROFINET
   DCP, S7, EtherNet/IP, BACnet, Omron FINS, Niagara Fox, OPC UA, SNMP, and LLDP requests.
 - **Rich discovery evidence** — Preserve per-protocol observations, field quality, interfaces,
   ports, topology links, warnings, and partial failures in a validated JSON contract.
@@ -41,7 +41,7 @@ field merging, flexible hierarchies, role-based access, search, and a complete a
   organization uses.
 - **Scoped access** — Grant read-only or read/write access to a site and all its descendants. A
   protected Admin role retains unrestricted access.
-- **Discovery imports** — Ingest Siemens PRONETA XML, Nmap XML, and OTserver Scanner JSON into a
+- **Discovery imports** — Ingest Siemens PRONETA XML, Nmap XML, and OTserver Otter JSON into a
   selected site.
 - **Reliable correlation** — Assets are identified only by normalized MAC address, never by a
   changeable IP address or device name.
@@ -104,16 +104,16 @@ are recorded as human provenance and survive future imports.
 
 ## Discovery and imports
 
-| Source           | Input                   | Default quality      | Best for                                                     |
-| ---------------- | ----------------------- | -------------------- | ------------------------------------------------------------ |
-| OTserver Scanner | Schema-version-2 JSON   | Observation-specific | Native discovery with observations, interfaces, and topology |
-| Siemens PRONETA  | Topology XML            | High                 | Siemens-oriented discovery and topology exports              |
-| Nmap             | XML produced with `-oX` | Medium               | Existing Nmap-based discovery workflows                      |
+| Source          | Input                   | Default quality      | Best for                                                     |
+| --------------- | ----------------------- | -------------------- | ------------------------------------------------------------ |
+| OTserver Otter  | Schema-version-2 JSON   | Observation-specific | Native discovery with observations, interfaces, and topology |
+| Siemens PRONETA | Topology XML            | High                 | Siemens-oriented discovery and topology exports              |
+| Nmap            | XML produced with `-oX` | Medium               | Existing Nmap-based discovery workflows                      |
 
 Import files are treated as untrusted input: parsers enforce size and structure limits, tolerate
-optional vendor data, and report malformed or uncorrelatable observations as warnings. The scanner
-wire contract is defined in
-[`contracts/otserver-scan-v2.schema.json`](contracts/otserver-scan-v2.schema.json).
+optional vendor data, and report malformed or uncorrelatable observations as warnings. The canonical
+wire contract is maintained as `contracts/otserver-scan-v2.schema.json` in the separate
+`otserver-otter` repository.
 
 Example searches:
 
@@ -124,9 +124,9 @@ site:"Plant 1" AND type:plc
 lastseen:[2026-01-01 TO *]
 ```
 
-## OTserver Scanner
+## OTserver Otter
 
-The scanner is not a wrapper around a general-purpose scanning engine. Its discovery, protocol
+Otter is not a wrapper around a general-purpose scanning engine. Its discovery, protocol
 framing, response validation, correlation, and export contract are implemented together for this
 inventory workflow.
 
@@ -141,14 +141,12 @@ inventory workflow.
 - **Predictable failure handling** — Produces valid partial results with warnings when individual
   probes fail, while malformed and unsolicited responses are rejected.
 
-The scanner requires `--ack-authorized` before a scan. Linux uses `AF_PACKET` raw sockets and needs
+Otter requires `--ack-authorized` before a scan. Linux uses `AF_PACKET` raw sockets and needs
 root or `CAP_NET_RAW`; Windows 10+ capture uses native Win32 IP Helper and Packet Monitor (pktmon).
 
 ```bash
-cd scanner
-cargo build --release
-sudo ./target/release/otserver-scanner doctor
-sudo ./target/release/otserver-scanner scan \
+otserver-otter doctor
+sudo otserver-otter scan \
   --target 192.168.1.0/24 \
   --interface eth0 \
   --source-mac 00:11:22:33:44:55 \
@@ -156,17 +154,16 @@ sudo ./target/release/otserver-scanner scan \
   --ack-authorized
 ```
 
-Only scan networks you own or are authorized to assess. The scanner does not perform configuration
+Only scan networks you own or are authorized to assess. Otter does not perform configuration
 writes, SNMP SET, DCP Set, brute force, exploits, vulnerability scripts, or Modbus requests.
 
 Users can enable a Payload API key on their account. With an OTserver URL, site ID, and that key in
-the scanner environment or executable-adjacent `otscanner.json`, the scanner can send its completed
+the Otter environment or executable-adjacent `otter.json`, Otter can send its completed
 JSON directly to the existing REST importer with the user's current site permissions. The local
 scan file is retained.
 
-See the [scanner guide](scanner/README.md) for Windows commands, SNMP settings, output validation,
-direct import configuration, exit codes, platform requirements, and the isolated interoperability
-lab.
+OTserver Otter, its platform guide, contract, tests, and interoperability lab are maintained in the
+separate `otserver-otter` repository.
 
 ## Security and audit model
 
@@ -177,31 +174,28 @@ lab.
 - All registered collections are audited for creates, updates, deletes, and authentication events.
 - Audit entries are immutable and redact fields resembling passwords, secrets, tokens, hashes, or
   sessions.
-- Scanner SNMP and OPC UA settings, including credentials, live in the executable-adjacent
-  `otscanner.json` and are never included in logs or scan exports.
+- Otter SNMP and OPC UA settings, including credentials, live in executable-adjacent `otter.json`
+  and are never included in logs or scan exports.
 
 ## Technology
 
-| Layer         | Technology                                                   |
-| ------------- | ------------------------------------------------------------ |
-| Application   | Next.js 16, React 19, TypeScript                             |
-| Admin and API | OTserver, built on Payload CMS 3                             |
-| Database      | MongoDB                                                      |
-| Search        | Lucene subset translated to Payload queries                  |
-| Scanner       | Rust, native Windows and Linux capture                       |
-| Validation    | Vitest integration tests, Rust tests, isolated Docker OT lab |
+| Layer         | Technology                                  |
+| ------------- | ------------------------------------------- |
+| Application   | Next.js 16, React 19, TypeScript            |
+| Admin and API | OTserver, built on Payload CMS 3            |
+| Database      | MongoDB                                     |
+| Search        | Lucene subset translated to Payload queries |
+| Otter         | Rust, native Windows and Linux capture      |
+| Validation    | Vitest integration tests                    |
 
 ## Project layout
 
 ```text
 src/collections/   OTserver collections, hooks, and domain rules
 src/access/        Shared site-scoped authorization
-src/importers/     PRONETA, Nmap, scanner parsers, and quality merging
+src/importers/     PRONETA, Nmap, Otter parsers, and quality merging
 src/search/        Lucene query translation and graphical-filter integration
 src/components/    OTserver admin views, branding, and fields
-scanner/           Native read-only discovery CLI
-scanner/lab/       Isolated protocol interoperability lab
-contracts/         Versioned scanner/importer JSON schema
 tests/int/         Application and importer integration tests
 ```
 
@@ -215,25 +209,10 @@ pnpm lint
 pnpm build
 ```
 
-Coverage is enforced at 90% for the application and scanner library. Install
-`cargo-llvm-cov`, then run both gates from the repository root:
+Coverage is enforced at 90% for the application:
 
 ```bash
-cargo install cargo-llvm-cov
 pnpm test:coverage
-```
-
-Scanner checks:
-
-```bash
-cd scanner
-cargo fmt -- --check
-cargo check --locked
-cargo test --locked
-cargo clippy --locked --all-targets -- -D warnings
-cd ..
-
-./scanner/lab/test.sh
 ```
 
 Regenerate OTserver's Payload artifacts after schema or admin component changes:
@@ -245,7 +224,7 @@ pnpm generate:importmap
 
 ## License
 
-OTserver and OTserver Scanner are dual-licensed:
+OTserver and OTserver Otter are dual-licensed:
 
 The open-source core will remain open source: the scanner, all detection
 needed to find assets and device capabilities, and the base asset-management

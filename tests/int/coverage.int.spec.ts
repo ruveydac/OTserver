@@ -450,7 +450,7 @@ describe('admin presentation', () => {
   it('renders every import source and its selected state', () => {
     const html = renderToStaticMarkup(createElement(ImportInstructions))
     expect(html).toContain('Selected')
-    expect(html).toContain('OTserver Scanner')
+    expect(html).toContain('OTserver Otter')
     expect(html).toContain('Copy command')
   })
 })

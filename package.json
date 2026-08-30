@@ -15,9 +15,8 @@
     "payload": "cross-env NODE_OPTIONS=--no-deprecation payload",
     "start": "cross-env NODE_OPTIONS=--no-deprecation next start",
     "test": "pnpm run test:int",
-    "test:coverage": "pnpm run test:coverage:app && pnpm run test:coverage:scanner",
+    "test:coverage": "pnpm run test:coverage:app",
     "test:coverage:app": "cross-env NODE_OPTIONS=--no-deprecation vitest run --config=vitest.config.mts --coverage",
-    "test:coverage:scanner": "cd scanner && cargo llvm-cov --lib --fail-under-lines 90 --summary-only -- --test-threads=1",
     "test:int": "cross-env NODE_OPTIONS=--no-deprecation vitest run --config=vitest.config.mts"
   },
   "dependencies": {

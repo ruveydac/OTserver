@@ -15,11 +15,11 @@ public/media/
 public/robots.txt
 public/sitemap*.xml
 import-files/
+# Existing checkouts may retain pre-split scanner build output.
 scanner/target/
-otscanner.json
 scanner/lab/artifacts/
-# Local driver experiments and extracted installers; distributable Windows packet-driver assets
-# belong under scanner/windows/.
+otter.json
+otscanner.json
 tmp/
 otserver-scan.json
 *.otserver.json

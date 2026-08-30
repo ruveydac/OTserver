@@ -257,7 +257,7 @@ export interface AssetImport {
    * Every asset in this file will be assigned to this site.
    */
   site: string | Site;
-  source: 'otserver-scanner' | 'proneta' | 'nmap';
+  source: 'otserver-otter' | 'proneta' | 'nmap';
   /**
    * Optional values overwrite these fields on every new or existing asset in this import.
    */

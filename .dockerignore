@@ -7,8 +7,6 @@ import-files/
 public/media/
 test-results/
 playwright-report/
-scanner/
-contracts/
 tests/
 scripts/
 coverage/

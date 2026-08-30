@@ -1,6 +1,6 @@
 # Licensing
 
-OTserver and OTserver Scanner are dual-licensed.
+OTserver and OTserver Otter are dual-licensed.
 
 The open-source core will remain open source: the scanner, all detection
 needed to find assets and device capabilities, and the base asset-management

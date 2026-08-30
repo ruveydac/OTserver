@@ -1,5 +1,6 @@
 import type {
   CollectionAfterChangeHook,
+  CollectionBeforeValidateHook,
   CollectionConfig,
   RequiredDataFromCollectionSlug,
 } from 'payload'
@@ -14,7 +15,7 @@ import {
 import { userSuppliedAssetFields } from './Assets'
 import { sanitizeCustomFieldValues } from './AssetFields'
 import { parseNmap } from '../importers/nmap'
-import { parseOTserverScanner } from '../importers/otserverScanner'
+import { parseOTserverOtter } from '../importers/otserverOtter'
 import { parseProneta } from '../importers/proneta'
 import { mergeAssetData, type FieldProvenance } from '../importers/assetQuality'
 import type { ImportResult } from '../importers/types'
@@ -22,9 +23,14 @@ import { importSources, type ImportSource } from '../importers/sources'
 
 const parsers = {
   nmap: parseNmap,
-  'otserver-scanner': parseOTserverScanner,
+  'otserver-otter': parseOTserverOtter,
   proneta: parseProneta,
 } satisfies Record<ImportSource, (input: string) => ImportResult>
+
+const normalizeLegacyOtterSource: CollectionBeforeValidateHook = ({ data }) => {
+  if (data?.source === 'otserver-scanner') data.source = 'otserver-otter'
+  return data
+}
 
 export const getAssetOverrides = (value: unknown) => {
   const overrides = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
@@ -288,7 +294,7 @@ export const AssetImports: CollectionConfig = {
     {
       name: 'source',
       type: 'select',
-      defaultValue: 'otserver-scanner',
+      defaultValue: 'otserver-otter',
       options: importSources.map(({ label, value }) => ({ label, value })),
       required: true,
     },
@@ -322,7 +328,7 @@ export const AssetImports: CollectionConfig = {
       name: 'sourceVersion',
       type: 'text',
       defaultValue: 'unknown',
-      label: 'Scanner version',
+      label: 'Otter version',
       required: true,
     },
     {
@@ -400,6 +406,7 @@ export const AssetImports: CollectionConfig = {
   ],
   hooks: {
     afterChange: [runImport],
+    beforeValidate: [normalizeLegacyOtterSource],
     beforeChange: [enforceWritableSite, sanitizeCustomFieldValues],
   },
   upload: {

@@ -21,7 +21,7 @@ const SiteIDField = () => {
           value={siteID}
         />
       </div>
-      <p>Use this ID for OTserver Scanner direct or automatic imports into this site.</p>
+      <p>Use this ID for OTserver Otter direct or automatic imports into this site.</p>
     </div>
   )
 }

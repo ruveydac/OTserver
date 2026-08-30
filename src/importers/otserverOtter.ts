@@ -72,7 +72,7 @@ const rejectSecrets = (value: unknown) => {
     if (!current.value || typeof current.value !== 'object') continue
     for (const [key, item] of Object.entries(current.value)) {
       if (secretKey.test(key))
-        throw new Error(`Scanner export contains a secret-like field at ${current.path}.${key}.`)
+        throw new Error(`Otter export contains a secret-like field at ${current.path}.${key}.`)
       pending.push({ path: `${current.path}.${key}`, value: item })
     }
   }
@@ -122,7 +122,7 @@ const safeFields = (value: unknown, identity: string) => {
   return fields
 }
 
-export const parseOTserverScanner = (input: string): ImportResult => {
+export const parseOTserverOtter = (input: string): ImportResult => {
   let parsed: unknown
   try {
     parsed = JSON.parse(input)
@@ -133,13 +133,13 @@ export const parseOTserverScanner = (input: string): ImportResult => {
   const root = record(parsed)
   if (root.format !== 'otserver-scan' || root.schemaVersion !== 2) {
     throw new Error(
-      'Unsupported scanner file. Expected otserver-scan schemaVersion 2. Run a new scan with OTserver Scanner.',
+      'Unsupported Otter file. Expected otserver-scan schemaVersion 2. Run a new scan with OTserver Otter.',
     )
   }
   const scanner = record(root.scanner)
   const scan = record(root.scan)
   if (typeof scanner.version !== 'string' || typeof scan.id !== 'string') {
-    throw new Error('Scanner and scan metadata are required.')
+    throw new Error('Otter and scan metadata are required.')
   }
 
   const identities = new Set<string>()

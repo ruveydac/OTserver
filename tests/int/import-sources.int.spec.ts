@@ -6,11 +6,11 @@ import { importSources } from '../../src/importers/sources'
 
 describe('import source guidance', () => {
   it('documents how to create a usable file for every importer', () => {
-    expect(importSources.map(({ value }) => value)).toEqual(['otserver-scanner', 'proneta', 'nmap'])
+    expect(importSources.map(({ value }) => value)).toEqual(['otserver-otter', 'proneta', 'nmap'])
     expect(Object.fromEntries(importSources.map(({ quality, value }) => [value, quality]))).toEqual(
       {
         nmap: 'medium',
-        'otserver-scanner': 'low',
+        'otserver-otter': 'low',
         proneta: 'high',
       },
     )
@@ -34,7 +34,7 @@ describe('import source guidance', () => {
     const sourceField = AssetImports.fields.find(
       (field) => field.type === 'select' && field.name === 'source',
     )
-    expect(sourceField).toMatchObject({ defaultValue: 'otserver-scanner' })
+    expect(sourceField).toMatchObject({ defaultValue: 'otserver-otter' })
 
     const siteIDField = Sites.fields.find(
       (field) => field.type === 'ui' && field.name === 'siteIDDisplay',

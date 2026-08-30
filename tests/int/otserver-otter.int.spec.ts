@@ -5,7 +5,7 @@ import { getPayload, handleEndpoints, type Payload } from 'payload'
 
 import { ensureAssetClass } from '../../src/collections/AssetClasses'
 import { ensureAdminRole } from '../../src/collections/UserRoles'
-import { parseOTserverScanner } from '../../src/importers/otserverScanner'
+import { parseOTserverOtter } from '../../src/importers/otserverOtter'
 
 const randomMAC = () =>
   `02:${randomBytes(5).toString('hex').toUpperCase().match(/.{2}/g)?.join(':')}`
@@ -13,7 +13,7 @@ const randomMAC = () =>
 const exportFile = (localMAC: string, remoteMAC: string) => ({
   format: 'otserver-scan',
   schemaVersion: 2,
-  scanner: { name: 'OTserver Scanner', version: '0.2.0' },
+  scanner: { name: 'OTserver Otter', version: '0.2.0' },
   scan: {
     id: randomUUID(),
     startedAt: '2026-08-10T10:00:00Z',
@@ -143,22 +143,22 @@ type MutableExport = {
 const mutableExport = (localMAC: string, remoteMAC: string) =>
   exportFile(localMAC, remoteMAC) as unknown as MutableExport
 
-describe('OTserver Scanner importer', () => {
+describe('OTserver Otter importer', () => {
   it('validates scanner files and rejects exported credentials', () => {
     const file = exportFile(randomMAC(), randomMAC())
-    expect(parseOTserverScanner(JSON.stringify(file)).assets).toHaveLength(2)
-    expect(() => parseOTserverScanner(JSON.stringify({ ...file, schemaVersion: 1 }))).toThrow(
+    expect(parseOTserverOtter(JSON.stringify(file)).assets).toHaveLength(2)
+    expect(() => parseOTserverOtter(JSON.stringify({ ...file, schemaVersion: 1 }))).toThrow(
       'schemaVersion 2',
     )
-    expect(() => parseOTserverScanner(JSON.stringify({ ...file, community: 'public' }))).toThrow(
+    expect(() => parseOTserverOtter(JSON.stringify({ ...file, community: 'public' }))).toThrow(
       'secret-like field',
     )
   })
 
   it('validates identities, observations, links, and untrusted field types', () => {
-    expect(() => parseOTserverScanner('{')).toThrow('not valid JSON')
+    expect(() => parseOTserverOtter('{')).toThrow('not valid JSON')
     expect(() =>
-      parseOTserverScanner(JSON.stringify({ format: 'otserver-scan', schemaVersion: 2 })),
+      parseOTserverOtter(JSON.stringify({ format: 'otserver-scan', schemaVersion: 2 })),
     ).toThrow('metadata are required')
 
     const localMAC = randomMAC()
@@ -193,7 +193,7 @@ describe('OTserver Scanner importer', () => {
     cleaned.links = []
     cleaned.warnings = ['warning', 1]
     cleaned.errors = ['error', false]
-    const result = parseOTserverScanner(JSON.stringify(cleaned))
+    const result = parseOTserverOtter(JSON.stringify(cleaned))
     expect(result.assets[0]).toMatchObject({
       macAddress: localMAC,
       name: localMAC,
@@ -212,33 +212,29 @@ describe('OTserver Scanner importer', () => {
 
     const duplicate = mutableExport(localMAC, remoteMAC)
     duplicate.devices[1].macAddress = localMAC
-    expect(() => parseOTserverScanner(JSON.stringify(duplicate))).toThrow('Duplicate device MAC')
+    expect(() => parseOTserverOtter(JSON.stringify(duplicate))).toThrow('Duplicate device MAC')
 
     const noObservations = mutableExport(localMAC, remoteMAC)
     noObservations.devices = [{ macAddress: localMAC }]
-    expect(() => parseOTserverScanner(JSON.stringify(noObservations))).toThrow(
-      'has no observations',
-    )
+    expect(() => parseOTserverOtter(JSON.stringify(noObservations))).toThrow('has no observations')
 
     const badObservation = mutableExport(localMAC, remoteMAC)
     badObservation.devices[0].observations![0].observedAt = 'invalid'
-    expect(() => parseOTserverScanner(JSON.stringify(badObservation))).toThrow(
+    expect(() => parseOTserverOtter(JSON.stringify(badObservation))).toThrow(
       'observedAt is invalid',
     )
 
     const badLinkMAC = mutableExport(localMAC, remoteMAC)
     badLinkMAC.links[0].local.macAddress = 'invalid'
-    expect(() => parseOTserverScanner(JSON.stringify(badLinkMAC))).toThrow('local.macAddress')
+    expect(() => parseOTserverOtter(JSON.stringify(badLinkMAC))).toThrow('local.macAddress')
 
     const badLinkDate = mutableExport(localMAC, remoteMAC)
     badLinkDate.links[0].observedAt = 'invalid'
-    expect(() => parseOTserverScanner(JSON.stringify(badLinkDate))).toThrow('links[0].observedAt')
+    expect(() => parseOTserverOtter(JSON.stringify(badLinkDate))).toThrow('links[0].observedAt')
 
     const unknownLinkSource = mutableExport(localMAC, remoteMAC)
     unknownLinkSource.links[0].source = 1
-    expect(parseOTserverScanner(JSON.stringify(unknownLinkSource)).links?.[0].source).toBe(
-      'unknown',
-    )
+    expect(parseOTserverOtter(JSON.stringify(unknownLinkSource)).links?.[0].source).toBe('unknown')
   })
 
   it('imports evidence and topology while merging fields by source quality', async () => {
@@ -274,7 +270,7 @@ describe('OTserver Scanner importer', () => {
         collection: 'asset-imports',
         data: {
           site: siteID,
-          source: 'otserver-scanner',
+          source: 'otserver-otter',
           sourceVersion: 'unknown',
           status: 'pending',
         },
@@ -357,7 +353,7 @@ describe('OTserver Scanner importer', () => {
     }
   })
 
-  it('imports through REST with the API key user permissions and audit identity', async () => {
+  it('normalizes legacy REST uploads while preserving permissions and audit identity', async () => {
     const payload: Payload = await getPayload({ config })
     const apiKey = randomUUID()
     const localMAC = randomMAC()
@@ -429,10 +425,21 @@ describe('OTserver Scanner importer', () => {
       const response = await upload(writableSite.id)
       expect(response.status).toBe(201)
       const result = (await response.json()) as {
-        doc: { createdAssets: number; id: string; status: string; updatedAssets: number }
+        doc: {
+          createdAssets: number
+          id: string
+          source: string
+          status: string
+          updatedAssets: number
+        }
       }
       importID = result.doc.id
-      expect(result.doc).toMatchObject({ createdAssets: 2, status: 'completed', updatedAssets: 0 })
+      expect(result.doc).toMatchObject({
+        createdAssets: 2,
+        source: 'otserver-otter',
+        status: 'completed',
+        updatedAssets: 0,
+      })
 
       const audit = await payload.find({
         collection: 'audit-logs',

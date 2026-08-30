@@ -316,7 +316,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
                 }))
               : [{ label: 'Evidence', value: 'No scanner evidence recorded yet.', wide: true }]
           }
-          title="Scanner evidence"
+          title="Otter evidence"
           wide
         />
         <Section

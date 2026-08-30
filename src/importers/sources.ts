@@ -1,15 +1,15 @@
 export const importSources = [
   {
-    label: 'OTserver Scanner',
-    value: 'otserver-scanner',
+    label: 'OTserver Otter',
+    value: 'otserver-otter',
     quality: 'low',
-    fileLabel: 'OTserver Scanner JSON',
+    fileLabel: 'OTserver Otter JSON',
     steps: [
-      'Windows 10+ uses native IP Helper and Packet Monitor (pktmon); Linux requires root or CAP_NET_RAW. Then run otserver-scanner doctor.',
-      'List capture devices with otserver-scanner interfaces.',
-      'Run otserver-scanner scan --target <network> --interface <id> --source-mac <mac> --output scan.json --ack-authorized.',
-      'Optionally set SNMP v2c/v3 settings and credentials in otscanner.json or the scanner GUI; without them, SNMPv2c with community public is used.',
-      'To import directly, add an OTserver URL, site ID, and user API key through otscanner.json or the documented flags and environment variable.',
+      'Windows 10+ uses native IP Helper and Packet Monitor (pktmon); Linux requires root or CAP_NET_RAW. Then run otserver-otter doctor.',
+      'List capture devices with otserver-otter interfaces.',
+      'Run otserver-otter scan --target <network> --interface <id> --source-mac <mac> --output scan.json --ack-authorized.',
+      'Optionally set SNMP v2c/v3 settings and credentials in otter.json or the Otter GUI; without them, SNMPv2c with community public is used.',
+      'To import directly, add an OTserver URL, site ID, and user API key through otter.json or the documented flags and environment variable.',
     ],
     required:
       'A validated otserver-scan JSON file with schemaVersion 2 and a unique MAC address per device.',
