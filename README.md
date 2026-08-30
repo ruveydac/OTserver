@@ -2,7 +2,7 @@
 
 # OTserver
 
-### Self-hosted OT inventory with automatic discovery in the separate [OTserver Otter repository](https://github.com/ruveydac/otserver-otter)
+### Self-hosted OT inventory with automatic discovery found here [OTserver Otter repository](https://github.com/ruveydac/otserver-otter)
 
 Native OT discovery · Quality-aware inventory · Site-scoped access · Immutable history
 
