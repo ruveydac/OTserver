@@ -25,5 +25,7 @@ export default defineConfig({
     fileParallelism: false,
     include: ['tests/int/**/*.int.spec.ts'],
     setupFiles: ['./vitest.setup.ts'],
+    // Integration tests boot Payload against a real MongoDB; the 5s default is too tight.
+    testTimeout: 60_000,
   },
 })

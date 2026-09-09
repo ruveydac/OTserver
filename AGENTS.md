@@ -152,8 +152,8 @@ podman run -d --rm --name otserver-test-mongo -p 27017:27017 \
 Tear it down with `podman stop otserver-test-mongo`; `--rm` removes it. The credentials match the
 `DATABASE_URL` in `.env`.
 
-A cold container makes the first database test exceed the default 5s Vitest timeout. Rerun with
-`pnpm vitest run --config=vitest.config.mts --testTimeout=60000`.
+`vitest.config.mts` sets a 60s per-test timeout because these tests boot Payload against a real
+MongoDB. A cold container makes the first run slower than later ones.
 
 Run the smallest relevant checks while developing, then the full set before committing:
 
