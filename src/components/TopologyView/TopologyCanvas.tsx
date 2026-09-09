@@ -1,13 +1,12 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Background,
   BackgroundVariant,
   Controls,
   Handle,
-  MarkerType,
   MiniMap,
   Position,
   ReactFlow,
@@ -27,8 +26,10 @@ export type GraphNode = {
 }
 
 export type GraphEdge = {
+  count?: number
   id: string
   label?: string
+  redundant?: boolean
   source: string
   sourceProtocol?: string
   target: string
@@ -77,8 +78,8 @@ const AssetNode = ({ data }: NodeProps) => (
 
 const SwitchNode = ({ data }: NodeProps) => (
   <div className="topology-node topology-node--network topology-node--switch">
-    <NodeHandles />
     <div className="topology-node__symbol">
+      <NodeHandles />
       <Layer3SwitchIcon />
     </div>
     <div className="topology-node__label">{data.label as string}</div>
@@ -87,8 +88,8 @@ const SwitchNode = ({ data }: NodeProps) => (
 
 const RouterNode = ({ data }: NodeProps) => (
   <div className="topology-node topology-node--network topology-node--router">
-    <NodeHandles />
     <div className="topology-node__symbol">
+      <NodeHandles />
       <RouterIcon />
     </div>
     <div className="topology-node__label">{data.label as string}</div>
@@ -97,8 +98,8 @@ const RouterNode = ({ data }: NodeProps) => (
 
 const Layer2Node = ({ data }: NodeProps) => (
   <div className="topology-node topology-node--layer2 topology-node--network">
-    <NodeHandles />
     <div className="topology-node__symbol">
+      <NodeHandles />
       <Layer2Icon />
     </div>
     <div className="topology-node__label">{data.label as string}</div>
@@ -141,7 +142,8 @@ const layoutNodes = (
     const root = component.sort((left, right) => {
       const rank = nodeRank[byId.get(left)!.type] - nodeRank[byId.get(right)!.type]
       if (rank) return rank
-      return (neighbors.get(right)?.size ?? 0) - (neighbors.get(left)?.size ?? 0)
+      const degree = (neighbors.get(right)?.size ?? 0) - (neighbors.get(left)?.size ?? 0)
+      return degree || left.localeCompare(right)
     })[0]
     const depths = new Map([[root, 0]])
     const queue = [root]
@@ -163,10 +165,25 @@ const layoutNodes = (
     }
     const widestRow = Math.max(...[...rows.values()].map((row) => row.length))
     const componentWidth = Math.max(220, widestRow * 260)
-    for (const [depth, row] of rows) {
-      row.sort((left, right) => byId.get(left)!.label.localeCompare(byId.get(right)!.label))
+    const order = new Map([[root, 0]])
+    for (const depth of [...rows.keys()].sort((left, right) => left - right)) {
+      const row = rows.get(depth)!
+      const neighborOrder = (id: string) => {
+        const previous = [...(neighbors.get(id) ?? [])].flatMap((neighbor) => {
+          const index = order.get(neighbor)
+          return index === undefined ? [] : [index]
+        })
+        return previous.length
+          ? previous.reduce((total, index) => total + index, 0) / previous.length
+          : Number.MAX_SAFE_INTEGER
+      }
+      row.sort((left, right) => {
+        const rank = neighborOrder(left) - neighborOrder(right)
+        return rank || byId.get(left)!.label.localeCompare(byId.get(right)!.label)
+      })
       const rowWidth = row.length * 260
       row.forEach((id, index) => {
+        order.set(id, index)
         positions.set(id, {
           x: componentX + (componentWidth - rowWidth) / 2 + index * 260,
           y: depth * 170,
@@ -188,18 +205,24 @@ export const TopologyCanvas = ({
   nodes: GraphNode[]
 }) => {
   const router = useRouter()
+  const [showAllInferred, setShowAllInferred] = useState(false)
 
   const { edges, nodes } = useMemo(() => {
-    const positions = layoutNodes(graphNodes, graphEdges)
+    const visibleEdges = showAllInferred ? graphEdges : graphEdges.filter((edge) => !edge.redundant)
+    const connectedNodeIds = new Set(visibleEdges.flatMap((edge) => [edge.source, edge.target]))
+    const visibleNodes = graphNodes.filter(
+      (node) => node.type !== 'layer2' || connectedNodeIds.has(node.id),
+    )
+    const positions = layoutNodes(visibleNodes, visibleEdges)
 
-    const nodes: Node[] = graphNodes.map((node) => ({
+    const nodes: Node[] = visibleNodes.map((node) => ({
       data: { ipAddress: node.ipAddress, label: node.label, status: node.status },
       id: node.id,
       position: positions.get(node.id) ?? { x: 0, y: 0 },
       type: node.type,
     }))
 
-    const edges: Edge[] = graphEdges.map((edge) => {
+    const edges: Edge[] = visibleEdges.map((edge) => {
       let source = edge.source
       let target = edge.target
       let sourceHandle = 'bottom'
@@ -219,8 +242,8 @@ export const TopologyCanvas = ({
       return {
         id: edge.id,
         label: edge.label,
-        markerEnd: { type: MarkerType.ArrowClosed },
-        markerStart: { type: MarkerType.ArrowClosed },
+        ariaLabel:
+          edge.type === 'layer2' ? 'Inferred network membership' : 'Recorded topology link',
         source,
         sourceHandle,
         style:
@@ -234,10 +257,37 @@ export const TopologyCanvas = ({
     })
 
     return { edges, nodes }
-  }, [graphEdges, graphNodes])
+  }, [graphEdges, graphNodes, showAllInferred])
+
+  const redundantCount = graphEdges.filter((edge) => edge.redundant).length
 
   return (
     <div className="topology-view__canvas">
+      <div className="topology-view__toolbar">
+        <div aria-label="Topology connection legend" className="topology-view__legend">
+          <span>
+            <i aria-hidden="true" className="topology-view__legend-line" />
+            Recorded link
+          </span>
+          <span>
+            <i
+              aria-hidden="true"
+              className="topology-view__legend-line topology-view__legend-line--inferred"
+            />
+            Inferred membership
+          </span>
+        </div>
+        {redundantCount > 0 && (
+          <label className="topology-view__toggle">
+            <input
+              checked={showAllInferred}
+              onChange={(event) => setShowAllInferred(event.target.checked)}
+              type="checkbox"
+            />
+            Show all inferred connections ({redundantCount} additional)
+          </label>
+        )}
+      </div>
       <ReactFlow
         edges={edges}
         fitView

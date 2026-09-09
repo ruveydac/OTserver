@@ -149,6 +149,51 @@ describe('topology graph building', () => {
     expect(explicitEdges).toHaveLength(1)
   })
 
+  it('bundles distinct parallel port links without counting repeated observations twice', () => {
+    const assets = [
+      { id: 'a1', name: 'Switch' },
+      { id: 'a2', name: 'PLC' },
+    ]
+    const links = [
+      {
+        id: 'l1',
+        local: { portId: 'Gi1' },
+        localAsset: 'a1',
+        remote: { portId: 'eth0' },
+        remoteAsset: 'a2',
+        source: 'lldp',
+      },
+      {
+        id: 'l2',
+        local: { portId: 'eth1' },
+        localAsset: 'a2',
+        remote: { portId: 'Gi2' },
+        remoteAsset: 'a1',
+        source: 'lldp',
+      },
+      {
+        id: 'l3',
+        local: { portId: 'eth0' },
+        localAsset: 'a2',
+        remote: { portId: 'Gi1' },
+        remoteAsset: 'a1',
+        source: 'snmp',
+      },
+    ]
+
+    const explicitEdges = buildTopologyGraph(assets, links).edges.filter(
+      ({ type }) => type === 'explicit',
+    )
+
+    expect(explicitEdges).toHaveLength(1)
+    expect(explicitEdges[0]).toMatchObject({
+      count: 2,
+      label: '2 links: Gi1 - eth0, Gi2 - eth1',
+      source: 'a1',
+      target: 'a2',
+    })
+  })
+
   it('skips links with unresolved asset references', () => {
     const assets = [
       {
@@ -215,11 +260,120 @@ describe('topology graph building', () => {
 
     const layer2Nodes = nodes.filter((n) => n.type === 'layer2')
     expect(layer2Nodes).toHaveLength(1)
-    expect(layer2Nodes[0].label).toBe('192.168.1.0/24')
+    expect(layer2Nodes[0].label).toBe('Inferred network (192.168.1.0/24)')
 
     const layer2Edges = edges.filter((e) => e.type === 'layer2')
     expect(layer2Edges).toHaveLength(3)
     expect(layer2Edges.every((e) => e.source === layer2Nodes[0].id)).toBe(true)
+  })
+
+  it('keeps one inferred connection per component already joined by recorded links', () => {
+    const assets = [
+      { assetClass: 'network-device', id: 'core', name: 'Core Switch' },
+      { id: 'hmi', name: 'Offline HMI' },
+      { id: 'plc', name: 'PLC' },
+      { id: 'robot', name: 'Maintenance Robot' },
+      { id: 'router', name: 'Edge Router' },
+    ]
+    const links = [
+      {
+        id: 'l1',
+        local: {},
+        localAsset: 'router',
+        remote: {},
+        remoteAsset: 'core',
+        source: 'lldp',
+      },
+      {
+        id: 'l2',
+        local: {},
+        localAsset: 'core',
+        remote: {},
+        remoteAsset: 'plc',
+        source: 'snmp',
+      },
+      {
+        id: 'l3',
+        local: {},
+        localAsset: 'hmi',
+        remote: {},
+        remoteAsset: 'robot',
+        source: 'profinet-dcp',
+      },
+    ]
+    const arp = assets.map(({ id }) => ({ asset: id, import: 'scan-1' }))
+
+    const graph = buildTopologyGraph(assets, links, arp)
+    const inferredEdges = graph.edges.filter(({ type }) => type === 'layer2')
+
+    expect(graph.edges.filter(({ type }) => type === 'explicit')).toHaveLength(3)
+    expect(inferredEdges).toHaveLength(5)
+    expect(
+      inferredEdges
+        .filter(({ redundant }) => !redundant)
+        .map(({ target }) => target)
+        .sort(),
+    ).toEqual(['core', 'hmi'])
+
+    const reordered = buildTopologyGraph(
+      [...assets].reverse(),
+      [...links].reverse(),
+      [...arp].reverse(),
+    )
+    expect(
+      reordered.edges
+        .filter(({ redundant, type }) => type === 'layer2' && !redundant)
+        .map(({ target }) => target)
+        .sort(),
+    ).toEqual(['core', 'hmi'])
+  })
+
+  it('hides an inferred network whose members are all connected by recorded links', () => {
+    const assets = ['a', 'b', 'c'].map((id) => ({ id, name: id }))
+    const links = [
+      { id: 'l1', local: {}, localAsset: 'a', remote: {}, remoteAsset: 'b', source: 'lldp' },
+      { id: 'l2', local: {}, localAsset: 'b', remote: {}, remoteAsset: 'c', source: 'lldp' },
+      { id: 'l3', local: {}, localAsset: 'c', remote: {}, remoteAsset: 'a', source: 'lldp' },
+    ]
+    const arp = assets.map(({ id }) => ({ asset: id, import: 'scan-1' }))
+
+    const { edges } = buildTopologyGraph(assets, links, arp)
+
+    expect(edges.filter(({ type }) => type === 'explicit')).toHaveLength(3)
+    expect(edges.filter(({ type }) => type === 'layer2').every(({ redundant }) => redundant)).toBe(
+      true,
+    )
+  })
+
+  it('does not reduce inferred connections using a path outside their network domain', () => {
+    const assets = ['a', 'b', 'outside'].map((id) => ({ id, name: id }))
+    const links = [
+      {
+        id: 'l1',
+        local: {},
+        localAsset: 'a',
+        remote: {},
+        remoteAsset: 'outside',
+        source: 'lldp',
+      },
+      {
+        id: 'l2',
+        local: {},
+        localAsset: 'outside',
+        remote: {},
+        remoteAsset: 'b',
+        source: 'lldp',
+      },
+    ]
+
+    const { edges } = buildTopologyGraph(assets, links, [
+      { asset: 'a', import: 'scan-1' },
+      { asset: 'b', import: 'scan-1' },
+    ])
+
+    expect(edges.filter(({ type }) => type === 'layer2').every(({ redundant }) => !redundant)).toBe(
+      true,
+    )
   })
 
   it('does not create a layer 2 node for a single ARP observation', () => {
