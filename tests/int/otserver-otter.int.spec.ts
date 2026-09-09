@@ -81,6 +81,20 @@ const exportFile = (localMAC: string, remoteMAC: string) => ({
           },
           warnings: [],
         },
+        {
+          source: 'dnp3',
+          observedAt: '2026-08-10T10:00:26Z',
+          fields: { macAddress: localMAC, protocols: ['dnp3'] },
+          raw: { masterAddress: 1, outstationAddress: 1 },
+          warnings: [],
+        },
+        {
+          source: 'iec61850',
+          observedAt: '2026-08-10T10:00:27Z',
+          fields: { macAddress: localMAC, hardwareVersion: 'HW-2', protocols: ['iec61850'] },
+          raw: { logicalDevices: ['LD0'] },
+          warnings: [],
+        },
       ],
     },
     {
@@ -147,6 +161,18 @@ describe('OTserver Otter importer', () => {
   it('validates scanner files and rejects exported credentials', () => {
     const file = exportFile(randomMAC(), randomMAC())
     expect(parseOTserverOtter(JSON.stringify(file)).assets).toHaveLength(2)
+    expect(
+      parseOTserverOtter(JSON.stringify(file)).assets[0].observations?.map(
+        ({ fields, quality, source }) => [source, quality, fields.protocols],
+      ),
+    ).toEqual([
+      ['arp', 'medium', undefined],
+      ['profinet-dcp', 'high', ['profinet']],
+      ['niagara-fox', 'medium', ['niagara-fox']],
+      ['opc-ua', 'medium', ['opc-ua']],
+      ['dnp3', 'medium', ['dnp3']],
+      ['iec61850', 'medium', ['iec61850']],
+    ])
     expect(() => parseOTserverOtter(JSON.stringify({ ...file, schemaVersion: 1 }))).toThrow(
       'schemaVersion 2',
     )
@@ -294,10 +320,11 @@ describe('OTserver Otter importer', () => {
       expect(assets.docs.find(({ macAddress }) => macAddress === localMAC)).toMatchObject({
         assetClass: plcClass.id,
         fieldProvenance: { assetClass: { quality: 'medium', source: 'asset-class-rule' } },
+        hardwareVersion: 'HW-2',
         model: 'SIMATIC S7-1500 CPU',
         name: 'Main PLC',
         operatingSystem: 'Embedded Linux',
-        protocols: ['profinet', 'niagara-fox', 'opc-ua'],
+        protocols: ['profinet', 'niagara-fox', 'opc-ua', 'dnp3', 'iec61850'],
         vendor: 'Siemens AG',
       })
       expect(assets.docs.find(({ macAddress }) => macAddress === remoteMAC)?.protocols).toEqual([
@@ -310,7 +337,7 @@ describe('OTserver Otter importer', () => {
         pagination: false,
         where: { import: { equals: importID } },
       })
-      expect(observations.docs).toHaveLength(5)
+      expect(observations.docs).toHaveLength(7)
       expect(observations.docs.map(({ quality }) => quality)).toEqual(
         expect.arrayContaining(['high', 'medium']),
       )

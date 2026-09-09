@@ -13,7 +13,9 @@ const macPattern = /^(?:[0-9A-F]{2}:){5}[0-9A-F]{2}$/
 const sources: Record<string, DataQuality> = {
   arp: 'medium',
   bacnet: 'medium',
+  dnp3: 'medium',
   'ethernet-ip': 'high',
+  iec61850: 'medium',
   lldp: 'high',
   'niagara-fox': 'medium',
   'omron-fins': 'medium',
@@ -28,6 +30,7 @@ const allowedFields = new Set([
   'description',
   'firmwareVersion',
   'gatewayAddress',
+  'hardwareVersion',
   'ipAddress',
   'lastSeen',
   'location',
@@ -44,7 +47,9 @@ const allowedFields = new Set([
 ])
 const allowedProtocols = new Set([
   'bacnet',
+  'dnp3',
   'ethernet-ip',
+  'iec61850',
   'modbus-tcp',
   'niagara-fox',
   'omron-fins',

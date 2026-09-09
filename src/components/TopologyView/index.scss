@@ -42,10 +42,64 @@
   }
 
   &__canvas {
+    background: var(--theme-elevation-0);
     border: 1px solid var(--theme-elevation-150);
     border-radius: 6px;
+    display: flex;
+    flex-direction: column;
     flex: 1;
     min-height: 400px;
+    overflow: hidden;
+
+    .react-flow {
+      flex: 1;
+      min-height: 0;
+    }
+  }
+
+  &__toolbar {
+    align-items: center;
+    border-bottom: 1px solid var(--theme-elevation-150);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1.5rem;
+    justify-content: space-between;
+    padding: 0.65rem 0.85rem;
+  }
+
+  &__legend,
+  &__toggle,
+  &__legend span {
+    align-items: center;
+    display: flex;
+  }
+
+  &__legend {
+    color: var(--theme-elevation-600);
+    flex-wrap: wrap;
+    font-size: 0.75rem;
+    gap: 1rem;
+
+    span {
+      gap: 0.4rem;
+    }
+  }
+
+  &__legend-line {
+    border-top: 2px solid var(--theme-elevation-700);
+    display: inline-block;
+    width: 28px;
+
+    &--inferred {
+      border-color: var(--theme-elevation-400);
+      border-style: dashed;
+    }
+  }
+
+  &__toggle {
+    cursor: pointer;
+    font-size: 0.8rem;
+    gap: 0.4rem;
   }
 
   &__empty {
@@ -63,11 +117,11 @@
 
 .topology-node {
   background: var(--theme-elevation-0);
-  border: 1px solid var(--theme-elevation-200);
-  border-radius: 6px;
-  font-size: 0.75rem;
-  min-width: 120px;
-  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--theme-elevation-500);
+  border-radius: 2px;
+  font-size: 0.8rem;
+  min-width: 170px;
+  padding: 0.75rem 1rem;
   text-align: center;
 
   &__label {
@@ -82,6 +136,28 @@
     margin-top: 0.15rem;
   }
 
+  &__symbol {
+    color: #00658b;
+    margin: 0 auto 0.4rem;
+    position: relative;
+    width: 64px;
+
+    svg {
+      display: block;
+      fill: var(--theme-elevation-0);
+      overflow: visible;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 3;
+      width: 100%;
+    }
+
+    path {
+      fill: none;
+    }
+  }
+
   &--online {
     border-color: var(--theme-success-500, #4caf50);
   }
@@ -94,9 +170,32 @@
     border-color: var(--theme-warning-500, #ff9800);
   }
 
-  &--switch {
-    background: var(--theme-elevation-100);
-    border-style: dashed;
-    min-width: 100px;
+  &--network {
+    background: transparent;
+    border: 0;
+    min-width: 120px;
+    padding: 0;
+
+    .topology-node__label {
+      max-width: 150px;
+    }
+  }
+
+  &--layer2 {
+    color: var(--theme-elevation-600);
+
+    .topology-node__symbol {
+      color: var(--theme-elevation-500);
+      width: 70px;
+    }
+  }
+
+  .react-flow__handle {
+    background: transparent;
+    border: 0;
+    height: 1px;
+    min-height: 1px;
+    min-width: 1px;
+    width: 1px;
   }
 }

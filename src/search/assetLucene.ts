@@ -33,6 +33,8 @@ const fields: Record<string, { kind: FieldKind; path: string }> = {
   firmwareversion: { kind: 'text', path: 'firmwareVersion' },
   gateway: { kind: 'text', path: 'gatewayAddress' },
   gatewayaddress: { kind: 'text', path: 'gatewayAddress' },
+  hardware: { kind: 'text', path: 'hardwareVersion' },
+  hardwareversion: { kind: 'text', path: 'hardwareVersion' },
   importsource: { kind: 'text', path: 'importSource' },
   id: { kind: 'keyword', path: 'id' },
   ip: { kind: 'keyword', path: 'ipAddress' },
@@ -194,13 +196,24 @@ const translate = (node: LuceneNode, inheritedField?: string, depth = 0): Where 
   return leaf(node, field)
 }
 
+const countNotOperators = (node: LuceneNode): number =>
+  (node.operator === 'NOT' ? 1 : 0) +
+  (node.left ? countNotOperators(node.left) : 0) +
+  (node.right ? countNotOperators(node.right) : 0)
+
 export const parseAssetSearch = (query: string): Where => {
   const trimmed = query.trim()
   if (!trimmed) return {}
   if (trimmed.length > 500) return fail('query is longer than 500 characters.')
 
   try {
-    return translate(lucene.parse(trimmed) as LuceneNode)
+    const tree = lucene.parse(trimmed) as LuceneNode
+    // lucene-query-parser drops a NOT without a left operand, which would silently turn
+    // "status:online AND NOT vendor:a" into a positive match on vendor a.
+    const typed = trimmed.replaceAll(/"[^"]*"/g, '').match(/\bNOT\b/g)?.length ?? 0
+    if (typed > countNotOperators(tree))
+      return fail('NOT needs a term on both sides, for example "status:online NOT vendor:a".')
+    return translate(tree)
   } catch (error) {
     if (error instanceof APIError) throw error
     return fail(error instanceof Error ? error.message : 'invalid syntax.')

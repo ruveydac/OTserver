@@ -51,6 +51,8 @@ export const endpointPort = (endpoint: unknown): string | undefined => {
 }
 
 type AssetRecord = {
+  assetClass?: null | string
+  gatewayAddress?: null | string
   id: string
   ipAddress?: null | string
   macAddress?: null | string
@@ -68,67 +70,216 @@ type LinkRecord = {
   source: string
 }
 
+type ArpRecord = {
+  asset?: null | string
+  import?: null | string
+}
+
+type ExplicitConnection = {
+  id: string
+  pair: string
+  source: string
+  sourcePort?: string
+  sourceProtocol: string
+  target: string
+  targetPort?: string
+}
+
 export const buildTopologyGraph = (
   assetDocs: AssetRecord[],
   linkDocs: LinkRecord[],
+  arpDocs: ArpRecord[] = [],
 ): { edges: GraphEdge[]; nodes: GraphNode[] } => {
   const assetIds = new Set(assetDocs.map((asset) => String(asset.id)))
   const nodes: GraphNode[] = []
   const edges: GraphEdge[] = []
-
-  for (const asset of assetDocs) {
-    nodes.push({
-      id: String(asset.id),
-      ipAddress: asset.ipAddress ?? undefined,
-      label: asset.name || asset.macAddress || String(asset.id),
-      status: asset.status ?? undefined,
-      type: 'asset',
-    })
-  }
-
-  const seenEdges = new Set<string>()
+  const explicitConnections = new Map<string, ExplicitConnection>()
   for (const link of linkDocs) {
     const localId = link.localAsset ? String(link.localAsset) : null
     const remoteId = link.remoteAsset ? String(link.remoteAsset) : null
     if (!localId || !remoteId || !assetIds.has(localId) || !assetIds.has(remoteId)) continue
     if (localId === remoteId) continue
 
-    const key = localId < remoteId ? `${localId}-${remoteId}` : `${remoteId}-${localId}`
-    if (seenEdges.has(key)) continue
-    seenEdges.add(key)
-
-    const port = endpointPort(link.local) ?? endpointPort(link.remote)
-    edges.push({
-      id: `link-${link.id}`,
-      label: port,
-      source: localId,
+    const localPort = endpointPort(link.local)
+    const remotePort = endpointPort(link.remote)
+    const [source, sourcePort, target, targetPort] =
+      localId < remoteId
+        ? [localId, localPort, remoteId, remotePort]
+        : [remoteId, remotePort, localId, localPort]
+    const pair = JSON.stringify([source, target])
+    const key = JSON.stringify([source, sourcePort ?? null, target, targetPort ?? null])
+    const connection = {
+      id: String(link.id),
+      pair,
+      source,
+      sourcePort,
       sourceProtocol: link.source,
-      target: remoteId,
+      target,
+      targetPort,
+    }
+    const existing = explicitConnections.get(key)
+    if (!existing || connection.id.localeCompare(existing.id) < 0)
+      explicitConnections.set(key, connection)
+  }
+
+  const connectionsByPair = new Map<string, ExplicitConnection[]>()
+  for (const connection of explicitConnections.values()) {
+    const connections = connectionsByPair.get(connection.pair) ?? []
+    connections.push(connection)
+    connectionsByPair.set(connection.pair, connections)
+  }
+
+  const explicitNeighbors = new Map<string, Set<string>>()
+  for (const connections of connectionsByPair.values()) {
+    connections.sort((left, right) => left.id.localeCompare(right.id))
+    const [{ source, sourceProtocol, target }] = connections
+    const labels = connections.map(({ sourcePort, targetPort }) =>
+      sourcePort && targetPort
+        ? `${sourcePort} - ${targetPort}`
+        : sourcePort || targetPort || 'ports unknown',
+    )
+    const label =
+      connections.length === 1
+        ? labels[0] === 'ports unknown'
+          ? undefined
+          : labels[0]
+        : `${connections.length} links: ${labels.join(', ')}`
+    const sourceNeighbors = explicitNeighbors.get(source) ?? new Set<string>()
+    const targetNeighbors = explicitNeighbors.get(target) ?? new Set<string>()
+    sourceNeighbors.add(target)
+    targetNeighbors.add(source)
+    explicitNeighbors.set(source, sourceNeighbors)
+    explicitNeighbors.set(target, targetNeighbors)
+    edges.push({
+      count: connections.length,
+      id: `link-${connections[0].id}`,
+      label,
+      source,
+      sourceProtocol,
+      target,
       type: 'explicit',
     })
   }
 
-  const subnetGroups = new Map<string, string[]>()
+  const gatewayAddresses = new Set(
+    assetDocs.flatMap(({ gatewayAddress }) => (gatewayAddress ? [gatewayAddress] : [])),
+  )
   for (const asset of assetDocs) {
-    if (!asset.ipAddress || !asset.networkMask) continue
-    const subnet = computeSubnet(asset.ipAddress, asset.networkMask)
-    if (!subnet) continue
-    const key = `${subnet.network}/${subnet.prefix}`
-    const group = subnetGroups.get(key) ?? []
-    group.push(String(asset.id))
-    subnetGroups.set(key, group)
+    const type =
+      asset.ipAddress && gatewayAddresses.has(asset.ipAddress)
+        ? 'router'
+        : asset.assetClass === 'network-device' ||
+            (explicitNeighbors.get(String(asset.id))?.size ?? 0) > 1
+          ? 'switch'
+          : 'asset'
+    nodes.push({
+      id: String(asset.id),
+      ipAddress: asset.ipAddress ?? undefined,
+      label: asset.name || asset.macAddress || String(asset.id),
+      status: asset.status ?? undefined,
+      type,
+    })
   }
 
-  for (const [subnetKey, members] of subnetGroups) {
+  const membersByImport = new Map<string, Set<string>>()
+  for (const observation of arpDocs) {
+    const assetId = observation.asset ? String(observation.asset) : ''
+    const importId = observation.import ? String(observation.import) : ''
+    if (!assetIds.has(assetId) || !importId) continue
+    const members = membersByImport.get(importId) ?? new Set<string>()
+    members.add(assetId)
+    membersByImport.set(importId, members)
+  }
+
+  const parent = new Map<string, string>()
+  const root = (id: string): string => {
+    const next = parent.get(id)
+    if (!next || next === id) return id
+    const result = root(next)
+    parent.set(id, result)
+    return result
+  }
+  for (const members of membersByImport.values()) {
+    const [first, ...rest] = [...members].sort()
+    if (!first) continue
+    if (!parent.has(first)) parent.set(first, first)
+    for (const member of rest) {
+      if (!parent.has(member)) parent.set(member, member)
+      parent.set(root(member), root(first))
+    }
+  }
+
+  const layer2Domains = new Map<string, string[]>()
+  for (const assetId of parent.keys()) {
+    const domain = root(assetId)
+    const members = layer2Domains.get(domain) ?? []
+    members.push(assetId)
+    layer2Domains.set(domain, members)
+  }
+
+  const assetsById = new Map(assetDocs.map((asset) => [String(asset.id), asset]))
+  const nodesById = new Map(nodes.map((node) => [node.id, node]))
+  for (const members of layer2Domains.values()) {
     if (members.length < 2) continue
-    const switchId = `subnet-${subnetKey}`
-    nodes.push({ id: switchId, label: subnetKey, subnet: subnetKey, type: 'switch' })
+    members.sort()
+    const subnets = new Set(
+      members.flatMap((id) => {
+        const asset = assetsById.get(id)
+        if (!asset?.ipAddress || !asset.networkMask) return []
+        const subnet = computeSubnet(asset.ipAddress, asset.networkMask)
+        return subnet ? [`${subnet.network}/${subnet.prefix}`] : []
+      }),
+    )
+    const networkId = `layer2-${members[0]}`
+    nodes.push({
+      id: networkId,
+      label: subnets.size === 1 ? `Inferred network (${[...subnets][0]})` : 'Inferred network',
+      type: 'layer2',
+    })
+
+    const memberSet = new Set(members)
+    const neighbors = new Map(members.map((member) => [member, new Set<string>()]))
+    for (const edge of edges) {
+      if (edge.type !== 'explicit' || !memberSet.has(edge.source) || !memberSet.has(edge.target))
+        continue
+      neighbors.get(edge.source)!.add(edge.target)
+      neighbors.get(edge.target)!.add(edge.source)
+    }
+    const remaining = new Set(members)
+    const components: string[][] = []
+    while (remaining.size) {
+      const first = remaining.values().next().value as string
+      const component: string[] = []
+      const pending = [first]
+      remaining.delete(first)
+      while (pending.length) {
+        const member = pending.shift()!
+        component.push(member)
+        for (const neighbor of neighbors.get(member) ?? []) {
+          if (!remaining.delete(neighbor)) continue
+          pending.push(neighbor)
+        }
+      }
+      components.push(component)
+    }
+    const representatives = new Set<string>()
+    if (components.length > 1) {
+      const rank: Record<GraphNode['type'], number> = { switch: 0, router: 1, asset: 2, layer2: 3 }
+      for (const component of components) {
+        component.sort((left, right) => {
+          const typeRank = rank[nodesById.get(left)!.type] - rank[nodesById.get(right)!.type]
+          return typeRank || left.localeCompare(right)
+        })
+        representatives.add(component[0])
+      }
+    }
     for (const memberId of members) {
       edges.push({
-        id: `subnet-${switchId}-${memberId}`,
-        source: memberId,
-        target: switchId,
-        type: 'subnet',
+        id: `${networkId}-${memberId}`,
+        redundant: !representatives.has(memberId),
+        source: networkId,
+        target: memberId,
+        type: 'layer2',
       })
     }
   }
@@ -185,13 +336,14 @@ const TopologyView = async (props: AdminViewServerProps) => {
     )
   }
 
-  const [assets, links] = await Promise.all([
+  const [assets, links, arpObservations] = await Promise.all([
     payload.find({
       collection: 'assets',
-      depth: 0,
+      depth: 1,
       overrideAccess: false,
       pagination: false,
       select: {
+        assetClass: true,
         gatewayAddress: true,
         ipAddress: true,
         macAddress: true,
@@ -211,9 +363,23 @@ const TopologyView = async (props: AdminViewServerProps) => {
       user,
       where: { site: { equals: selectedSiteId } },
     }),
+    payload.find({
+      collection: 'asset-observations',
+      depth: 0,
+      overrideAccess: false,
+      pagination: false,
+      select: { asset: true, import: true },
+      user,
+      where: {
+        and: [{ site: { equals: selectedSiteId } }, { source: { equals: 'arp' } }],
+      },
+    }),
   ])
 
   const assetDocs = assets.docs.map((asset) => ({
+    assetClass:
+      asset.assetClass && typeof asset.assetClass === 'object' ? asset.assetClass.legacyKey : null,
+    gatewayAddress: asset.gatewayAddress,
     id: String(asset.id),
     ipAddress: asset.ipAddress,
     macAddress: asset.macAddress,
@@ -231,7 +397,11 @@ const TopologyView = async (props: AdminViewServerProps) => {
     source: link.source,
   }))
 
-  const { edges, nodes } = buildTopologyGraph(assetDocs, linkDocs)
+  const arpDocs = arpObservations.docs.map((observation) => ({
+    asset: observation.asset ? String(observation.asset) : null,
+    import: observation.import ? String(observation.import) : null,
+  }))
+  const { edges, nodes } = buildTopologyGraph(assetDocs, linkDocs, arpDocs)
 
   const selectedSite = siteOptions.find((site) => site.id === selectedSiteId)
 
@@ -247,8 +417,11 @@ const TopologyView = async (props: AdminViewServerProps) => {
           />
           {selectedSite && (
             <span className="topology-view__site-label">
-              {selectedSite.name} · {nodes.filter((n) => n.type === 'asset').length} assets ·{' '}
-              {edges.filter((e) => e.type === 'explicit').length} links
+              {selectedSite.name} · {nodes.filter((n) => n.type !== 'layer2').length} assets ·{' '}
+              {edges
+                .filter((edge) => edge.type === 'explicit')
+                .reduce((total, edge) => total + (edge.count ?? 1), 0)}{' '}
+              links
             </span>
           )}
         </header>

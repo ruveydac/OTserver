@@ -58,6 +58,60 @@ describe('asset Lucene search', () => {
     expect(() => parseAssetSearch('password:secret')).toThrow('unknown field')
   })
 
+  it('rejects a NOT without a left operand instead of inverting the filter', () => {
+    for (const query of [
+      'NOT status:offline',
+      'status:online AND NOT vendor:Siemens',
+      'status:online OR NOT vendor:Siemens',
+      'NOT (status:online OR status:offline)',
+      'status:online NOT NOT vendor:Siemens',
+    ]) {
+      expect(() => parseAssetSearch(query)).toThrow('NOT needs a term on both sides')
+    }
+
+    expect(parseAssetSearch('name:"NOT a term"')).toEqual({ name: { equals: 'NOT a term' } })
+    expect(parseAssetSearch('vendor:Siemens NOT status:offline')).toEqual({
+      and: [{ vendor: { like: 'Siemens' } }, { status: { not_equals: 'offline' } }],
+    })
+  })
+
+  it('rejects unsupported syntax with a clear error', () => {
+    expect(() => parseAssetSearch('name:/plc.*/')).toThrow('regular expressions are not supported')
+    expect(() => parseAssetSearch('name:plc~2')).toThrow(
+      'fuzzy search and boosts are not supported',
+    )
+    expect(() => parseAssetSearch('name:plc^2')).toThrow(
+      'fuzzy search and boosts are not supported',
+    )
+    expect(() => parseAssetSearch('name:[a TO z]')).toThrow('ranges are not supported for name')
+    expect(() => parseAssetSearch('osAccuracy:[abc TO 100]')).toThrow('abc is not a valid number')
+    expect(() => parseAssetSearch('lastseen:[abc TO *]')).toThrow('abc is not a valid date')
+    expect(() => parseAssetSearch('**')).toThrow('enter a search term')
+    expect(() => parseAssetSearch('x'.repeat(501))).toThrow('longer than 500 characters')
+    expect(() => parseAssetSearch(`${'('.repeat(25)}name:x${')'.repeat(25)}`)).toThrow(
+      'too deeply nested',
+    )
+  })
+
+  it('translates ranges, wildcards, and negated ranges', () => {
+    expect(parseAssetSearch('osAccuracy:{80 TO 100}')).toEqual({
+      osAccuracy: { greater_than: 80, less_than: 100 },
+    })
+    expect(parseAssetSearch('osAccuracy:[* TO *]')).toEqual({})
+    expect(parseAssetSearch('*')).toEqual({})
+    expect(parseAssetSearch('name:*')).toEqual({ name: { exists: true } })
+    expect(parseAssetSearch('name:**')).toEqual({ name: { exists: true } })
+    expect(parseAssetSearch('status:-*')).toEqual({ status: { exists: false } })
+    expect(parseAssetSearch('name:"foo bar"~3')).toEqual({ name: { equals: 'foo bar' } })
+    expect(parseAssetSearch('criticality:HIGH')).toEqual({ criticality: { equals: 'high' } })
+    expect(parseAssetSearch('vendor:a NOT osAccuracy:[80 TO 100]')).toEqual({
+      and: [
+        { vendor: { like: 'a' } },
+        { or: [{ osAccuracy: { less_than: 80 } }, { osAccuracy: { greater_than: 100 } }] },
+      ],
+    })
+  })
+
   it('turns Payload graphical filters into equivalent Lucene', () => {
     const graphicalWhere: Where = {
       or: [

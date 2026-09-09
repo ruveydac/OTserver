@@ -252,12 +252,20 @@ export const Assets: CollectionConfig = {
       label: 'Firmware version',
     },
     {
+      name: 'hardwareVersion',
+      type: 'text',
+      admin: { position: 'sidebar' },
+      label: 'Hardware version',
+    },
+    {
       name: 'protocols',
       type: 'select',
       hasMany: true,
       options: [
         { label: 'BACnet', value: 'bacnet' },
+        { label: 'DNP3', value: 'dnp3' },
         { label: 'EtherNet/IP', value: 'ethernet-ip' },
+        { label: 'IEC 61850', value: 'iec61850' },
         { label: 'Modbus TCP', value: 'modbus-tcp' },
         { label: 'Niagara Fox', value: 'niagara-fox' },
         { label: 'Omron FINS', value: 'omron-fins' },

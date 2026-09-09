@@ -245,6 +245,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
             },
             { label: 'Serial number', value: asset.serialNumber },
             { label: 'Firmware version', value: asset.firmwareVersion },
+            { label: 'Hardware version', value: asset.hardwareVersion },
           ]}
           title="Device"
         />

@@ -7,7 +7,9 @@ export const statusLabels: Record<string, string> = {
 
 export const protocolLabels: Record<string, string> = {
   bacnet: 'BACnet',
+  dnp3: 'DNP3',
   'ethernet-ip': 'EtherNet/IP',
+  iec61850: 'IEC 61850',
   'modbus-tcp': 'Modbus TCP',
   'niagara-fox': 'Niagara Fox',
   'omron-fins': 'Omron FINS',
