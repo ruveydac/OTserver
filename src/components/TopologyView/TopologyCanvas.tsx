@@ -46,23 +46,22 @@ const NodeHandles = () => (
 
 const RouterIcon = () => (
   <svg aria-hidden="true" viewBox="0 0 64 64">
-    <circle cx="32" cy="32" r="29" />
-    <path d="m21 21 9 9m-9-9v7m0-7h7m15 0-9 9m9-9v7m0-7h-7M21 43l9-9m-9 9v-7m0 7h7m15 0-9-9m9 9v-7m0 7h-7" />
+    <ellipse cx="32" cy="22" rx="27" ry="14" />
+    <path d="M5 22v20c0 8 12 14 27 14s27-6 27-14V22M20 16l9 5m-9-5 1 6m-1-6 7 1m17-1-9 5m9-5-1 6m1-6-7 1M20 28l9-5m-9 5 1-6m-1 6 7-1m17 1-9-5m9 5-1-6m1 6-7-1" />
   </svg>
 )
 
-const CoreSwitchIcon = () => (
+const Layer3SwitchIcon = () => (
   <svg aria-hidden="true" viewBox="0 0 64 64">
-    <rect height="56" rx="5" width="56" x="4" y="4" />
-    <path d="M32 13v12m0-12-5 5m5-5 5 5m0 28V34m0 12-5-5m5 5 5-5M13 32h12m-12 0 5-5m-5 5 5 5m28-5H34m12 0-5-5m5 5-5 5" />
-    <circle cx="32" cy="32" r="6" />
+    <path d="M5 15 15 6h43v43L48 58H5Zm0 0h43L58 6M48 15v43" />
+    <circle cx="27" cy="36" r="7" />
+    <path d="M27 29v-9m0 0-3 3m3-3 3 3m-3 20v9m0 0-3-3m3 3 3-3M20 36h-9m0 0 3-3m-3 3 3 3m20-3h9m0 0-3-3m3 3-3 3M22 31l-6-6m0 0 4 1m-4-1 1 4m15 2 6-6m0 0-1 4m1-4-4 1M32 41l6 6m0 0-4-1m4 1-1-4M22 41l-6 6m0 0 1-4m-1 4 4-1" />
   </svg>
 )
 
 const Layer2Icon = () => (
   <svg aria-hidden="true" viewBox="0 0 64 64">
-    <rect height="48" rx="5" width="56" x="4" y="8" />
-    <path d="M15 24h32m0 0-7-6m7 6-7 6m9 10H17m0 0 7-6m-7 6 7 6" />
+    <path d="M5 17 15 8h43v37L48 54H5Zm0 0h43L58 8M48 17v37M13 29h28m0 0-6-5m6 5-6 5m8 9H15m0 0 6-5m-6 5 6 5" />
   </svg>
 )
 
@@ -80,7 +79,7 @@ const SwitchNode = ({ data }: NodeProps) => (
   <div className="topology-node topology-node--network topology-node--switch">
     <NodeHandles />
     <div className="topology-node__symbol">
-      <CoreSwitchIcon />
+      <Layer3SwitchIcon />
     </div>
     <div className="topology-node__label">{data.label as string}</div>
   </div>
@@ -207,9 +206,7 @@ export const TopologyCanvas = ({
       let targetHandle = 'top'
       const sourcePosition = positions.get(source) ?? { x: 0, y: 0 }
       const targetPosition = positions.get(target) ?? { x: 0, y: 0 }
-      const horizontal =
-        Math.abs(sourcePosition.x - targetPosition.x) >
-        Math.abs(sourcePosition.y - targetPosition.y)
+      const horizontal = sourcePosition.y === targetPosition.y
       if (horizontal ? sourcePosition.x > targetPosition.x : sourcePosition.y > targetPosition.y) {
         const previousSource = source
         source = target
