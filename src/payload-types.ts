@@ -229,9 +229,20 @@ export interface Asset {
    */
   osAccuracy?: number | null;
   firmwareVersion?: string | null;
+  hardwareVersion?: string | null;
   protocols?:
     | (
-        'bacnet' | 'ethernet-ip' | 'modbus-tcp' | 'niagara-fox' | 'omron-fins' | 'profinet' | 'opc-ua' | 's7' | 'other'
+        | 'bacnet'
+        | 'dnp3'
+        | 'ethernet-ip'
+        | 'iec61850'
+        | 'modbus-tcp'
+        | 'niagara-fox'
+        | 'omron-fins'
+        | 'profinet'
+        | 'opc-ua'
+        | 's7'
+        | 'other'
       )[]
     | null;
   status: 'online' | 'offline' | 'maintenance' | 'unknown';
@@ -672,6 +683,7 @@ export interface AssetsSelect<T extends boolean = true> {
   operatingSystem?: T;
   osAccuracy?: T;
   firmwareVersion?: T;
+  hardwareVersion?: T;
   protocols?: T;
   status?: T;
   criticality?: T;

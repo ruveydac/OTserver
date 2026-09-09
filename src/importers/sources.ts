@@ -5,7 +5,7 @@ export const importSources = [
     quality: 'low',
     fileLabel: 'OTserver Otter JSON',
     steps: [
-      'Windows 10+ uses native IP Helper and Packet Monitor (pktmon); Linux requires root or CAP_NET_RAW. Then run otserver-otter doctor.',
+      'Windows 10+ uses native IP Helper, needs a separately installed Npcap for active PROFINET DCP, and falls back to passive Packet Monitor (pktmon); Linux requires root or CAP_NET_RAW. Then run otserver-otter doctor.',
       'List capture devices with otserver-otter interfaces.',
       'Run otserver-otter scan --target <network> --interface <id> --source-mac <mac> --output scan.json --ack-authorized.',
       'Optionally set SNMP v2c/v3 settings and credentials in otter.json or the Otter GUI; without them, SNMPv2c with community public is used.',

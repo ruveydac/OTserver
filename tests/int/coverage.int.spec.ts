@@ -49,7 +49,15 @@ import {
   cleanCustomFieldValues,
   sanitizeCustomFieldValues,
 } from '../../src/collections/AssetFields'
-import { initializeAssetClasses } from '../../src/collections/AssetClasses'
+import {
+  assignDefaultAssetClass,
+  defaultAssetClasses,
+  ensureAssetClass,
+  findMatchingAssetClass,
+  initializeAssetClasses,
+  validateAssignmentRegex,
+} from '../../src/collections/AssetClasses'
+import { AssetImports } from '../../src/collections/AssetImports'
 import { AssetObservations } from '../../src/collections/AssetObservations'
 import { Sites, filterSiteParents } from '../../src/collections/Sites'
 import { TopologyLinks } from '../../src/collections/TopologyLinks'
@@ -319,17 +327,37 @@ describe('collection safety hooks', () => {
     const updates: unknown[] = []
     const payload = {
       count: vi.fn().mockResolvedValue({ totalDocs: 1 }),
-      find: vi.fn().mockImplementation(async ({ collection }: { collection: string }) => {
-        if (collection === 'assets') {
-          return {
-            docs: [
-              { id: 'asset-1', assetType: 'plc', fieldProvenance: { assetType: 'low' } },
-              { id: 'asset-2', assetType: 42, fieldProvenance: [] },
-            ],
-          }
-        }
-        return { docs: [{ id: 'class-1', assignmentRules: [], ruleSeedVersion: 0 }] }
-      }),
+      find: vi
+        .fn()
+        .mockImplementation(
+          async ({
+            collection,
+            where,
+          }: {
+            collection: string
+            where?: { legacyKey?: { equals?: string } }
+          }) => {
+            if (collection === 'assets') {
+              return {
+                docs: [
+                  { id: 'asset-1', assetType: 'plc', fieldProvenance: { assetType: 'low' } },
+                  { id: 'asset-2', assetType: 42, fieldProvenance: [] },
+                ],
+              }
+            }
+            return where?.legacyKey?.equals === 'plc'
+              ? {
+                  docs: [
+                    {
+                      assignmentRules: [{ manufacturerRegex: 'kept', modelRegex: 'kept' }],
+                      id: 'class-plc',
+                      ruleSeedVersion: 0,
+                    },
+                  ],
+                }
+              : { docs: [{ assignmentRules: [], id: 'class-1', ruleSeedVersion: 0 }] }
+          },
+        ),
       update: vi.fn().mockImplementation(async (value: unknown) => {
         updates.push(value)
         return value
@@ -338,10 +366,270 @@ describe('collection safety hooks', () => {
 
     await initializeAssetClasses(payload as never)
     expect(updates.length).toBeGreaterThan(2)
+    expect(updates).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          assignmentRules: [{ manufacturerRegex: 'kept', modelRegex: 'kept' }],
+        }),
+        id: 'class-plc',
+      }),
+    )
     expect(updates.at(-1)).toMatchObject({
       data: { assetClass: 'class-1', assetType: null, fieldProvenance: {} },
       id: 'asset-2',
     })
+  })
+
+  it('validates assignment rules and falls back to the Other class', async () => {
+    expect(validateAssignmentRegex('')).toBe('Enter a regular expression.')
+    expect(validateAssignmentRegex(undefined)).toBe('Enter a regular expression.')
+    expect(validateAssignmentRegex('(model)\\1')).toBe(
+      'Backreferences are not supported in assignment rules.',
+    )
+
+    const ruleless = { find: vi.fn().mockResolvedValue({ docs: [{ id: 'class-1', name: 'PLC' }] }) }
+    expect(await findMatchingAssetClass(ruleless as never, 'Siemens', 'S7-1500')).toBeUndefined()
+
+    const created: unknown[] = []
+    const empty = {
+      create: vi.fn(async (value: unknown) => {
+        created.push(value)
+        return { id: 'class-other' }
+      }),
+      find: vi.fn().mockResolvedValue({ docs: [] }),
+    }
+    expect(await ensureAssetClass(empty as never, 'not-a-class-key')).toEqual({ id: 'class-other' })
+    expect(created[0]).toMatchObject({
+      data: { assignmentPriority: 100, legacyKey: 'other', name: 'Other' },
+    })
+
+    const seeded: unknown[] = []
+    const fresh = {
+      count: vi.fn().mockResolvedValue({ totalDocs: 0 }),
+      create: vi.fn(async (value: unknown) => {
+        seeded.push(value)
+        return { id: 'class-new' }
+      }),
+      find: vi.fn().mockResolvedValue({ docs: [] }),
+      update: vi.fn(async (value: unknown) => value),
+    }
+    await initializeAssetClasses(fresh as never)
+    expect(seeded.length).toBe(defaultAssetClasses.length)
+  })
+
+  it('assigns asset classes from rules, provenance, and legacy types', async () => {
+    const classReq = (docs: unknown[]) => ({
+      context: {},
+      payload: {
+        create: vi.fn().mockResolvedValue({ id: 'class-other' }),
+        find: vi.fn().mockResolvedValue({ docs }),
+      },
+    })
+    const matching = [
+      {
+        assignmentRules: [{ manufacturerRegex: 'Siemens', modelRegex: 'S7-1500' }],
+        id: 'class-plc',
+        name: 'PLC',
+      },
+    ]
+
+    const matchedReq = classReq(matching)
+    expect(
+      await invoke(assignDefaultAssetClass, {
+        context: {},
+        data: { model: 'S7-1500', vendor: 'Siemens' },
+        originalDoc: { fieldProvenance: { vendor: { quality: 'low', source: 'otserver-otter' } } },
+        req: matchedReq,
+      }),
+    ).toEqual({
+      assetClass: 'class-plc',
+      fieldProvenance: {
+        assetClass: { quality: 'medium', source: 'asset-class-rule' },
+        vendor: { quality: 'low', source: 'otserver-otter' },
+      },
+      model: 'S7-1500',
+      vendor: 'Siemens',
+    })
+    expect(matchedReq.context).toMatchObject({ assetClassRuleAssignment: true })
+
+    expect(
+      await invoke(assignDefaultAssetClass, {
+        context: {},
+        data: {},
+        originalDoc: {
+          assetClass: 'class-1',
+          fieldProvenance: { assetClass: { quality: 'medium', source: 'asset-class-rule' } },
+          model: 'Unmatched',
+          vendor: 'Unmatched',
+        },
+        req: classReq(matching),
+      }),
+    ).toEqual({})
+
+    for (const fieldProvenance of ['junk', []]) {
+      expect(
+        await invoke(assignDefaultAssetClass, {
+          context: {},
+          data: {},
+          originalDoc: { assetClass: 'class-1', fieldProvenance },
+          req: classReq([]),
+        }),
+      ).toEqual({})
+    }
+
+    const legacyReq = classReq([])
+    expect(
+      await invoke(assignDefaultAssetClass, {
+        context: {},
+        data: { assetType: 'plc' },
+        req: legacyReq,
+      }),
+    ).toMatchObject({ assetClass: 'class-other', assetType: null })
+    expect(legacyReq.payload.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ legacyKey: 'plc', name: 'PLC' }),
+      }),
+    )
+
+    const emptyReq = classReq([])
+    expect(await invoke(assignDefaultAssetClass, { context: {}, req: emptyReq })).toMatchObject({
+      assetClass: 'class-other',
+      fieldProvenance: { assetClass: { quality: 'low', source: 'default' } },
+    })
+    expect(emptyReq.context).toMatchObject({ assetClassDefaultAssignment: true })
+  })
+
+  it('imports defensively and records failures on the import document', async () => {
+    const hook = AssetImports.hooks?.afterChange?.[0]
+    const scan = {
+      devices: [
+        {
+          macAddress: 'AA:BB:CC:DD:EE:01',
+          observations: [
+            {
+              fields: { name: 'PLC 1' },
+              observedAt: '2026-09-01T08:00:00.000Z',
+              source: 's7',
+              warnings: [],
+            },
+          ],
+        },
+      ],
+      format: 'otserver-scan',
+      links: [
+        {
+          local: { macAddress: '00:11:22:33:44:55' },
+          observedAt: '2026-09-01T08:00:00.000Z',
+          remote: { macAddress: '66:77:88:99:AA:BB' },
+          source: 'lldp',
+        },
+      ],
+      scan: { id: 'scan-1' },
+      scanner: { version: '' },
+      schemaVersion: 2,
+      unresolved: [{ fields: {}, observedAt: '2026-09-01T08:00:00.000Z', source: 'arp' }],
+      warnings: ['interface down'],
+    }
+    const file = { data: Buffer.from(JSON.stringify(scan)) }
+    const importReq = (payload: Record<string, unknown>) => ({ context: {}, file, payload })
+
+    const creates: { collection: string; data: Record<string, unknown> }[] = []
+    const updates: unknown[] = []
+    const payload = {
+      create: vi.fn(async (value: { collection: string; data: Record<string, unknown> }) => {
+        creates.push(value)
+        return { ...value, id: 'asset-new' }
+      }),
+      find: vi.fn(
+        async ({ where }: { where?: { and?: { macAddress?: { equals?: string } }[] } }) => ({
+          docs:
+            where?.and?.[0]?.macAddress?.equals === '00:11:22:33:44:55' ? [{ id: 'asset-9' }] : [],
+        }),
+      ),
+      update: vi.fn(async (value: unknown) => {
+        updates.push(value)
+        return value
+      }),
+    }
+
+    const now = vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(31_000)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const completed = await invoke(hook, {
+      context: {},
+      doc: {
+        customFieldOverrides: [],
+        id: 'import-1',
+        site: 'site-1',
+        source: 'otserver-otter',
+        sourceVersion: '',
+      },
+      req: importReq(payload),
+    })
+    const slowImportWarnings = warn.mock.calls.length
+    now.mockRestore()
+    warn.mockRestore()
+
+    expect(completed).toMatchObject({
+      data: {
+        createdAssets: 1,
+        skippedAssets: 2,
+        sourceVersion: 'unknown',
+        status: 'completed',
+        updatedAssets: 0,
+      },
+      id: 'import-1',
+    })
+    expect((completed as { data: { warnings: string } }).data.warnings).toContain('interface down')
+    expect((completed as { data: { warnings: string } }).data.warnings).toContain(
+      '1 observation(s) could not be correlated by MAC address.',
+    )
+    expect((completed as { data: { warnings: string } }).data.warnings).toContain(
+      'Import took 31.0 seconds.',
+    )
+    expect(slowImportWarnings).toBeGreaterThan(0)
+    const created = (slug: string) => creates.filter((entry) => entry.collection === slug)
+    const observation = created('asset-observations')[0].data
+    expect(observation.asset).toBe('asset-new')
+    expect(observation.raw).toBeNull()
+    expect(created('assets')[0].data).toMatchObject({ macAddress: 'AA:BB:CC:DD:EE:01' })
+    const link = created('topology-links')[0].data
+    expect(link.localAsset).toBe('asset-9')
+    expect(link.remoteAsset).toBeUndefined()
+    expect(link.raw).toBeNull()
+
+    expect(
+      await invoke(hook, {
+        context: {},
+        doc: { id: 'import-2', site: null, source: 'otserver-otter' },
+        req: importReq(payload),
+      }),
+    ).toMatchObject({
+      data: { error: 'Select a site before importing assets.', status: 'failed' },
+    })
+
+    expect(
+      await invoke(hook, {
+        context: {},
+        doc: { id: 'import-3', site: 'site-1', source: 'otserver-otter' },
+        req: {
+          context: {},
+          file: {
+            data: {
+              toString: () => {
+                throw 'not an error object'
+              },
+            },
+          },
+          payload,
+        },
+      }),
+    ).toMatchObject({ data: { error: 'Import failed.', status: 'failed' } })
+
+    expect(updates.map((update) => (update as { id: string }).id)).toEqual([
+      'import-1',
+      'import-2',
+      'import-3',
+    ])
   })
 
   it('keeps internal evidence collections immutable', async () => {

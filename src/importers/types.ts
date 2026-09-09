@@ -24,9 +24,12 @@ export type ImportedAsset = {
   operatingSystem?: string
   osAccuracy?: number
   firmwareVersion?: string
+  hardwareVersion?: string
   protocols?: (
     | 'bacnet'
+    | 'dnp3'
     | 'ethernet-ip'
+    | 'iec61850'
     | 'modbus-tcp'
     | 'niagara-fox'
     | 'omron-fins'

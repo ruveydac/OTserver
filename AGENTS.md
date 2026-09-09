@@ -123,8 +123,8 @@ transaction only when real file sizes or atomicity requirements justify it.
 
 Asset search accepts the supported Lucene subset in `src/search/assetLucene.ts`. The graphical filter
 builder is a query-language assistant, not an independent filter path. Keep both representations in
-sync. Unsupported regex, fuzzy, boost, invalid range, unknown-field, oversized, and deeply nested
-queries must continue to fail with a clear HTTP 400 error.
+sync. Unsupported regex, fuzzy, boost, unary NOT, invalid range, unknown-field, oversized, and deeply
+nested queries must continue to fail with a clear HTTP 400 error.
 
 ## Generated Files
 
@@ -139,6 +139,21 @@ queries must continue to fail with a clear HTTP 400 error.
 
 Requirements: Node.js 20.9+, pnpm 9-11, and MongoDB. Copy `.env.example` to `.env` and use
 a long random `OTSERVER_SECRET`. `docker compose up` can provide OTserver and MongoDB.
+
+Integration tests need a MongoDB matching `DATABASE_URL` in `.env`. Start a throwaway instance
+with Podman:
+
+```bash
+podman run -d --rm --name otserver-test-mongo -p 27017:27017 \
+  -e MONGO_INITDB_ROOT_USERNAME=admin -e MONGO_INITDB_ROOT_PASSWORD=admin \
+  docker.io/library/mongo:8
+```
+
+Tear it down with `podman stop otserver-test-mongo`; `--rm` removes it. The credentials match the
+`DATABASE_URL` in `.env`.
+
+A cold container makes the first database test exceed the default 5s Vitest timeout. Rerun with
+`pnpm vitest run --config=vitest.config.mts --testTimeout=60000`.
 
 Run the smallest relevant checks while developing, then the full set before committing:
 
