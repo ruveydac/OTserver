@@ -42,6 +42,7 @@
   }
 
   &__canvas {
+    background: var(--theme-elevation-0);
     border: 1px solid var(--theme-elevation-150);
     border-radius: 6px;
     flex: 1;
@@ -63,11 +64,11 @@
 
 .topology-node {
   background: var(--theme-elevation-0);
-  border: 1px solid var(--theme-elevation-200);
-  border-radius: 6px;
-  font-size: 0.75rem;
-  min-width: 120px;
-  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--theme-elevation-500);
+  border-radius: 2px;
+  font-size: 0.8rem;
+  min-width: 170px;
+  padding: 0.75rem 1rem;
   text-align: center;
 
   &__label {
@@ -82,6 +83,27 @@
     margin-top: 0.15rem;
   }
 
+  &__symbol {
+    color: #00658b;
+    margin: 0 auto 0.4rem;
+    width: 64px;
+
+    svg {
+      display: block;
+      fill: var(--theme-elevation-0);
+      overflow: visible;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 3;
+      width: 100%;
+    }
+
+    path {
+      fill: none;
+    }
+  }
+
   &--online {
     border-color: var(--theme-success-500, #4caf50);
   }
@@ -94,9 +116,27 @@
     border-color: var(--theme-warning-500, #ff9800);
   }
 
-  &--switch {
-    background: var(--theme-elevation-100);
-    border-style: dashed;
-    min-width: 100px;
+  &--network {
+    background: transparent;
+    border: 0;
+    min-width: 120px;
+    padding: 0;
+
+    .topology-node__label {
+      max-width: 150px;
+    }
+  }
+
+  &--layer2 .topology-node__symbol {
+    width: 70px;
+  }
+
+  .react-flow__handle {
+    background: transparent;
+    border: 0;
+    height: 1px;
+    min-height: 1px;
+    min-width: 1px;
+    width: 1px;
   }
 }

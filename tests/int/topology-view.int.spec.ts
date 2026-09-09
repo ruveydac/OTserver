@@ -104,9 +104,9 @@ describe('topology graph building', () => {
 
     const { edges, nodes } = buildTopologyGraph(assets, links)
 
-    const assetNodes = nodes.filter((n) => n.type === 'asset')
-    expect(assetNodes).toHaveLength(3)
-    expect(assetNodes[0]).toMatchObject({ id: 'a1', label: 'PLC-1', status: 'online' })
+    expect(nodes).toHaveLength(3)
+    expect(nodes[0]).toMatchObject({ id: 'a1', label: 'PLC-1', status: 'online' })
+    expect(nodes.find(({ id }) => id === 'a3')?.type).toBe('switch')
 
     const explicitEdges = edges.filter((e) => e.type === 'explicit')
     expect(explicitEdges).toHaveLength(2)
@@ -169,7 +169,7 @@ describe('topology graph building', () => {
     expect(edges.filter((e) => e.type === 'explicit')).toHaveLength(0)
   })
 
-  it('creates virtual switch nodes for subnets with multiple members', () => {
+  it('creates a layer 2 domain from assets observed by ARP in the same scan', () => {
     const assets = [
       {
         id: 'a1',
@@ -205,18 +205,24 @@ describe('topology graph building', () => {
       },
     ]
 
-    const { edges, nodes } = buildTopologyGraph(assets, [])
+    const arp = [
+      { asset: 'a1', import: 'scan-1' },
+      { asset: 'a2', import: 'scan-1' },
+      { asset: 'a3', import: 'scan-1' },
+      { asset: 'a4', import: 'scan-2' },
+    ]
+    const { edges, nodes } = buildTopologyGraph(assets, [], arp)
 
-    const switchNodes = nodes.filter((n) => n.type === 'switch')
-    expect(switchNodes).toHaveLength(1)
-    expect(switchNodes[0].label).toBe('192.168.1.0/24')
+    const layer2Nodes = nodes.filter((n) => n.type === 'layer2')
+    expect(layer2Nodes).toHaveLength(1)
+    expect(layer2Nodes[0].label).toBe('192.168.1.0/24')
 
-    const subnetEdges = edges.filter((e) => e.type === 'subnet')
-    expect(subnetEdges).toHaveLength(3)
-    expect(subnetEdges.every((e) => e.target === switchNodes[0].id)).toBe(true)
+    const layer2Edges = edges.filter((e) => e.type === 'layer2')
+    expect(layer2Edges).toHaveLength(3)
+    expect(layer2Edges.every((e) => e.source === layer2Nodes[0].id)).toBe(true)
   })
 
-  it('does not create a switch node for a single-member subnet', () => {
+  it('does not create a layer 2 node for a single ARP observation', () => {
     const assets = [
       {
         id: 'a1',
@@ -228,9 +234,47 @@ describe('topology graph building', () => {
       },
     ]
 
-    const { edges, nodes } = buildTopologyGraph(assets, [])
-    expect(nodes.filter((n) => n.type === 'switch')).toHaveLength(0)
-    expect(edges.filter((e) => e.type === 'subnet')).toHaveLength(0)
+    const { edges, nodes } = buildTopologyGraph(assets, [], [{ asset: 'a1', import: 'scan-1' }])
+    expect(nodes.filter((n) => n.type === 'layer2')).toHaveLength(0)
+    expect(edges.filter((e) => e.type === 'layer2')).toHaveLength(0)
+  })
+
+  it('merges overlapping ARP scans into one layer 2 domain', () => {
+    const assets = ['a1', 'a2', 'a3'].map((id) => ({ id, name: id }))
+    const { edges, nodes } = buildTopologyGraph(
+      assets,
+      [],
+      [
+        { asset: 'a1', import: 'scan-1' },
+        { asset: 'a2', import: 'scan-1' },
+        { asset: 'a2', import: 'scan-2' },
+        { asset: 'a3', import: 'scan-2' },
+      ],
+    )
+
+    expect(nodes.filter(({ type }) => type === 'layer2')).toHaveLength(1)
+    expect(edges.filter(({ type }) => type === 'layer2')).toHaveLength(3)
+  })
+
+  it('renders an asset used as a gateway as a router', () => {
+    const assets = [
+      {
+        gatewayAddress: '192.168.1.1',
+        id: 'host',
+        ipAddress: '192.168.1.10',
+        macAddress: 'AA:BB:CC:DD:EE:01',
+        name: 'Host',
+      },
+      {
+        id: 'gateway',
+        ipAddress: '192.168.1.1',
+        macAddress: 'AA:BB:CC:DD:EE:02',
+        name: 'Gateway',
+      },
+    ]
+
+    const { nodes } = buildTopologyGraph(assets, [])
+    expect(nodes.find(({ id }) => id === 'gateway')?.type).toBe('router')
   })
 
   it('falls back to MAC address when asset has no name', () => {

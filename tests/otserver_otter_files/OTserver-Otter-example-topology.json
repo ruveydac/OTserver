@@ -1,0 +1,335 @@
+{
+  "format": "otserver-scan",
+  "schemaVersion": 2,
+  "scanner": {
+    "name": "OTserver Otter",
+    "version": "0.4.0"
+  },
+  "scan": {
+    "id": "8f3f4ac2-3a2d-4e58-a7e6-2a8baf9319b1",
+    "startedAt": "2026-09-09T10:00:00Z",
+    "finishedAt": "2026-09-09T10:01:00Z",
+    "targets": ["192.0.2.0/24"],
+    "interface": {
+      "id": "test-interface",
+      "name": "Topology test interface",
+      "macAddress": "02:00:00:00:FF:01",
+      "addresses": ["192.0.2.254/24"]
+    }
+  },
+  "devices": [
+    {
+      "macAddress": "02:00:00:00:00:01",
+      "macAddresses": ["02:00:00:00:00:01"],
+      "ipAddresses": ["192.0.2.1"],
+      "observations": [
+        {
+          "source": "arp",
+          "observedAt": "2026-09-09T10:00:05Z",
+          "ipAddress": "192.0.2.1",
+          "macAddress": "02:00:00:00:00:01",
+          "fields": {
+            "name": "Edge Router",
+            "ipAddress": "192.0.2.1",
+            "networkMask": "255.255.255.0",
+            "status": "online"
+          },
+          "raw": {},
+          "warnings": []
+        }
+      ],
+      "interfaces": [
+        {
+          "key": "ifIndex:1",
+          "source": "snmp",
+          "name": "lan0",
+          "description": "Plant network uplink",
+          "macAddress": "02:00:00:00:00:01",
+          "ipAddresses": ["192.0.2.1"],
+          "adminStatus": "up",
+          "operStatus": "up",
+          "speed": 1000000000,
+          "mtu": 1500,
+          "raw": {}
+        }
+      ],
+      "ports": [
+        {
+          "key": "ifIndex:1",
+          "source": "snmp",
+          "interfaceKey": "ifIndex:1",
+          "portId": "lan0",
+          "description": "Plant network uplink",
+          "macAddress": "02:00:00:00:00:01",
+          "vlans": [100],
+          "raw": {}
+        }
+      ]
+    },
+    {
+      "macAddress": "02:00:00:00:00:02",
+      "macAddresses": ["02:00:00:00:00:02"],
+      "ipAddresses": ["192.0.2.2"],
+      "observations": [
+        {
+          "source": "arp",
+          "observedAt": "2026-09-09T10:00:06Z",
+          "ipAddress": "192.0.2.2",
+          "macAddress": "02:00:00:00:00:02",
+          "fields": {
+            "name": "Core Switch",
+            "ipAddress": "192.0.2.2",
+            "networkMask": "255.255.255.0",
+            "gatewayAddress": "192.0.2.1",
+            "status": "online"
+          },
+          "raw": {},
+          "warnings": []
+        },
+        {
+          "source": "snmp",
+          "observedAt": "2026-09-09T10:00:20Z",
+          "ipAddress": "192.0.2.2",
+          "macAddress": "02:00:00:00:00:02",
+          "fields": {
+            "name": "Core Switch",
+            "vendor": "Cisco Systems",
+            "model": "Catalyst IE-3400",
+            "ipAddress": "192.0.2.2",
+            "networkMask": "255.255.255.0",
+            "gatewayAddress": "192.0.2.1",
+            "status": "online"
+          },
+          "raw": {},
+          "warnings": []
+        }
+      ],
+      "interfaces": [
+        {
+          "key": "ifIndex:1",
+          "source": "snmp",
+          "name": "GigabitEthernet1/0/1",
+          "description": "Router uplink",
+          "macAddress": "02:00:00:00:00:02",
+          "ipAddresses": [],
+          "adminStatus": "up",
+          "operStatus": "up",
+          "speed": 1000000000,
+          "mtu": 1500,
+          "raw": {}
+        },
+        {
+          "key": "ifIndex:2",
+          "source": "snmp",
+          "name": "GigabitEthernet1/0/2",
+          "description": "PLC access port",
+          "ipAddresses": [],
+          "adminStatus": "up",
+          "operStatus": "up",
+          "speed": 1000000000,
+          "mtu": 1500,
+          "raw": {}
+        }
+      ],
+      "ports": [
+        {
+          "key": "ifIndex:1",
+          "source": "lldp",
+          "interfaceKey": "ifIndex:1",
+          "portId": "Gi1/0/1",
+          "description": "Router uplink",
+          "vlans": [100],
+          "raw": {}
+        },
+        {
+          "key": "ifIndex:2",
+          "source": "lldp",
+          "interfaceKey": "ifIndex:2",
+          "portId": "Gi1/0/2",
+          "description": "PLC access port",
+          "vlans": [100, 200],
+          "raw": {}
+        }
+      ]
+    },
+    {
+      "macAddress": "02:00:00:00:00:10",
+      "macAddresses": ["02:00:00:00:00:10"],
+      "ipAddresses": ["192.0.2.10"],
+      "observations": [
+        {
+          "source": "arp",
+          "observedAt": "2026-09-09T10:00:07Z",
+          "ipAddress": "192.0.2.10",
+          "macAddress": "02:00:00:00:00:10",
+          "fields": {
+            "name": "Online PLC",
+            "vendor": "Siemens AG",
+            "model": "SIMATIC S7-1500 CPU",
+            "ipAddress": "192.0.2.10",
+            "networkMask": "255.255.255.0",
+            "gatewayAddress": "192.0.2.1",
+            "status": "online",
+            "protocols": ["profinet", "s7"]
+          },
+          "raw": {},
+          "warnings": []
+        }
+      ],
+      "interfaces": [],
+      "ports": []
+    },
+    {
+      "macAddress": "02:00:00:00:00:20",
+      "macAddresses": ["02:00:00:00:00:20"],
+      "ipAddresses": ["192.0.2.20"],
+      "observations": [
+        {
+          "source": "arp",
+          "observedAt": "2026-09-09T10:00:08Z",
+          "ipAddress": "192.0.2.20",
+          "macAddress": "02:00:00:00:00:20",
+          "fields": {
+            "name": "Offline HMI",
+            "vendor": "Siemens AG",
+            "model": "SIMATIC HMI Comfort Panel",
+            "ipAddress": "192.0.2.20",
+            "networkMask": "255.255.255.0",
+            "gatewayAddress": "192.0.2.1",
+            "status": "online",
+            "protocols": ["profinet"]
+          },
+          "raw": {},
+          "warnings": []
+        },
+        {
+          "source": "opc-ua",
+          "observedAt": "2026-09-09T10:00:30Z",
+          "ipAddress": "192.0.2.20",
+          "macAddress": "02:00:00:00:00:20",
+          "fields": {
+            "name": "Offline HMI",
+            "status": "offline",
+            "protocols": ["opc-ua"]
+          },
+          "raw": {},
+          "warnings": []
+        }
+      ],
+      "interfaces": [],
+      "ports": []
+    },
+    {
+      "macAddress": "02:00:00:00:00:30",
+      "macAddresses": ["02:00:00:00:00:30"],
+      "ipAddresses": ["192.0.2.30"],
+      "observations": [
+        {
+          "source": "arp",
+          "observedAt": "2026-09-09T10:00:09Z",
+          "ipAddress": "192.0.2.30",
+          "macAddress": "02:00:00:00:00:30",
+          "fields": {
+            "name": "Maintenance Robot",
+            "vendor": "Example Robotics",
+            "model": "Cell Controller 3000",
+            "ipAddress": "192.0.2.30",
+            "networkMask": "255.255.255.0",
+            "gatewayAddress": "192.0.2.1",
+            "status": "online",
+            "protocols": ["ethernet-ip"]
+          },
+          "raw": {},
+          "warnings": []
+        },
+        {
+          "source": "opc-ua",
+          "observedAt": "2026-09-09T10:00:31Z",
+          "ipAddress": "192.0.2.30",
+          "macAddress": "02:00:00:00:00:30",
+          "fields": {
+            "name": "Maintenance Robot",
+            "status": "maintenance",
+            "protocols": ["opc-ua"]
+          },
+          "raw": {},
+          "warnings": []
+        }
+      ],
+      "interfaces": [],
+      "ports": []
+    },
+    {
+      "macAddress": "02:00:00:00:00:40",
+      "macAddresses": ["02:00:00:00:00:40"],
+      "ipAddresses": [],
+      "observations": [
+        {
+          "source": "os-fingerprint",
+          "observedAt": "2026-09-09T10:00:40Z",
+          "macAddress": "02:00:00:00:00:40",
+          "fields": {
+            "name": "Unaddressed Asset",
+            "operatingSystem": "Embedded Linux",
+            "osAccuracy": 85,
+            "status": "unknown"
+          },
+          "raw": {},
+          "warnings": []
+        }
+      ],
+      "interfaces": [],
+      "ports": []
+    }
+  ],
+  "links": [
+    {
+      "source": "lldp",
+      "observedAt": "2026-09-09T10:00:45Z",
+      "local": {
+        "macAddress": "02:00:00:00:00:01",
+        "stationName": "Edge Router",
+        "interfaceKey": "ifIndex:1",
+        "portId": "lan0"
+      },
+      "remote": {
+        "macAddress": "02:00:00:00:00:02",
+        "stationName": "Core Switch",
+        "interfaceKey": "ifIndex:1",
+        "portId": "Gi1/0/1"
+      },
+      "raw": {}
+    },
+    {
+      "source": "snmp",
+      "observedAt": "2026-09-09T10:00:46Z",
+      "local": {
+        "macAddress": "02:00:00:00:00:02",
+        "stationName": "Core Switch",
+        "interfaceKey": "ifIndex:2"
+      },
+      "remote": {
+        "macAddress": "02:00:00:00:00:10",
+        "stationName": "Online PLC",
+        "portId": "eth0"
+      },
+      "raw": {}
+    },
+    {
+      "source": "profinet-dcp",
+      "observedAt": "2026-09-09T10:00:47Z",
+      "local": {
+        "macAddress": "02:00:00:00:00:20",
+        "stationName": "Offline HMI"
+      },
+      "remote": {
+        "macAddress": "02:00:00:00:00:30",
+        "stationName": "Maintenance Robot"
+      },
+      "raw": {}
+    }
+  ],
+  "unresolved": [],
+  "warnings": [],
+  "errors": []
+}
