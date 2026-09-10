@@ -39,7 +39,7 @@ const ImportInstructions = () => {
         body={
           <div className="import-instructions">
             <p>
-              Choose an importer, prepare its XML as described below, select the destination site,
+              Choose an importer, prepare its file as described below, select the destination site,
               and upload the file. Assets are merged only by MAC address.
             </p>
 
@@ -61,6 +61,13 @@ const ImportInstructions = () => {
                     {value === source.value ? <span>Selected</span> : null}
                   </h3>
                 </div>
+                {'downloadUrl' in source ? (
+                  <p>
+                    <a href={source.downloadUrl} target="_blank" rel="noopener noreferrer">
+                      Download {source.label}
+                    </a>
+                  </p>
+                ) : null}
                 <ol>
                   {source.steps.map((step) => (
                     <li key={step}>{step}</li>

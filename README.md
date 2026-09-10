@@ -55,17 +55,59 @@ field merging, flexible hierarchies, role-based access, search, and a complete a
 
 ## Quick start
 
-### Docker
+### Docker deployment (GitHub Container Registry)
 
-Docker Engine with Compose is the shortest path to a local application and MongoDB:
+Deploy the prebuilt image from GitHub Container Registry:
+`ghcr.io/ruveydac/otserver:latest`. Release images also have version tags (`X.Y.Z` and
+`X.Y`); use an exact version tag for a pinned deployment.
+
+With Docker Engine and Compose installed, create a deployment directory containing this
+`compose.yaml`:
+
+```yaml
+services:
+  otserver:
+    image: ghcr.io/ruveydac/otserver:latest
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    environment:
+      DATABASE_URL: mongodb://mongo:27017/otserver
+      OTSERVER_SECRET: ${OTSERVER_SECRET:?Set OTSERVER_SECRET in .env}
+    volumes:
+      - import-files:/app/import-files
+    depends_on:
+      - mongo
+
+  mongo:
+    image: mongo:8
+    restart: unless-stopped
+    volumes:
+      - data:/data/db
+
+volumes:
+  data:
+  import-files:
+```
+
+Create a `.env` file beside it with a long random secret, and keep that secret across restarts:
+
+```dotenv
+OTSERVER_SECRET=replace-with-a-long-random-secret
+```
+
+Pull the images and start the application and MongoDB:
 
 ```bash
-cp .env.example .env
-# Replace OTSERVER_SECRET in .env with a long random value.
-docker compose up
+docker compose pull
+docker compose up -d
 ```
 
 Open <http://localhost:3000/admin> and create the first administrator account.
+The named volumes persist database data and uploaded import files.
+
+To upgrade, back up those volumes, update the image tag if pinned, then run
+`docker compose pull && docker compose up -d` again.
 
 ### Local development
 
@@ -79,6 +121,9 @@ pnpm dev
 ```
 
 Then open <http://localhost:3000/admin>. The first account receives the protected Admin role.
+
+For container-based development, the repository's `docker-compose.yml` runs the source with
+`pnpm dev`: prepare `.env` as above and run `docker compose up` from the repository root.
 
 ## First inventory
 
@@ -126,6 +171,9 @@ lastseen:[2026-01-01 TO *]
 ```
 
 ## OTserver Otter
+
+Download the scanner for your platform from the
+[OTserver Otter releases page](https://github.com/ruveydac/otserver-otter/releases).
 
 Otter is not a wrapper around a general-purpose scanning engine. Its discovery, protocol
 framing, response validation, correlation, and export contract are implemented together for this
