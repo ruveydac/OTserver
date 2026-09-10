@@ -4,6 +4,7 @@ export const importSources = [
     value: 'otserver-otter',
     quality: 'low',
     fileLabel: 'OTserver Otter JSON',
+    downloadUrl: 'https://github.com/ruveydac/otserver-otter/releases',
     steps: [
       'Windows 10+ uses native IP Helper, needs a separately installed Npcap for active PROFINET DCP, and falls back to passive Packet Monitor (pktmon); Linux requires root or CAP_NET_RAW. Then run otserver-otter doctor.',
       'List capture devices with otserver-otter interfaces.',
