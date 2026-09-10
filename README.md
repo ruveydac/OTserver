@@ -52,6 +52,8 @@ field merging, flexible hierarchies, role-based access, search, and a complete a
   precise inventory searches.
 - **Traceable history** — Retain source observations and topology links alongside an immutable,
   secret-redacting audit log.
+- **Passive vulnerability lookup** — Match recorded vendor, product, and version data against local
+  CISA KEV and NVD catalogs without probing the device.
 
 ## Quick start
 
@@ -102,6 +104,26 @@ human > high > medium > low
 Empty values can always be filled. Equal-quality evidence may replace changed values, stronger
 evidence may replace weaker values, and weaker evidence cannot overwrite stronger data. Manual edits
 are recorded as human provenance and survive future imports.
+
+### Vulnerability lookup
+
+OTserver downloads the CISA Known Exploited Vulnerabilities catalog and NVD JSON 2.0 feeds in the
+background when the application starts, then refreshes stale data weekly. The initial NVD import
+loads annual feeds from 2002 onward and can require substantial time, memory, disk space, and network
+bandwidth. Set `OTSERVER_VULNERABILITY_FEEDS=off` for an air-gapped installation.
+
+Assets store only a derived vulnerability count. A CVE is counted only when its NVD CPE vendor and
+product match the recorded asset data and the asset reports a version satisfying the affected exact
+version or range. CISA KEV enriches matching NVD records with known-exploitation information; a
+CISA-only entry is not counted because it has no affected-version constraint.
+
+Click the count in an asset detail view to perform a fresh local lookup and inspect the matching
+CVEs. Results are unvalidated metadata matches, not evidence that the device is vulnerable. OTserver
+does not run active vulnerability checks.
+
+For a GUI smoke test, upload `tests/otserver_otter_files/OTserver-Otter-known-vulnerability.json`
+under **Imports** as an OTserver Otter file. It creates a demo Siemens S7-1500 CPU with firmware
+`V2.8.0`, which matches NVD `CVE-2020-15782` while the catalog is loaded.
 
 ## Discovery and imports
 
@@ -198,6 +220,7 @@ src/collections/   OTserver collections, hooks, and domain rules
 src/access/        Shared site-scoped authorization
 src/importers/     PRONETA, Nmap, Otter parsers, and quality merging
 src/search/        Lucene query translation and graphical-filter integration
+src/vulnerabilities/ Feed synchronization, CPE parsing, and passive matching
 src/components/    OTserver admin views, branding, and fields
 otserver-otter/    Pinned scanner repository and canonical export contract
 tests/int/         Application and importer integration tests

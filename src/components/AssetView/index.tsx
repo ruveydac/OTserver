@@ -258,6 +258,16 @@ const AssetView = async (props: DocumentViewServerProps) => {
               value: asset.protocols?.map((protocol) => protocolLabels[protocol]).join(', '),
             },
             { label: 'Last seen', value: formatDateTime(asset.lastSeen) },
+            {
+              label: 'Known vulnerabilities',
+              value: (
+                <Link href={`${assetURL}/vulnerabilities`}>
+                  {asset.vulnerabilityCount === null || asset.vulnerabilityCount === undefined
+                    ? 'Not evaluated'
+                    : `${asset.vulnerabilityCount} potential`}
+                </Link>
+              ),
+            },
           ]}
           title="Operations"
         />

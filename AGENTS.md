@@ -26,6 +26,7 @@ Main locations:
 - `src/access/authorization.ts`: site-scoped authorization shared by collections and hooks.
 - `src/importers/`: PRONETA XML, Nmap XML, OTserver Otter JSON, source metadata, and quality merging.
 - `src/search/`: Lucene syntax translation and graphical-filter integration.
+- `src/vulnerabilities/`: CISA/NVD feed synchronization, CPE parsing, and passive asset matching.
 - `src/components/`: custom Payload admin views and fields.
 - `otserver-otter/contracts/otserver-scan-v2.schema.json`: pinned canonical Otter wire contract.
 - `tests/int/`: application and importer integration tests.
@@ -89,6 +90,21 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
 - New collection mutations are covered by `withAudit`; custom actions outside collection hooks must
   call `writeAudit` explicitly with the original request and target context.
 - Never bypass auditing merely to simplify bulk operations or imports.
+
+### Vulnerability matching
+
+- Assets store only the derived vulnerability count. CVE details remain in the local vulnerability
+  catalog and are looked up when the asset vulnerability view opens.
+- Match only recorded metadata. Never add an active vulnerability probe, exploit, or scanner check.
+- Count a CVE only when fuzzy vendor/product matching succeeds and a reported asset version satisfies
+  an affected NVD CPE exact version or range. Missing version evidence does not count.
+- CISA KEV enriches NVD records with known-exploitation data but cannot create a count by itself
+  because the CISA feed has no affected-version constraints.
+- NVD JSON 2.0 affected CPE entries use `vulnerable: true`. Feed parsers must fail closed on malformed
+  top-level data and retain the previous usable catalog when downloads fail.
+- Catalog bulk writes use the MongoDB collection for scale and are represented by one explicit
+  `writeAudit` synchronization event. Asset count changes still use Payload and remain individually
+  audited.
 
 ## Importer Development
 

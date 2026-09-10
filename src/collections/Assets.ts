@@ -14,6 +14,7 @@ import { trackHumanAssetChanges } from '../importers/assetQuality'
 import { assignDefaultAssetClass } from './AssetClasses'
 import { exportAssetsCSV } from './AssetExport'
 import { sanitizeCustomFieldValues } from './AssetFields'
+import { assignVulnerabilityCount } from '../vulnerabilities/match'
 
 const macAddressPattern = /^(?:[0-9A-F]{2}:){5}[0-9A-F]{2}$/
 
@@ -40,7 +41,8 @@ export const userSuppliedAssetFields = [
 ] as const
 
 const recordHumanChanges: CollectionBeforeChangeHook = ({ context, data, originalDoc, req }) => {
-  if (context.assetImport || context.assetClassMigration) return data
+  if (context.assetImport || context.assetClassMigration || context.vulnerabilityCountSync)
+    return data
 
   const tracked = trackHumanAssetChanges(data, originalDoc)
   const ruleAssignment = context.assetClassRuleAssignment || req.context.assetClassRuleAssignment
@@ -81,6 +83,10 @@ export const Assets: CollectionConfig = {
         edit: {
           default: { Component: '@/components/AssetView' },
           edit: { Component: '@payloadcms/ui#DefaultEditView', path: '/edit' },
+          vulnerabilities: {
+            Component: '@/components/AssetVulnerabilitiesView',
+            path: '/vulnerabilities',
+          },
         },
       },
     },
@@ -304,6 +310,22 @@ export const Assets: CollectionConfig = {
       required: true,
     },
     {
+      name: 'vulnerabilityCount',
+      type: 'number',
+      access: {
+        create: () => false,
+        update: () => false,
+      },
+      admin: {
+        description:
+          'Unvalidated catalog matches for the recorded vendor, model, and version data. Empty until the vulnerability catalog is loaded.',
+        position: 'sidebar',
+        readOnly: true,
+      },
+      index: true,
+      label: 'Known vulnerabilities',
+    },
+    {
       name: 'lastSeen',
       type: 'date',
       admin: {
@@ -341,7 +363,13 @@ export const Assets: CollectionConfig = {
   ],
   hooks: {
     beforeValidate: [assignDefaultAssetClass],
-    beforeChange: [enforceWritableSite, sanitizeCustomFieldValues, recordHumanChanges],
+    // assignVulnerabilityCount runs last so the derived count never enters field provenance.
+    beforeChange: [
+      enforceWritableSite,
+      sanitizeCustomFieldValues,
+      recordHumanChanges,
+      assignVulnerabilityCount,
+    ],
     beforeOperation: [applyAssetSearch],
   },
   indexes: [{ fields: ['site', 'status'] }, { fields: ['site', 'assetClass'] }],
