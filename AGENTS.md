@@ -110,6 +110,10 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
   evidence and never yield matchable version constraints. Do not parse that column into `affected`.
 - NVD JSON 2.0 affected CPE entries use `vulnerable: true`. Feed parsers must fail closed on malformed
   top-level data and retain the previous usable catalog when downloads fail.
+- The `sha256` in an NVD `.meta` file covers the **uncompressed** JSON, not the `.gz` download (its
+  `size` field is the uncompressed length too). Hash while gunzipping. Hashing the compressed bytes
+  fails every year, which silently empties the NVD state, marks the catalog unloaded, and makes each
+  restart re-download all annual feeds.
 - Catalog bulk writes use the MongoDB collection for scale and are represented by one explicit
   `writeAudit` synchronization event. Asset count changes still use Payload and remain individually
   audited.

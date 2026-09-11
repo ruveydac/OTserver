@@ -2,7 +2,7 @@ import Link from 'next/link'
 import type { DocumentViewServerProps } from 'payload'
 
 import { formatDateTime } from '@/components/labels'
-import { findAssetVulnerabilities } from '@/vulnerabilities/match'
+import { bySeverity, findAssetVulnerabilities } from '@/vulnerabilities/match'
 import type { Asset } from '@/payload-types'
 
 import './AssetView/index.scss'
@@ -16,10 +16,7 @@ const AssetVulnerabilitiesView = async (props: DocumentViewServerProps) => {
   const page = Math.max(1, Number(props.searchParams?.page) || 1)
 
   const matches = (await findAssetVulnerabilities(props.payload, asset, { user: props.user })).sort(
-    (left, right) =>
-      Number(right.knownExploited) - Number(left.knownExploited) ||
-      (right.cvssScore ?? 0) - (left.cvssScore ?? 0) ||
-      left.cve.localeCompare(right.cve),
+    bySeverity,
   )
   const pages = Math.max(1, Math.ceil(matches.length / PAGE_SIZE))
   const visible = matches.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)

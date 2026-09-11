@@ -109,9 +109,14 @@ are recorded as human provenance and survive future imports.
 
 OTserver downloads the CISA Known Exploited Vulnerabilities catalog, NVD JSON 2.0 feeds, the
 CERT@VDE CSAF 2.0 aggregator, CISA's OT and IT CSAF ROLIE feeds, and the ICS Advisory Project master
-CSV in the background when the application starts, then refreshes stale data weekly. The initial
-import can require substantial time, memory, disk space, and network bandwidth. Set
+CSV in the background when the application starts. Each start first checks when the catalogs were
+last pulled and downloads nothing until they are seven days old, so restarts are cheap. Set
 `OTSERVER_VULNERABILITY_FEEDS=off` for an air-gapped installation.
+
+The first import is the expensive one: NVD publishes one file per year from 2002 onward, roughly
+600 MB compressed and a dozen minutes of work, with a peak heap near 880 MB for the largest year.
+Each year is recorded as it lands, so an interrupted import resumes where it stopped instead of
+starting over.
 
 Assets store only a derived vulnerability count. A CVE is counted only when its NVD or CSAF vendor
 and product match the recorded asset data and the asset reports a version satisfying the affected
@@ -120,9 +125,10 @@ the ICS Advisory Project adds CISA ICS advisory identifiers, critical-infrastruc
 product distribution, and vendor headquarters; neither can create a count on its own because neither
 carries affected-version constraints.
 
-Click the count in an asset detail view to perform a fresh local lookup and inspect the matching
-CVEs. Results are unvalidated metadata matches, not evidence that the device is vulnerable. OTserver
-does not run active vulnerability checks.
+The asset detail view lists the five most severe matches — known-exploited first, then highest CVSS —
+and links to a paginated subview holding every match plus its evidence. Results are unvalidated
+metadata matches, not evidence that the device is vulnerable. OTserver does not run active
+vulnerability checks.
 
 For a GUI smoke test, upload `tests/otserver_otter_files/OTserver-Otter-known-vulnerability.json`
 under **Imports** as an OTserver Otter file. It creates a demo Siemens S7-1500 CPU with firmware

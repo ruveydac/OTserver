@@ -342,6 +342,15 @@ export const findAssetVulnerabilities = async (
   return matchAssetVulnerabilities(asset, result.docs as VulnerabilityCandidate[])
 }
 
+/**
+ * Canonical match ordering: known-exploited first, then highest CVSS, then CVE. Every view that
+ * lists matches sorts this way so a truncated list shows the same entries the full page leads with.
+ */
+export const bySeverity = (left: VulnerabilityMatch, right: VulnerabilityMatch): number =>
+  Number(right.knownExploited) - Number(left.knownExploited) ||
+  (right.cvssScore ?? 0) - (left.cvssScore ?? 0) ||
+  left.cve.localeCompare(right.cve)
+
 export const countAssetVulnerabilities = async (
   payload: Payload,
   asset: AssetMatchInput,

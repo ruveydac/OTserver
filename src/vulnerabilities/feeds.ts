@@ -93,8 +93,10 @@ const rawCollection = (payload: Payload, slug: string): RawCollection => {
 }
 
 /**
- * Downloads a feed, verifies the checksum NVD publishes next to it, and caps the
- * payload size so a hostile or corrupt mirror cannot exhaust memory.
+ * Downloads a feed, verifies the checksum NVD publishes next to it, and caps the payload size so a
+ * hostile or corrupt mirror cannot exhaust memory. NVD's `.meta` `sha256` covers the *uncompressed*
+ * JSON (its `size` field is the uncompressed length too), so the digest is taken while gunzipping
+ * rather than over the downloaded `.gz` bytes.
  */
 export const downloadFeed: DownloadFeed = async (url, { gzip, sha256 } = {}) => {
   const response = await fetch(url, {
@@ -103,7 +105,6 @@ export const downloadFeed: DownloadFeed = async (url, { gzip, sha256 } = {}) => 
   })
   if (!response.ok || !response.body) throw new Error(`${url} responded with ${response.status}.`)
 
-  const hash = createHash('sha256')
   const compressed: Buffer[] = []
   let compressedSize = 0
   for await (const chunk of Readable.fromWeb(
@@ -114,25 +115,28 @@ export const downloadFeed: DownloadFeed = async (url, { gzip, sha256 } = {}) => 
     if (compressedSize > MAX_DOWNLOAD_BYTES) {
       throw new Error(`${url} exceeded the ${MAX_DOWNLOAD_BYTES} byte download limit.`)
     }
-    if (gzip && sha256) hash.update(buffer)
     compressed.push(buffer)
   }
 
   const body = Buffer.concat(compressed)
   if (!gzip) return body
-  if (sha256 && hash.digest('hex') !== sha256.toLowerCase()) {
-    throw new Error(`${url} did not match its published SHA-256 checksum.`)
-  }
 
-  // ponytail: whole feed held in memory (a full NVD year is ~300 MB uncompressed);
-  // switch to the paginated NVD API if the annual files outgrow the heap.
+  const expected = sha256?.toLowerCase()
+  const hash = expected ? createHash('sha256') : undefined
+  // ponytail: whole feed held in memory. The largest NVD year (2024, 278 MB gzipped) peaks near
+  // 880 MB of heap across the decompressed buffer, its UTF-8 string, and the parsed object graph;
+  // switch to the paginated NVD API 2.0 if the annual files outgrow the heap.
   const decompressed: Buffer[] = []
   let size = 0
   for await (const chunk of createGunzip().end(body)) {
     const buffer = chunk as Buffer
     size += buffer.length
     if (size > MAX_FEED_BYTES) throw new Error(`${url} exceeded the ${MAX_FEED_BYTES} byte limit.`)
+    hash?.update(buffer)
     decompressed.push(buffer)
+  }
+  if (expected && hash?.digest('hex') !== expected) {
+    throw new Error(`${url} did not match its published SHA-256 checksum.`)
   }
   return Buffer.concat(decompressed)
 }
@@ -1000,6 +1004,9 @@ const runSync = async (
       await upsertVulnerabilities(payload, documents)
       loaded += documents.length
       state[year] = { lastModifiedDate: meta.lastModifiedDate, sha256: meta.sha256 }
+      // Persist each year as it lands. The initial 2002-onward import takes many minutes, and
+      // without this an interrupted run would restart from the first year on the next boot.
+      await saveFeedState(payload, 'nvd', { state })
     } catch (error) {
       nvdFailures.push(`${year}: ${message(error)}`)
     }
@@ -1059,6 +1066,9 @@ export const syncVulnerabilityFeeds = async (
   inFlight = run.finally(() => {
     inFlight = null
   })
+  // Callers handle `run`; this keeps the shared guard from surfacing as an unhandled rejection
+  // when a sync fails, which would otherwise leak on every failed refresh.
+  void inFlight.catch(() => {})
   return run
 }
 

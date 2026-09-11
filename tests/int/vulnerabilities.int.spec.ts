@@ -37,6 +37,7 @@ import {
 import {
   assetFingerprint,
   assignVulnerabilityCount,
+  bySeverity,
   catalogIsLoaded,
   compareVersions,
   countAssetVulnerabilities,
@@ -683,6 +684,30 @@ describe('asset matching', () => {
     ])
   })
 
+  it('orders matches by exploitation, then severity, then identifier', () => {
+    const match = (cve: string, cvssScore?: null | number, knownExploited = false) => ({
+      constraint: 'all versions',
+      cve,
+      cvssScore,
+      cvssSeverity: null,
+      knownExploited,
+      matchedProduct: 'p',
+      matchedVendor: 'v',
+      version: '1.0',
+      versionEvidence: 'firmware version',
+    })
+    expect(
+      [
+        match('CVE-2099-0002', 9.8),
+        match('CVE-2099-0001', null),
+        match('CVE-2099-0004', 5.0, true),
+        match('CVE-2099-0003', 7.5),
+      ]
+        .sort(bySeverity)
+        .map(({ cve }) => cve),
+    ).toEqual(['CVE-2099-0004', 'CVE-2099-0002', 'CVE-2099-0003', 'CVE-2099-0001'])
+  })
+
   it('builds bounded candidate queries from product evidence', () => {
     expect(vulnerabilityCandidateQuery(feedDocument)).toEqual({
       or: [
@@ -702,7 +727,9 @@ describe('downloadFeed', () => {
   it('verifies checksums, unpacks gzip, and rejects bad responses', async () => {
     const body = Buffer.from(JSON.stringify({ ok: true }))
     const gzipped = gzipSync(body)
-    const sha256 = createHash('sha256').update(gzipped).digest('hex')
+    // NVD publishes the SHA-256 of the *uncompressed* payload, never of the `.gz` file.
+    const sha256 = createHash('sha256').update(body).digest('hex')
+    const compressedSha256 = createHash('sha256').update(gzipped).digest('hex')
     const server = createServer((request, response) => {
       if (request.url === '/missing') {
         response.writeHead(404).end()
@@ -724,6 +751,11 @@ describe('downloadFeed', () => {
       )
       await expect(
         downloadFeed(`${base}/feed.json.gz`, { gzip: true, sha256: 'deadbeef' }),
+      ).rejects.toThrow('SHA-256')
+      // Hashing the compressed bytes instead is the bug this contract pins shut.
+      expect(compressedSha256).not.toBe(sha256)
+      await expect(
+        downloadFeed(`${base}/feed.json.gz`, { gzip: true, sha256: compressedSha256 }),
       ).rejects.toThrow('SHA-256')
       expect((await downloadFeed(`${base}/feed.json.gz`, { gzip: true })).toString()).toBe(
         body.toString(),
@@ -1068,6 +1100,57 @@ describe('vulnerability catalog', () => {
     expect(first).toBe(second)
   })
 
+  it('resumes an interrupted NVD import instead of re-downloading every year', async () => {
+    const nvdJson = Buffer.from(JSON.stringify(await nvdFeed()))
+    // NVD publishes the digest of the uncompressed feed, exactly like the real `.meta` files.
+    const sha256 = createHash('sha256').update(nvdJson).digest('hex')
+    const requested: string[] = []
+    // An injected `download` stands in for the whole download/verify/gunzip pipeline, so it
+    // returns the decompressed body just like `downloadFixtures` does.
+    const serve2023 = async (url: string) => {
+      requested.push(url)
+      if (url === `${NVD_FEED_BASE_URL}/nvdcve-2.0-2023.meta`) {
+        return Buffer.from(`lastModifiedDate:2026-09-10T03:00:00-04:00\nsha256:${sha256}\n`)
+      }
+      if (url === `${NVD_FEED_BASE_URL}/nvdcve-2.0-2023.json.gz`) return nvdJson
+      return downloadFixtures(url)
+    }
+
+    // Interrupt the run after the year loop, which is where a long initial import would die.
+    const count = vi.spyOn(payload, 'count').mockRejectedValueOnce(new Error('interrupted'))
+    await expect(
+      syncVulnerabilityFeeds(payload, { download: serve2023, force: true }),
+    ).rejects.toThrow('interrupted')
+    count.mockRestore()
+
+    expect(requested.filter((url) => url.endsWith('nvdcve-2.0-2023.json.gz'))).toHaveLength(1)
+    const interruptedState = (
+      await payload.find({
+        collection: 'vulnerability-feeds',
+        depth: 0,
+        overrideAccess: true,
+        where: { source: { equals: 'nvd' } },
+      })
+    ).docs[0]
+    expect(interruptedState.state).toMatchObject({ 2023: { sha256 } })
+
+    // The next run sees the stored digest and skips the year entirely.
+    requested.length = 0
+    const result = await syncVulnerabilityFeeds(payload, { download: serve2023, force: true })
+    expect(requested.some((url) => url.endsWith('nvdcve-2.0-2023.json.gz'))).toBe(false)
+    expect(result.skipped).toBe(false)
+    expect(
+      (
+        await payload.find({
+          collection: 'vulnerability-feeds',
+          depth: 0,
+          overrideAccess: true,
+          where: { source: { equals: 'nvd' } },
+        })
+      ).docs[0].status,
+    ).toBe('ready')
+  })
+
   it('keeps counts current when asset metadata changes', async () => {
     const asset = await createAsset({ ...feedDocument, name: 'Counted PLC' })
     expect(asset.vulnerabilityCount).toBe(1)
@@ -1239,8 +1322,10 @@ describe('vulnerability catalog', () => {
   })
 
   it('synchronizes through the real downloader when not in test mode', async () => {
-    const gzip = gzipSync(Buffer.from(JSON.stringify(await nvdFeed())))
-    const sha256 = createHash('sha256').update(gzip).digest('hex')
+    const nvdJson = Buffer.from(JSON.stringify(await nvdFeed()))
+    const gzip = gzipSync(nvdJson)
+    // Mirrors NVD's real contract: the published digest covers the uncompressed feed.
+    const sha256 = createHash('sha256').update(nvdJson).digest('hex')
     const fetchMock = vi.fn(async (url: string) => {
       if (url === CISA_KEV_URL) return new Response(JSON.stringify(await kevCatalog()))
       if (url === `${NVD_FEED_BASE_URL}/nvdcve-2.0-2024.meta`) {

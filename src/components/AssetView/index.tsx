@@ -9,7 +9,7 @@ import {
   statusLabels,
 } from '@/components/labels'
 import type { Asset, AuditLog } from '@/payload-types'
-import { findAssetVulnerabilities } from '@/vulnerabilities/match'
+import { bySeverity, findAssetVulnerabilities } from '@/vulnerabilities/match'
 
 import './index.scss'
 
@@ -19,6 +19,9 @@ type Detail = {
   value: ReactNode
   wide?: boolean
 }
+
+/** The detail view teases the worst matches; the rest live on the vulnerability subview. */
+const MAX_LISTED_VULNERABILITIES = 5
 
 const auditValue = (value: unknown) =>
   value !== null && typeof value === 'object' ? JSON.stringify(value) : String(value ?? '—')
@@ -174,6 +177,9 @@ const AssetView = async (props: DocumentViewServerProps) => {
       }),
       findAssetVulnerabilities(props.payload, asset, { user: props.user }),
     ])
+  const visibleVulnerabilities = vulnerabilityMatches
+    .sort(bySeverity)
+    .slice(0, MAX_LISTED_VULNERABILITIES)
 
   return (
     <main className="asset-view">
@@ -266,13 +272,15 @@ const AssetView = async (props: DocumentViewServerProps) => {
               value: vulnerabilityMatches.length ? (
                 <>
                   <ul className="asset-view__vulnerabilities">
-                    {vulnerabilityMatches
-                      .sort((left, right) => left.cve.localeCompare(right.cve))
-                      .map((match) => (
-                        <li key={match.cve}>{match.cve}</li>
-                      ))}
+                    {visibleVulnerabilities.map((match) => (
+                      <li key={match.cve}>{match.cve}</li>
+                    ))}
                   </ul>
-                  <Link href={`${assetURL}/vulnerabilities`}>View match details</Link>
+                  <Link href={`${assetURL}/vulnerabilities`}>
+                    {vulnerabilityMatches.length > visibleVulnerabilities.length
+                      ? `View all ${vulnerabilityMatches.length} matches`
+                      : 'View match details'}
+                  </Link>
                 </>
               ) : (
                 <Link href={`${assetURL}/vulnerabilities`}>

@@ -155,19 +155,24 @@ describe('asset network fields', () => {
           if (collection === 'vulnerabilities') {
             return Promise.resolve({
               docs: [
-                {
-                  affected: [
-                    {
-                      part: 'a',
-                      product: 'simatic_s7-1500_firmware',
-                      vendor: 'siemens',
-                      version: '2.5',
-                    },
-                  ],
-                  cve: 'CVE-2099-0001',
-                  knownExploited: false,
-                },
-              ],
+                { cve: 'CVE-2099-0001', cvssScore: 5.0, knownExploited: false },
+                { cve: 'CVE-2099-0002', cvssScore: 9.8, knownExploited: false },
+                { cve: 'CVE-2099-0003', cvssScore: 7.5, knownExploited: true },
+                { cve: 'CVE-2099-0004', cvssScore: 6.0, knownExploited: false },
+                { cve: 'CVE-2099-0005', cvssScore: 8.1, knownExploited: false },
+                { cve: 'CVE-2099-0006', cvssScore: 4.0, knownExploited: false },
+                { cve: 'CVE-2099-0007', cvssScore: 9.1, knownExploited: false },
+              ].map((doc) => ({
+                ...doc,
+                affected: [
+                  {
+                    part: 'a',
+                    product: 'simatic_s7-1500_firmware',
+                    vendor: 'siemens',
+                    version: '2.5',
+                  },
+                ],
+              })),
             })
           }
           return Promise.resolve({
@@ -206,8 +211,20 @@ describe('asset network fields', () => {
     expect(html).toContain('<dd>0</dd>')
     expect(html).toContain('href="/admin/collections/assets/asset-1/edit"')
     expect(html).toContain('Edit asset')
-    expect(html).toContain('<li>CVE-2099-0001</li>')
-    expect(html).toContain('View match details')
+    // The detail view lists only the five worst matches, most severe first, and defers the rest
+    // to the vulnerability subview.
+    const positions = [
+      'CVE-2099-0003',
+      'CVE-2099-0002',
+      'CVE-2099-0007',
+      'CVE-2099-0005',
+      'CVE-2099-0004',
+    ].map((cve) => html.indexOf(`<li>${cve}</li>`))
+    expect(positions.every((position) => position >= 0)).toBe(true)
+    expect(positions).toEqual([...positions].sort((left, right) => left - right))
+    expect(html).not.toContain('CVE-2099-0001')
+    expect(html).not.toContain('CVE-2099-0006')
+    expect(html).toContain('View all 7 matches')
     expect(html).toContain('Change history')
     expect(html).toContain('operator@example.test')
     expect(html).toContain('offline → online')
@@ -292,17 +309,38 @@ describe('asset network fields', () => {
         createdAt: '2026-08-08T10:00:00.000Z',
         criticality: 'high',
         customFields: { active: true, installed: '2026-08-08', invalid: false },
+        firmwareVersion: '2.5',
         id: 'asset-3',
         macAddress: '02:00:00:00:00:30',
+        model: 'SIMATIC S7-1500',
         name: 'PLC 3',
         protocols: ['s7'],
         site: 3,
         status: 'online',
         updatedAt: '2026-08-08T11:00:00.000Z',
+        vendor: 'Siemens',
       },
       payload: {
         config: { routes: { admin: '/admin' } },
         find: vi.fn().mockImplementation(({ collection }: { collection: string }) => {
+          if (collection === 'vulnerabilities') {
+            return Promise.resolve({
+              docs: [
+                { cve: 'CVE-2099-0011', cvssScore: 4.0, knownExploited: false },
+                { cve: 'CVE-2099-0012', cvssScore: 8.8, knownExploited: false },
+              ].map((doc) => ({
+                ...doc,
+                affected: [
+                  {
+                    part: 'a',
+                    product: 'simatic_s7-1500_firmware',
+                    vendor: 'siemens',
+                    version: '2.5',
+                  },
+                ],
+              })),
+            })
+          }
           if (collection === 'asset-fields') {
             return Promise.resolve({
               docs: [
@@ -360,5 +398,12 @@ describe('asset network fields', () => {
     expect(html).toContain('Peer')
     expect(html).toContain('Other peer')
     expect(html).toContain('No changes recorded yet')
+    // At or below the cap every match is listed and the link offers details rather than a count.
+    expect(html).toContain('<li>CVE-2099-0012</li>')
+    expect(html).toContain('<li>CVE-2099-0011</li>')
+    expect(html.indexOf('<li>CVE-2099-0012</li>')).toBeLessThan(
+      html.indexOf('<li>CVE-2099-0011</li>'),
+    )
+    expect(html).toContain('View match details')
   })
 })
