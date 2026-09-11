@@ -26,7 +26,8 @@ Main locations:
 - `src/access/authorization.ts`: site-scoped authorization shared by collections and hooks.
 - `src/importers/`: PRONETA XML, Nmap XML, OTserver Otter JSON, source metadata, and quality merging.
 - `src/search/`: Lucene syntax translation and graphical-filter integration.
-- `src/vulnerabilities/`: CISA/NVD feed synchronization, CPE parsing, and passive asset matching.
+- `src/vulnerabilities/`: CISA/NVD/CSAF/ICS-advisory feed synchronization, CPE parsing, and passive
+  asset matching.
 - `src/components/`: custom Payload admin views and fields.
 - `otserver-otter/contracts/otserver-scan-v2.schema.json`: pinned canonical Otter wire contract.
 - `tests/int/`: application and importer integration tests.
@@ -96,10 +97,17 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
 - Assets store only the derived vulnerability count. CVE details remain in the local vulnerability
   catalog and are looked up when the asset vulnerability view opens.
 - Match only recorded metadata. Never add an active vulnerability probe, exploit, or scanner check.
+- CSAF sources are the CERT@VDE aggregator and CISA OT/IT ROLIE feeds. Refresh CSAF as one complete
+  snapshot, preserve the previous snapshot on any provider failure, and never overwrite NVD-owned
+  records with CSAF data.
 - Count a CVE only when fuzzy vendor/product matching succeeds and a reported asset version satisfies
-  an affected NVD CPE exact version or range. Missing version evidence does not count.
+  an affected NVD CPE or CSAF product-tree exact version or range. Missing version evidence does not
+  count.
 - CISA KEV enriches NVD records with known-exploitation data but cannot create a count by itself
   because the CISA feed has no affected-version constraints.
+- The ICS Advisory Project master CSV is an enrichment source only. It writes just the `ics*` fields,
+  so its per-advisory `Cumulative_CVSS` and free-text `Products_Affected` never displace NVD or CSAF
+  evidence and never yield matchable version constraints. Do not parse that column into `affected`.
 - NVD JSON 2.0 affected CPE entries use `vulnerable: true`. Feed parsers must fail closed on malformed
   top-level data and retain the previous usable catalog when downloads fail.
 - Catalog bulk writes use the MongoDB collection for scale and are represented by one explicit

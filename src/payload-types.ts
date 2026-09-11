@@ -508,7 +508,7 @@ export interface TopologyLink {
   createdAt: string;
 }
 /**
- * Downloaded CISA KEV and NVD catalog entries used for passive asset matching.
+ * Downloaded NVD, CSAF, CISA KEV, and ICS Advisory Project entries used for passive asset matching.
  *
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "vulnerabilities".
@@ -551,6 +551,10 @@ export interface Vulnerability {
   kevRequiredAction?: string | null;
   kevRansomwareUse?: string | null;
   kevVendor?: string | null;
+  icsAdvisory?: string[] | null;
+  icsSectors?: string[] | null;
+  icsDistribution?: string | null;
+  icsHeadquarters?: string | null;
   updatedAt: string;
   createdAt: string;
 }
@@ -932,6 +936,10 @@ export interface VulnerabilitiesSelect<T extends boolean = true> {
   kevRequiredAction?: T;
   kevRansomwareUse?: T;
   kevVendor?: T;
+  icsAdvisory?: T;
+  icsSectors?: T;
+  icsDistribution?: T;
+  icsHeadquarters?: T;
   updatedAt?: T;
   createdAt?: T;
 }

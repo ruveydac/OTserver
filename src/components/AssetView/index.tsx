@@ -9,6 +9,7 @@ import {
   statusLabels,
 } from '@/components/labels'
 import type { Asset, AuditLog } from '@/payload-types'
+import { findAssetVulnerabilities } from '@/vulnerabilities/match'
 
 import './index.scss'
 
@@ -132,45 +133,47 @@ const AssetView = async (props: DocumentViewServerProps) => {
     !Array.isArray(asset.customFields)
       ? (asset.customFields as Record<string, unknown>)
       : {}
-  const [definitions, auditLogs, observations, topologyLinks] = await Promise.all([
-    props.payload.find({
-      collection: 'asset-fields',
-      depth: 0,
-      overrideAccess: false,
-      pagination: false,
-      sort: 'label',
-      user: props.user,
-    }),
-    props.payload.find({
-      collection: 'audit-logs',
-      depth: 0,
-      overrideAccess: false,
-      pagination: false,
-      sort: '-createdAt',
-      user: props.user,
-      where: { asset: { equals: asset.id } },
-    }),
-    props.payload.find({
-      collection: 'asset-observations',
-      depth: 0,
-      limit: 20,
-      overrideAccess: false,
-      sort: '-observedAt',
-      user: props.user,
-      where: { asset: { equals: asset.id } },
-    }),
-    props.payload.find({
-      collection: 'topology-links',
-      depth: 0,
-      limit: 20,
-      overrideAccess: false,
-      sort: '-observedAt',
-      user: props.user,
-      where: {
-        or: [{ localAsset: { equals: asset.id } }, { remoteAsset: { equals: asset.id } }],
-      },
-    }),
-  ])
+  const [definitions, auditLogs, observations, topologyLinks, vulnerabilityMatches] =
+    await Promise.all([
+      props.payload.find({
+        collection: 'asset-fields',
+        depth: 0,
+        overrideAccess: false,
+        pagination: false,
+        sort: 'label',
+        user: props.user,
+      }),
+      props.payload.find({
+        collection: 'audit-logs',
+        depth: 0,
+        overrideAccess: false,
+        pagination: false,
+        sort: '-createdAt',
+        user: props.user,
+        where: { asset: { equals: asset.id } },
+      }),
+      props.payload.find({
+        collection: 'asset-observations',
+        depth: 0,
+        limit: 20,
+        overrideAccess: false,
+        sort: '-observedAt',
+        user: props.user,
+        where: { asset: { equals: asset.id } },
+      }),
+      props.payload.find({
+        collection: 'topology-links',
+        depth: 0,
+        limit: 20,
+        overrideAccess: false,
+        sort: '-observedAt',
+        user: props.user,
+        where: {
+          or: [{ localAsset: { equals: asset.id } }, { remoteAsset: { equals: asset.id } }],
+        },
+      }),
+      findAssetVulnerabilities(props.payload, asset, { user: props.user }),
+    ])
 
   return (
     <main className="asset-view">
@@ -260,13 +263,25 @@ const AssetView = async (props: DocumentViewServerProps) => {
             { label: 'Last seen', value: formatDateTime(asset.lastSeen) },
             {
               label: 'Known vulnerabilities',
-              value: (
+              value: vulnerabilityMatches.length ? (
+                <>
+                  <ul className="asset-view__vulnerabilities">
+                    {vulnerabilityMatches
+                      .sort((left, right) => left.cve.localeCompare(right.cve))
+                      .map((match) => (
+                        <li key={match.cve}>{match.cve}</li>
+                      ))}
+                  </ul>
+                  <Link href={`${assetURL}/vulnerabilities`}>View match details</Link>
+                </>
+              ) : (
                 <Link href={`${assetURL}/vulnerabilities`}>
                   {asset.vulnerabilityCount === null || asset.vulnerabilityCount === undefined
                     ? 'Not evaluated'
-                    : `${asset.vulnerabilityCount} potential`}
+                    : 'None matched'}
                 </Link>
               ),
+              wide: true,
             },
           ]}
           title="Operations"

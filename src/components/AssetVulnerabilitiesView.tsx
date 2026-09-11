@@ -58,8 +58,9 @@ const AssetVulnerabilitiesView = async (props: DocumentViewServerProps) => {
           <p className="asset-view__eyebrow">Vulnerability lookup</p>
           <h1>{matches.length} potential vulnerabilities</h1>
           <p>
-            Matched against the downloaded CISA KEV and NVD catalogs using the vendor, model,
-            operating system, and version data recorded for this asset.
+            Matched against downloaded CSAF and NVD advisories, enriched with CISA KEV and ICS
+            Advisory Project context, using the vendor, model, operating system, and version data
+            recorded for this asset.
           </p>
         </div>
         <div className="asset-view__actions">
@@ -140,6 +141,15 @@ const AssetVulnerabilitiesView = async (props: DocumentViewServerProps) => {
                     {detail?.kevRequiredAction ? (
                       <p className="asset-view__match-reason">
                         CISA action: {detail.kevRequiredAction}
+                      </p>
+                    ) : null}
+                    {detail?.icsAdvisory?.length ? (
+                      <p className="asset-view__match-reason">
+                        CISA ICS advisory {detail.icsAdvisory.join(', ')}
+                        {detail.icsSectors?.length
+                          ? ` · sectors: ${detail.icsSectors.join(', ')}`
+                          : ''}
+                        {detail.icsHeadquarters ? ` · vendor HQ: ${detail.icsHeadquarters}` : ''}
                       </p>
                     ) : null}
                   </li>

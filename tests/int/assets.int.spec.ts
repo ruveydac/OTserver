@@ -130,9 +130,11 @@ describe('asset network fields', () => {
         criticality: 'high',
         customFields: { 'field-enabled': false, 'field-level': 0 },
         description: 'Main line controller',
+        firmwareVersion: '2.5',
         id: 'asset-1',
         ipAddress: '192.0.2.10',
         macAddress: '02:00:00:00:00:10',
+        model: 'SIMATIC S7-1500',
         name: 'PLC 1',
         notes: 'Maintenance window Sunday',
         serialNumber: 'S-123',
@@ -145,11 +147,30 @@ describe('asset network fields', () => {
         },
         status: 'online',
         updatedAt: '2026-08-08T11:00:00.000Z',
+        vendor: 'Siemens',
       },
       payload: {
         config: { routes: { admin: '/admin' } },
-        find: vi.fn().mockImplementation(({ collection }: { collection: string }) =>
-          Promise.resolve({
+        find: vi.fn().mockImplementation(({ collection }: { collection: string }) => {
+          if (collection === 'vulnerabilities') {
+            return Promise.resolve({
+              docs: [
+                {
+                  affected: [
+                    {
+                      part: 'a',
+                      product: 'simatic_s7-1500_firmware',
+                      vendor: 'siemens',
+                      version: '2.5',
+                    },
+                  ],
+                  cve: 'CVE-2099-0001',
+                  knownExploited: false,
+                },
+              ],
+            })
+          }
+          return Promise.resolve({
             docs:
               collection === 'audit-logs'
                 ? [
@@ -165,8 +186,8 @@ describe('asset network fields', () => {
                     { id: 'field-enabled', label: 'Remote access enabled', type: 'checkbox' },
                     { id: 'field-level', label: 'ISA-95 level', type: 'number' },
                   ],
-          }),
-        ),
+          })
+        }),
       },
       routeSegments: ['collections', 'assets', 'asset-1'],
     } as unknown as DocumentViewServerProps)
@@ -185,6 +206,8 @@ describe('asset network fields', () => {
     expect(html).toContain('<dd>0</dd>')
     expect(html).toContain('href="/admin/collections/assets/asset-1/edit"')
     expect(html).toContain('Edit asset')
+    expect(html).toContain('<li>CVE-2099-0001</li>')
+    expect(html).toContain('View match details')
     expect(html).toContain('Change history')
     expect(html).toContain('operator@example.test')
     expect(html).toContain('offline → online')

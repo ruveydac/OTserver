@@ -107,15 +107,18 @@ are recorded as human provenance and survive future imports.
 
 ### Vulnerability lookup
 
-OTserver downloads the CISA Known Exploited Vulnerabilities catalog and NVD JSON 2.0 feeds in the
-background when the application starts, then refreshes stale data weekly. The initial NVD import
-loads annual feeds from 2002 onward and can require substantial time, memory, disk space, and network
-bandwidth. Set `OTSERVER_VULNERABILITY_FEEDS=off` for an air-gapped installation.
+OTserver downloads the CISA Known Exploited Vulnerabilities catalog, NVD JSON 2.0 feeds, the
+CERT@VDE CSAF 2.0 aggregator, CISA's OT and IT CSAF ROLIE feeds, and the ICS Advisory Project master
+CSV in the background when the application starts, then refreshes stale data weekly. The initial
+import can require substantial time, memory, disk space, and network bandwidth. Set
+`OTSERVER_VULNERABILITY_FEEDS=off` for an air-gapped installation.
 
-Assets store only a derived vulnerability count. A CVE is counted only when its NVD CPE vendor and
-product match the recorded asset data and the asset reports a version satisfying the affected exact
-version or range. CISA KEV enriches matching NVD records with known-exploitation information; a
-CISA-only entry is not counted because it has no affected-version constraint.
+Assets store only a derived vulnerability count. A CVE is counted only when its NVD or CSAF vendor
+and product match the recorded asset data and the asset reports a version satisfying the affected
+exact version or range. CISA KEV enriches matching records with known-exploitation information and
+the ICS Advisory Project adds CISA ICS advisory identifiers, critical-infrastructure sectors,
+product distribution, and vendor headquarters; neither can create a count on its own because neither
+carries affected-version constraints.
 
 Click the count in an asset detail view to perform a fresh local lookup and inspect the matching
 CVEs. Results are unvalidated metadata matches, not evidence that the device is vulnerable. OTserver

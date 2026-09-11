@@ -11,16 +11,25 @@ import { ensureAssetClass } from '../../src/collections/AssetClasses'
 import { ensureAdminRole } from '../../src/collections/UserRoles'
 import AssetVulnerabilitiesView from '../../src/components/AssetVulnerabilitiesView'
 import {
+  CISA_CSAF_FEED_URLS,
   affectedProducts,
   CISA_KEV_URL,
+  CSAF_AGGREGATOR_URL,
   downloadFeed,
   FIRST_NVD_YEAR,
+  ICS_ADVISORY_URL,
   initializeVulnerabilityFeeds,
   NVD_FEED_BASE_URL,
   parseCisaCatalog,
   parseCpe,
+  parseCsafAggregator,
+  parseCsafDocument,
+  parseCsafProviderMetadata,
+  parseCsv,
+  parseIcsAdvisories,
   parseNvdFeed,
   parseNvdMeta,
+  parseRolieFeed,
   searchKeys,
   syncVulnerabilityFeeds,
   upsertVulnerabilities,
@@ -49,8 +58,16 @@ const fixture = async (name: string) =>
     await readFile(new URL(`../vulnerability_files/${name}`, import.meta.url), 'utf8'),
   ) as unknown
 
+const textFixture = (name: string) =>
+  readFile(new URL(`../vulnerability_files/${name}`, import.meta.url), 'utf8')
+
 const nvdFeed = () => fixture('nvdcve-2.0-2024.json')
 const kevCatalog = () => fixture('known_exploited_vulnerabilities.json')
+const csafAggregator = () => fixture('csaf-aggregator.json')
+const csafProviderMetadata = () => fixture('csaf-provider-metadata.json')
+const csafRolie = () => fixture('csaf-rolie.json')
+const csafDocument = () => fixture('csaf-document.json')
+const icsCsv = () => textFixture('ics-advisory-project.csv')
 
 const feedDocument = {
   firmwareVersion: 'V2.5',
@@ -300,6 +317,263 @@ describe('feed parsing', () => {
       }),
     ).toThrow('invalid entry')
   })
+
+  it('discovers and parses CSAF 2.0 provider advisories', async () => {
+    expect(parseCsafAggregator(await csafAggregator())).toEqual([
+      'https://aggregator.certvde.com/.well-known/csaf-aggregator/example/provider-metadata.json',
+    ])
+    expect(parseCsafProviderMetadata(await csafProviderMetadata())).toEqual([
+      'https://aggregator.certvde.com/.well-known/csaf-aggregator/example/white/feed.json',
+    ])
+    expect(parseRolieFeed(await csafRolie())).toMatchObject({
+      updated: '2026-09-11T06:30:00Z',
+      entries: [
+        {
+          url: 'https://aggregator.certvde.com/.well-known/csaf-aggregator/example/white/2026/example-2026-001.json',
+        },
+      ],
+    })
+    expect(parseCsafDocument(await csafDocument())).toMatchObject([
+      {
+        cve: 'CVE-2099-0100',
+        set: {
+          affected: [
+            {
+              part: 'a',
+              product: 'CSAF Test Controller',
+              vendor: 'CSAF Test Vendor',
+              version: '*',
+              versionEndExcluding: '34.015',
+            },
+          ],
+          cvssScore: 8.8,
+          cvssSeverity: 'HIGH',
+          status: 'CSAF',
+        },
+      },
+    ])
+
+    expect(() => parseCsafAggregator({ aggregator_version: '1.0' })).toThrow('version 2.0')
+    expect(() => parseCsafProviderMetadata({ metadata_version: '2.0' })).toThrow('metadata')
+    expect(() => parseRolieFeed({ feed: { entry: [], updated: 'invalid' } })).toThrow('ROLIE')
+    expect(() => parseCsafDocument({ document: {}, vulnerabilities: [] })).toThrow('version 2.0')
+  })
+
+  it('maps every CSAF product-tree shape onto affected version constraints', () => {
+    const ranged = (id: string, range: string) => ({
+      category: 'product_version_range',
+      name: range,
+      product: { name: `Ranged Product ${range}`, product_id: id },
+    })
+    const documents = parseCsafDocument({
+      document: { csaf_version: '2.0' },
+      product_tree: {
+        branches: [
+          {
+            category: 'vendor',
+            name: 'Ranged Vendor',
+            branches: [
+              {
+                branches: [
+                  ranged('P1', '<1.5'),
+                  ranged('P2', '<=2.0'),
+                  ranged('P3', '>3.0'),
+                  ranged('P4', '>=4.0'),
+                  ranged('P5', '5.0'),
+                ],
+                category: 'product_name',
+                name: 'Ranged Product',
+              },
+              {
+                // A CPE under a version branch keeps the CPE identity and takes the branch bound.
+                category: 'product_version',
+                name: '6.0',
+                product: {
+                  name: 'CPE Product 6.0',
+                  product_id: 'P6',
+                  product_identification_helper: {
+                    cpe: 'cpe:2.3:a:cpevendor:cpeproduct:9.9:*:*:*:*:*:*:*',
+                  },
+                },
+              },
+              {
+                // A CPE with no surrounding version branch keeps its own CPE version.
+                category: 'product_name',
+                name: 'Bare CPE Product',
+                product: {
+                  name: 'Bare CPE Product',
+                  product_id: 'P7',
+                  product_identification_helper: {
+                    cpe: 'cpe:2.3:o:barevendor:bareproduct:7.0:*:*:*:*:*:*:*',
+                  },
+                },
+              },
+            ],
+          },
+        ],
+        full_product_names: [
+          {
+            name: 'Full CPE Product',
+            product_id: 'P8',
+            product_identification_helper: {
+              cpe: 'cpe:2.3:a:fullvendor:fullproduct:8.0:*:*:*:*:*:*:*',
+            },
+          },
+          // No CPE and no product id: nothing can be identified, so both are ignored.
+          { name: 'Unidentified Product' },
+          { name: 'No CPE Product', product_id: 'P9' },
+        ],
+      },
+      vulnerabilities: [
+        {
+          cve: 'not-a-cve',
+          product_status: { known_affected: ['P1'] },
+        },
+        {
+          cve: 'CVE-2099-0300',
+          notes: [{ category: 'other', text: 'Fallback note text' }],
+          product_status: {
+            known_affected: ['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'missing'],
+          },
+          scores: [{ cvss_v4: { baseScore: 9.3 } }],
+        },
+        {
+          cve: 'CVE-2099-0301',
+          product_status: { known_affected: ['P1'] },
+          scores: [{ cvss_v2: { baseScore: 4.4, baseSeverity: 'MEDIUM' } }],
+        },
+        {
+          cve: 'CVE-2099-0302',
+          product_status: { known_affected: ['P1'] },
+          scores: [{ cvss_v3: {} }],
+        },
+      ],
+    })
+
+    expect(documents.map(({ cve }) => cve)).toEqual([
+      'CVE-2099-0300',
+      'CVE-2099-0301',
+      'CVE-2099-0302',
+    ])
+    expect(documents[0].set.affected).toEqual([
+      {
+        part: 'a',
+        product: 'Ranged Product',
+        vendor: 'Ranged Vendor',
+        version: '*',
+        versionEndExcluding: '1.5',
+      },
+      {
+        part: 'a',
+        product: 'Ranged Product',
+        vendor: 'Ranged Vendor',
+        version: '*',
+        versionEndIncluding: '2.0',
+      },
+      {
+        part: 'a',
+        product: 'Ranged Product',
+        vendor: 'Ranged Vendor',
+        version: '*',
+        versionStartExcluding: '3.0',
+      },
+      {
+        part: 'a',
+        product: 'Ranged Product',
+        vendor: 'Ranged Vendor',
+        version: '*',
+        versionStartIncluding: '4.0',
+      },
+      { part: 'a', product: 'Ranged Product', vendor: 'Ranged Vendor', version: '5.0' },
+      { part: 'a', product: 'cpeproduct', vendor: 'cpevendor', version: '6.0' },
+      { part: 'o', product: 'bareproduct', vendor: 'barevendor', version: '7.0' },
+      { part: 'a', product: 'fullproduct', vendor: 'fullvendor', version: '8.0' },
+    ])
+    // A cvss_v4 metric without a severity still yields its score, and the note fallback is used.
+    expect(documents[0].set).toMatchObject({ cvssScore: 9.3, description: 'Fallback note text' })
+    expect(documents[0].set).not.toHaveProperty('cvssSeverity')
+    expect(documents[1].set).toMatchObject({
+      cvssScore: 4.4,
+      cvssSeverity: 'MEDIUM',
+      description: '',
+    })
+    // A metric without a base score contributes neither score nor severity.
+    expect(documents[2].set).not.toHaveProperty('cvssScore')
+    expect(documents[2].set).not.toHaveProperty('cvssSeverity')
+  })
+
+  it('reads quoted CSV fields containing commas, quotes, and newlines', () => {
+    expect(parseCsv('a,b\r\n1,"x,y"\r\n')).toEqual([
+      ['a', 'b'],
+      ['1', 'x,y'],
+    ])
+    expect(parseCsv('"say ""hi""","line\nbreak"')).toEqual([['say "hi"', 'line\nbreak']])
+    expect(parseCsv('')).toEqual([])
+  })
+
+  it('merges ICS Advisory Project rows per CVE and rejects malformed values', async () => {
+    const result = parseIcsAdvisories(await icsCsv())
+    expect(result.dateReleased).toEqual(new Date('2026-09-11T00:00:00.000Z'))
+    expect(result.documents.map(({ cve }) => cve)).toEqual([
+      'CVE-2099-0201',
+      'CVE-2099-0202',
+      'CVE-2099-0001',
+      'CVE-2099-0210',
+      'CVE-2099-0212',
+    ])
+
+    // Two advisories report CVE-2099-0201; the higher advisory score and the union of sectors win.
+    expect(result.documents[0].set).toMatchObject({
+      icsAdvisory: ['ICSA-26-001-01', 'ICSMA-26-002-01'],
+      icsDistribution: 'Worldwide',
+      icsHeadquarters: 'Germany',
+      icsSectors: ['Critical Manufacturing', 'Energy', 'Chemical'],
+    })
+    expect(result.documents[0].setOnInsert).toMatchObject({
+      cvssScore: 9.1,
+      cvssSeverity: 'CRITICAL',
+      description: 'CISA ICS advisory ICSA-26-001-01: Example Controller',
+      modified: new Date('2026-09-11T00:00:00.000Z'),
+      products: ['examplecontroller'],
+      published: new Date('2026-08-01T00:00:00.000Z'),
+      references: [
+        'https://www.cisa.gov/news-events/ics-advisories/icsa-26-001-01',
+        'https://www.cisa.gov/news-events/ics-advisories/icsma-26-002-01',
+      ],
+      vendors: ['examplevendor', 'example', 'vendor'],
+    })
+    expect(result.documents[1].setOnInsert).toMatchObject({ cvssScore: 7.5, cvssSeverity: 'HIGH' })
+    expect(result.documents[2].set).toMatchObject({ icsAdvisory: ['ICSA-26-005-01'] })
+
+    // An out-of-range score, an unknown severity, blank distribution/headquarters, unparseable
+    // dates, and an empty sector segment all degrade to omitted values instead of bad data.
+    const [degenerate] = result.documents.slice(3)
+    expect(degenerate?.set).toMatchObject({
+      icsAdvisory: ['ICSA-26-006-01'],
+      icsSectors: ['Critical Manufacturing'],
+    })
+    expect(degenerate?.set).not.toHaveProperty('icsDistribution')
+    expect(degenerate?.set).not.toHaveProperty('icsHeadquarters')
+    expect(degenerate?.setOnInsert).not.toHaveProperty('cvssScore')
+    expect(degenerate?.setOnInsert).not.toHaveProperty('cvssSeverity')
+    expect(degenerate?.setOnInsert).not.toHaveProperty('published')
+    expect(degenerate?.setOnInsert).not.toHaveProperty('modified')
+    // Row seven has no vendor, so it cannot identify a product and is dropped entirely.
+    expect(result.documents.map(({ cve }) => cve)).not.toContain('CVE-2099-0211')
+    // An in-range score is kept even when the severity label is not a CVSS level.
+    expect(result.documents[4]?.setOnInsert).toMatchObject({ cvssScore: 7 })
+    expect(result.documents[4]?.setOnInsert).not.toHaveProperty('cvssSeverity')
+
+    // Advisory context is supplementary, so it never carries matchable version evidence.
+    expect(result.documents[0].set).not.toHaveProperty('affected')
+
+    // Row three carries only malformed CVE tokens and a non-numeric score, and row four is
+    // truncated, so neither contributes a document.
+    expect(result.documents.map(({ cve }) => cve)).not.toContain('CVE-2099-0203')
+    const [header] = (await icsCsv()).split('\r\n')
+    expect(parseIcsAdvisories(`${header}\r\n`).documents).toEqual([])
+    expect(() => parseIcsAdvisories('Vendor,Product\nExample,Example\n')).toThrow('missing columns')
+  })
 })
 
 describe('asset matching', () => {
@@ -472,6 +746,18 @@ describe('vulnerability catalog', () => {
 
   const downloadFixtures = async (url: string) => {
     if (url === CISA_KEV_URL) return Buffer.from(JSON.stringify(await kevCatalog()))
+    if (url === CSAF_AGGREGATOR_URL) return Buffer.from(JSON.stringify(await csafAggregator()))
+    if (CISA_CSAF_FEED_URLS.includes(url as (typeof CISA_CSAF_FEED_URLS)[number])) {
+      return Buffer.from(JSON.stringify(await csafRolie()))
+    }
+    if (url.endsWith('/provider-metadata.json')) {
+      return Buffer.from(JSON.stringify(await csafProviderMetadata()))
+    }
+    if (url.endsWith('/feed.json')) return Buffer.from(JSON.stringify(await csafRolie()))
+    if (url.endsWith('/example-2026-001.json')) {
+      return Buffer.from(JSON.stringify(await csafDocument()))
+    }
+    if (url === ICS_ADVISORY_URL) return Buffer.from(await icsCsv())
     if (url.endsWith('nvdcve-2.0-2024.meta')) {
       return Buffer.from('lastModifiedDate:2026-09-10T03:00:00-04:00\nsha256:abc123\n')
     }
@@ -575,13 +861,24 @@ describe('vulnerability catalog', () => {
     expect(stored.totalDocs).toBe(1)
   })
 
-  it('synchronizes both feeds, records state, and recounts assets', async () => {
+  it('synchronizes every feed, records state, and recounts assets', async () => {
+    const logged = vi.spyOn(payload.logger, 'info').mockImplementation(() => undefined as never)
     const result = await syncVulnerabilityFeeds(payload, {
       download: downloadFixtures,
       force: true,
     })
-    expect(result).toMatchObject({ loaded: 9, skipped: false, updatedAssets: 1 })
-    expect(result.documentCount).toBeGreaterThan(7)
+    const messages = logged.mock.calls.map(([message]) => String(message))
+    logged.mockRestore()
+
+    // The job announces itself on the console when it starts pulling feeds and when the
+    // downloads are done, so a long NVD import is never silent.
+    expect(messages[0]).toBe(
+      'Vulnerability catalog sync started: downloading CISA KEV, CSAF, ICS Advisory Project, and NVD feeds.',
+    )
+    expect(messages[1]).toBe('Vulnerability catalog sync finished downloading 15 documents.')
+
+    expect(result).toMatchObject({ loaded: 15, skipped: false, updatedAssets: 1 })
+    expect(result.documentCount).toBeGreaterThan(10)
 
     const feeds = await payload.find({
       collection: 'vulnerability-feeds',
@@ -591,10 +888,15 @@ describe('vulnerability catalog', () => {
     })
     expect(feeds.docs.map(({ source, status }) => ({ source, status }))).toEqual([
       { source: 'cisa-kev', status: 'ready' },
+      { source: 'csaf', status: 'ready' },
+      { source: 'ics-advisories', status: 'ready' },
       { source: 'nvd', status: 'ready' },
     ])
     expect(feeds.docs[0]).toMatchObject({ catalogVersion: '2026.09.10', documentCount: 2 })
-    expect(feeds.docs[1].state).toMatchObject({ 2024: { sha256: 'abc123' } })
+    expect(feeds.docs[1]).toMatchObject({ documentCount: 1 })
+    expect(feeds.docs[2]).toMatchObject({ documentCount: 5 })
+    expect(feeds.docs[2].dateReleased).toBe('2026-09-11T00:00:00.000Z')
+    expect(feeds.docs[3].state).toMatchObject({ 2024: { sha256: 'abc123' } })
 
     const merged = await payload.find({
       collection: 'vulnerabilities',
@@ -609,6 +911,59 @@ describe('vulnerability catalog', () => {
       vendors: ['siemens'],
     })
     expect(merged.docs[0].kevDateAdded).toBe('2026-01-15T00:00:00.000Z')
+
+    // ICS Advisory Project context enriches the NVD record without displacing any NVD value:
+    // the advisory score of 6.0 stays out and the NVD CPE evidence is untouched.
+    expect(merged.docs[0]).toMatchObject({
+      affected: [
+        {
+          part: 'a',
+          product: 'simatic_s7-1500_firmware',
+          vendor: 'siemens',
+          version: '*',
+          versionEndExcluding: '2.9',
+          versionStartIncluding: '1.0',
+        },
+      ],
+      cvssScore: 9.8,
+      icsAdvisory: ['ICSA-26-005-01'],
+      icsHeadquarters: 'Germany',
+      icsSectors: ['Critical Manufacturing'],
+      status: 'Analyzed',
+    })
+
+    // An advisory-only CVE is stored for visibility but carries no matchable version evidence.
+    const advisoryOnly = await payload.find({
+      collection: 'vulnerabilities',
+      overrideAccess: true,
+      where: { cve: { equals: 'CVE-2099-0201' } },
+    })
+    expect(advisoryOnly.docs[0]).toMatchObject({
+      cvssScore: 9.1,
+      cvssSeverity: 'CRITICAL',
+      icsAdvisory: ['ICSA-26-001-01', 'ICSMA-26-002-01'],
+      icsSectors: ['Critical Manufacturing', 'Energy', 'Chemical'],
+    })
+    expect(advisoryOnly.docs[0].affected ?? []).toEqual([])
+    // Even with reported version evidence an advisory-only CVE cannot be counted.
+    expect(
+      await findAssetVulnerabilities(
+        payload,
+        { firmwareVersion: '1.5', model: 'Example Controller', vendor: 'Example Vendor' },
+        { user: adminUser },
+      ),
+    ).toEqual([])
+
+    const csaf = await payload.find({
+      collection: 'vulnerabilities',
+      overrideAccess: true,
+      where: { cve: { equals: 'CVE-2099-0100' } },
+    })
+    expect(csaf.docs[0]).toMatchObject({
+      affected: [{ product: 'CSAF Test Controller', versionEndExcluding: '34.015' }],
+      cvssSeverity: 'HIGH',
+      status: 'CSAF',
+    })
 
     const removedKev = await payload.find({
       collection: 'vulnerabilities',
@@ -641,19 +996,29 @@ describe('vulnerability catalog', () => {
   })
 
   it('skips a fresh catalog and keeps the previous one on failure', async () => {
+    const logged = vi.spyOn(payload.logger, 'info').mockImplementation(() => undefined as never)
     expect(await syncVulnerabilityFeeds(payload, { download: downloadFixtures })).toMatchObject({
       loaded: 0,
       skipped: true,
     })
+    // A skipped run pulls nothing, so it stays quiet rather than pretending to be a sync.
+    expect(logged.mock.calls).toHaveLength(0)
 
     const failing = await syncVulnerabilityFeeds(payload, {
       download: async (url) => {
         if (url === CISA_KEV_URL) throw new Error('mirror unreachable')
+        if (url === CSAF_AGGREGATOR_URL) throw new Error('aggregator unreachable')
+        if (url === ICS_ADVISORY_URL) throw new Error('advisory project unreachable')
         return downloadFixtures(url)
       },
       force: true,
     })
     expect(failing.loaded).toBe(0)
+    expect(logged.mock.calls.map(([message]) => String(message))).toEqual([
+      'Vulnerability catalog sync started: downloading CISA KEV, CSAF, ICS Advisory Project, and NVD feeds.',
+      'Vulnerability catalog sync finished downloading 0 documents with 3 source failures.',
+    ])
+    logged.mockRestore()
 
     const feeds = await payload.find({
       collection: 'vulnerability-feeds',
@@ -661,9 +1026,10 @@ describe('vulnerability catalog', () => {
       overrideAccess: true,
       sort: 'source',
     })
-    expect(feeds.docs.map(({ status }) => status)).toEqual(['failed', 'ready'])
+    expect(feeds.docs.map(({ status }) => status)).toEqual(['failed', 'failed', 'failed', 'ready'])
     expect(feeds.docs[0].error).toContain('mirror unreachable')
-    expect(feeds.docs[1].error).toBeNull()
+    expect(feeds.docs[1].error).toContain('aggregator unreachable')
+    expect(feeds.docs[2].error).toContain('advisory project unreachable')
     // The previously stored catalog survives a failed refresh.
     expect(
       (
@@ -674,6 +1040,24 @@ describe('vulnerability catalog', () => {
         })
       ).totalDocs,
     ).toBe(1)
+    expect(
+      (
+        await payload.find({
+          collection: 'vulnerabilities',
+          overrideAccess: true,
+          where: { cve: { equals: 'CVE-2099-0100' } },
+        })
+      ).totalDocs,
+    ).toBe(1)
+    // A failed advisory refresh leaves the previous ICS context in place.
+    const preserved = await payload.find({
+      collection: 'vulnerabilities',
+      overrideAccess: true,
+      where: { cve: { equals: 'CVE-2099-0201' } },
+    })
+    expect(preserved.docs[0]).toMatchObject({
+      icsAdvisory: ['ICSA-26-001-01', 'ICSMA-26-002-01'],
+    })
   })
 
   it('never runs two synchronizations at once', async () => {
@@ -734,7 +1118,7 @@ describe('vulnerability catalog', () => {
       overrideAccess: false,
       user: adminUser,
     })
-    expect(anonymous.totalDocs).toBe(2)
+    expect(anonymous.totalDocs).toBe(4)
 
     const operatorRole = await payload.create({
       collection: 'user-roles',
@@ -800,6 +1184,29 @@ describe('vulnerability catalog', () => {
     expect(html).toContain('firmware version')
     expect(html).toContain('satisfies')
     expect(html).toContain('cisa-kev')
+    expect(html).toContain('ics-advisories')
+
+    // CVE-2099-0001 carries ICS Advisory Project context, which the lookup view surfaces.
+    const enriched = (
+      await payload.find({
+        collection: 'assets',
+        overrideAccess: true,
+        where: { name: { equals: 'Uncounted PLC' } },
+      })
+    ).docs[0]
+    const enrichedHTML = renderToStaticMarkup(
+      await AssetVulnerabilitiesView({
+        doc: enriched,
+        payload,
+        routeSegments: ['collections', 'assets', enriched.id, 'vulnerabilities'],
+        searchParams: {},
+        user: adminUser,
+      } as never),
+    )
+    expect(enrichedHTML).toContain('CVE-2099-0001')
+    expect(enrichedHTML).toContain('CISA ICS advisory ICSA-26-005-01')
+    expect(enrichedHTML).toContain('sectors: Critical Manufacturing')
+    expect(enrichedHTML).toContain('vendor HQ: Germany')
 
     const bare = (
       await payload.find({
@@ -869,8 +1276,8 @@ describe('vulnerability catalog', () => {
       overrideAccess: true,
       sort: 'source',
     })
-    expect(feeds.docs.map(({ status }) => status)).toEqual(['ready', 'partial'])
-    expect(feeds.docs[1].error).toContain('responded with 404')
+    expect(feeds.docs.map(({ status }) => status)).toEqual(['ready', 'failed', 'failed', 'partial'])
+    expect(feeds.docs[3].error).toContain('responded with 404')
 
     process.env.OTSERVER_VULNERABILITY_FEEDS = 'off'
     const calls = fetchMock.mock.calls.length
