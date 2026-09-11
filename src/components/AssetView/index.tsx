@@ -23,6 +23,9 @@ type Detail = {
 /** The detail view teases the worst matches; the rest live on the vulnerability subview. */
 const MAX_LISTED_VULNERABILITIES = 5
 
+const cvssBand = (score: number): string =>
+  score >= 9 ? 'CRITICAL' : score >= 7 ? 'HIGH' : score >= 4 ? 'MEDIUM' : 'LOW'
+
 const auditValue = (value: unknown) =>
   value !== null && typeof value === 'object' ? JSON.stringify(value) : String(value ?? '—')
 
@@ -272,9 +275,24 @@ const AssetView = async (props: DocumentViewServerProps) => {
               value: vulnerabilityMatches.length ? (
                 <>
                   <ul className="asset-view__vulnerabilities">
-                    {visibleVulnerabilities.map((match) => (
-                      <li key={match.cve}>{match.cve}</li>
-                    ))}
+                    {visibleVulnerabilities.map((match) => {
+                      const score = match.cvssScore ?? undefined
+                      const band =
+                        match.cvssSeverity ?? (score === undefined ? undefined : cvssBand(score))
+                      return (
+                        <li key={match.cve}>
+                          {match.cve}
+                          {score === undefined || band === undefined ? null : (
+                            <span
+                              className={`asset-view__severity--${band.toLowerCase()}`}
+                              title={band}
+                            >
+                              {score}
+                            </span>
+                          )}
+                        </li>
+                      )
+                    })}
                   </ul>
                   <Link href={`${assetURL}/vulnerabilities`}>
                     {vulnerabilityMatches.length > visibleVulnerabilities.length

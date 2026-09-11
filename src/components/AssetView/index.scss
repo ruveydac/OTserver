@@ -180,6 +180,11 @@
       &:first-child {
         border-top: 0;
       }
+
+      > span {
+        margin-left: 0.5rem;
+        vertical-align: middle;
+      }
     }
 
     p {

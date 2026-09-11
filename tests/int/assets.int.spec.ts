@@ -219,9 +219,10 @@ describe('asset network fields', () => {
       'CVE-2099-0007',
       'CVE-2099-0005',
       'CVE-2099-0004',
-    ].map((cve) => html.indexOf(`<li>${cve}</li>`))
+    ].map((cve) => html.indexOf(`<li>${cve}<span`))
     expect(positions.every((position) => position >= 0)).toBe(true)
     expect(positions).toEqual([...positions].sort((left, right) => left - right))
+    expect(html).toContain('asset-view__severity--critical" title="CRITICAL">9.8</span>')
     expect(html).not.toContain('CVE-2099-0001')
     expect(html).not.toContain('CVE-2099-0006')
     expect(html).toContain('View all 7 matches')
@@ -399,11 +400,13 @@ describe('asset network fields', () => {
     expect(html).toContain('Other peer')
     expect(html).toContain('No changes recorded yet')
     // At or below the cap every match is listed and the link offers details rather than a count.
-    expect(html).toContain('<li>CVE-2099-0012</li>')
-    expect(html).toContain('<li>CVE-2099-0011</li>')
-    expect(html.indexOf('<li>CVE-2099-0012</li>')).toBeLessThan(
-      html.indexOf('<li>CVE-2099-0011</li>'),
+    expect(html).toContain(
+      '<li>CVE-2099-0012<span class="asset-view__severity--high" title="HIGH">8.8</span></li>',
     )
+    expect(html).toContain(
+      '<li>CVE-2099-0011<span class="asset-view__severity--medium" title="MEDIUM">4</span></li>',
+    )
+    expect(html.indexOf('CVE-2099-0012')).toBeLessThan(html.indexOf('CVE-2099-0011'))
     expect(html).toContain('View match details')
   })
 })
