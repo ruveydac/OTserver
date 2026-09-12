@@ -9,6 +9,7 @@ import {
   statusLabels,
 } from '@/components/labels'
 import type { Asset, AuditLog } from '@/payload-types'
+import { bySeverity, findAssetVulnerabilities } from '@/vulnerabilities/match'
 
 import './index.scss'
 
@@ -18,6 +19,12 @@ type Detail = {
   value: ReactNode
   wide?: boolean
 }
+
+/** The detail view teases the worst matches; the rest live on the vulnerability subview. */
+const MAX_LISTED_VULNERABILITIES = 5
+
+const cvssBand = (score: number): string =>
+  score >= 9 ? 'CRITICAL' : score >= 7 ? 'HIGH' : score >= 4 ? 'MEDIUM' : 'LOW'
 
 const auditValue = (value: unknown) =>
   value !== null && typeof value === 'object' ? JSON.stringify(value) : String(value ?? '—')
@@ -132,45 +139,50 @@ const AssetView = async (props: DocumentViewServerProps) => {
     !Array.isArray(asset.customFields)
       ? (asset.customFields as Record<string, unknown>)
       : {}
-  const [definitions, auditLogs, observations, topologyLinks] = await Promise.all([
-    props.payload.find({
-      collection: 'asset-fields',
-      depth: 0,
-      overrideAccess: false,
-      pagination: false,
-      sort: 'label',
-      user: props.user,
-    }),
-    props.payload.find({
-      collection: 'audit-logs',
-      depth: 0,
-      overrideAccess: false,
-      pagination: false,
-      sort: '-createdAt',
-      user: props.user,
-      where: { asset: { equals: asset.id } },
-    }),
-    props.payload.find({
-      collection: 'asset-observations',
-      depth: 0,
-      limit: 20,
-      overrideAccess: false,
-      sort: '-observedAt',
-      user: props.user,
-      where: { asset: { equals: asset.id } },
-    }),
-    props.payload.find({
-      collection: 'topology-links',
-      depth: 0,
-      limit: 20,
-      overrideAccess: false,
-      sort: '-observedAt',
-      user: props.user,
-      where: {
-        or: [{ localAsset: { equals: asset.id } }, { remoteAsset: { equals: asset.id } }],
-      },
-    }),
-  ])
+  const [definitions, auditLogs, observations, topologyLinks, vulnerabilityMatches] =
+    await Promise.all([
+      props.payload.find({
+        collection: 'asset-fields',
+        depth: 0,
+        overrideAccess: false,
+        pagination: false,
+        sort: 'label',
+        user: props.user,
+      }),
+      props.payload.find({
+        collection: 'audit-logs',
+        depth: 0,
+        overrideAccess: false,
+        pagination: false,
+        sort: '-createdAt',
+        user: props.user,
+        where: { asset: { equals: asset.id } },
+      }),
+      props.payload.find({
+        collection: 'asset-observations',
+        depth: 0,
+        limit: 20,
+        overrideAccess: false,
+        sort: '-observedAt',
+        user: props.user,
+        where: { asset: { equals: asset.id } },
+      }),
+      props.payload.find({
+        collection: 'topology-links',
+        depth: 0,
+        limit: 20,
+        overrideAccess: false,
+        sort: '-observedAt',
+        user: props.user,
+        where: {
+          or: [{ localAsset: { equals: asset.id } }, { remoteAsset: { equals: asset.id } }],
+        },
+      }),
+      findAssetVulnerabilities(props.payload, asset, { user: props.user }),
+    ])
+  const visibleVulnerabilities = vulnerabilityMatches
+    .sort(bySeverity)
+    .slice(0, MAX_LISTED_VULNERABILITIES)
 
   return (
     <main className="asset-view">
@@ -258,6 +270,45 @@ const AssetView = async (props: DocumentViewServerProps) => {
               value: asset.protocols?.map((protocol) => protocolLabels[protocol]).join(', '),
             },
             { label: 'Last seen', value: formatDateTime(asset.lastSeen) },
+            {
+              label: 'Known vulnerabilities',
+              value: vulnerabilityMatches.length ? (
+                <>
+                  <ul className="asset-view__vulnerabilities">
+                    {visibleVulnerabilities.map((match) => {
+                      const score = match.cvssScore ?? undefined
+                      const band =
+                        match.cvssSeverity ?? (score === undefined ? undefined : cvssBand(score))
+                      return (
+                        <li key={match.cve}>
+                          {match.cve}
+                          {score === undefined || band === undefined ? null : (
+                            <span
+                              className={`asset-view__severity--${band.toLowerCase()}`}
+                              title={band}
+                            >
+                              {score}
+                            </span>
+                          )}
+                        </li>
+                      )
+                    })}
+                  </ul>
+                  <Link href={`${assetURL}/vulnerabilities`}>
+                    {vulnerabilityMatches.length > visibleVulnerabilities.length
+                      ? `View all ${vulnerabilityMatches.length} matches`
+                      : 'View match details'}
+                  </Link>
+                </>
+              ) : (
+                <Link href={`${assetURL}/vulnerabilities`}>
+                  {asset.vulnerabilityCount === null || asset.vulnerabilityCount === undefined
+                    ? 'Not evaluated'
+                    : 'None matched'}
+                </Link>
+              ),
+              wide: true,
+            },
           ]}
           title="Operations"
         />

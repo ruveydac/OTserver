@@ -76,6 +76,8 @@ export interface Config {
     users: User;
     'asset-observations': AssetObservation;
     'topology-links': TopologyLink;
+    vulnerabilities: Vulnerability;
+    'vulnerability-feeds': VulnerabilityFeed;
     'audit-logs': AuditLog;
     'payload-kv': PayloadKv;
     'payload-locked-documents': PayloadLockedDocument;
@@ -93,6 +95,8 @@ export interface Config {
     users: UsersSelect<false> | UsersSelect<true>;
     'asset-observations': AssetObservationsSelect<false> | AssetObservationsSelect<true>;
     'topology-links': TopologyLinksSelect<false> | TopologyLinksSelect<true>;
+    vulnerabilities: VulnerabilitiesSelect<false> | VulnerabilitiesSelect<true>;
+    'vulnerability-feeds': VulnerabilityFeedsSelect<false> | VulnerabilityFeedsSelect<true>;
     'audit-logs': AuditLogsSelect<false> | AuditLogsSelect<true>;
     'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
     'payload-locked-documents': PayloadLockedDocumentsSelect<false> | PayloadLockedDocumentsSelect<true>;
@@ -247,6 +251,10 @@ export interface Asset {
     | null;
   status: 'online' | 'offline' | 'maintenance' | 'unknown';
   criticality: 'low' | 'medium' | 'high' | 'critical';
+  /**
+   * Unvalidated catalog matches for the recorded vendor, model, and version data. Empty until the vulnerability catalog is loaded.
+   */
+  vulnerabilityCount?: number | null;
   lastSeen?: string | null;
   importSource?: string | null;
   sourceVersion?: string | null;
@@ -500,6 +508,84 @@ export interface TopologyLink {
   createdAt: string;
 }
 /**
+ * Downloaded NVD, CSAF, CISA KEV, and ICS Advisory Project entries used for passive asset matching.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "vulnerabilities".
+ */
+export interface Vulnerability {
+  id: string;
+  cve: string;
+  description?: string | null;
+  cvssScore?: number | null;
+  cvssSeverity?: string | null;
+  status?: string | null;
+  published?: string | null;
+  modified?: string | null;
+  references?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  affected?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  vendors?: string[] | null;
+  products?: string[] | null;
+  productTokens?: string[] | null;
+  knownExploited?: boolean | null;
+  kevDateAdded?: string | null;
+  kevDueDate?: string | null;
+  kevName?: string | null;
+  kevProduct?: string | null;
+  kevRequiredAction?: string | null;
+  kevRansomwareUse?: string | null;
+  kevVendor?: string | null;
+  icsAdvisory?: string[] | null;
+  icsSectors?: string[] | null;
+  icsDistribution?: string | null;
+  icsHeadquarters?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Synchronization state of the downloaded vulnerability catalogs.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "vulnerability-feeds".
+ */
+export interface VulnerabilityFeed {
+  id: string;
+  source: string;
+  status: 'idle' | 'running' | 'ready' | 'partial' | 'failed';
+  lastSyncedAt?: string | null;
+  documentCount?: number | null;
+  catalogVersion?: string | null;
+  dateReleased?: string | null;
+  error?: string | null;
+  state?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
  * Immutable history of inventory, configuration, and authentication changes.
  *
  * This interface was referenced by `Config`'s JSON-Schema
@@ -687,6 +773,7 @@ export interface AssetsSelect<T extends boolean = true> {
   protocols?: T;
   status?: T;
   criticality?: T;
+  vulnerabilityCount?: T;
   lastSeen?: T;
   importSource?: T;
   sourceVersion?: T;
@@ -821,6 +908,54 @@ export interface TopologyLinksSelect<T extends boolean = true> {
   local?: T;
   remote?: T;
   raw?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "vulnerabilities_select".
+ */
+export interface VulnerabilitiesSelect<T extends boolean = true> {
+  cve?: T;
+  description?: T;
+  cvssScore?: T;
+  cvssSeverity?: T;
+  status?: T;
+  published?: T;
+  modified?: T;
+  references?: T;
+  affected?: T;
+  vendors?: T;
+  products?: T;
+  productTokens?: T;
+  knownExploited?: T;
+  kevDateAdded?: T;
+  kevDueDate?: T;
+  kevName?: T;
+  kevProduct?: T;
+  kevRequiredAction?: T;
+  kevRansomwareUse?: T;
+  kevVendor?: T;
+  icsAdvisory?: T;
+  icsSectors?: T;
+  icsDistribution?: T;
+  icsHeadquarters?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "vulnerability-feeds_select".
+ */
+export interface VulnerabilityFeedsSelect<T extends boolean = true> {
+  source?: T;
+  status?: T;
+  lastSyncedAt?: T;
+  documentCount?: T;
+  catalogVersion?: T;
+  dateReleased?: T;
+  error?: T;
+  state?: T;
   updatedAt?: T;
   createdAt?: T;
 }

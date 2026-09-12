@@ -130,9 +130,11 @@ describe('asset network fields', () => {
         criticality: 'high',
         customFields: { 'field-enabled': false, 'field-level': 0 },
         description: 'Main line controller',
+        firmwareVersion: '2.5',
         id: 'asset-1',
         ipAddress: '192.0.2.10',
         macAddress: '02:00:00:00:00:10',
+        model: 'SIMATIC S7-1500',
         name: 'PLC 1',
         notes: 'Maintenance window Sunday',
         serialNumber: 'S-123',
@@ -145,11 +147,35 @@ describe('asset network fields', () => {
         },
         status: 'online',
         updatedAt: '2026-08-08T11:00:00.000Z',
+        vendor: 'Siemens',
       },
       payload: {
         config: { routes: { admin: '/admin' } },
-        find: vi.fn().mockImplementation(({ collection }: { collection: string }) =>
-          Promise.resolve({
+        find: vi.fn().mockImplementation(({ collection }: { collection: string }) => {
+          if (collection === 'vulnerabilities') {
+            return Promise.resolve({
+              docs: [
+                { cve: 'CVE-2099-0001', cvssScore: 5.0, knownExploited: false },
+                { cve: 'CVE-2099-0002', cvssScore: 9.8, knownExploited: false },
+                { cve: 'CVE-2099-0003', cvssScore: 7.5, knownExploited: true },
+                { cve: 'CVE-2099-0004', cvssScore: 6.0, knownExploited: false },
+                { cve: 'CVE-2099-0005', cvssScore: 8.1, knownExploited: false },
+                { cve: 'CVE-2099-0006', cvssScore: 4.0, knownExploited: false },
+                { cve: 'CVE-2099-0007', cvssScore: 9.1, knownExploited: false },
+              ].map((doc) => ({
+                ...doc,
+                affected: [
+                  {
+                    part: 'a',
+                    product: 'simatic_s7-1500_firmware',
+                    vendor: 'siemens',
+                    version: '2.5',
+                  },
+                ],
+              })),
+            })
+          }
+          return Promise.resolve({
             docs:
               collection === 'audit-logs'
                 ? [
@@ -165,8 +191,8 @@ describe('asset network fields', () => {
                     { id: 'field-enabled', label: 'Remote access enabled', type: 'checkbox' },
                     { id: 'field-level', label: 'ISA-95 level', type: 'number' },
                   ],
-          }),
-        ),
+          })
+        }),
       },
       routeSegments: ['collections', 'assets', 'asset-1'],
     } as unknown as DocumentViewServerProps)
@@ -185,6 +211,21 @@ describe('asset network fields', () => {
     expect(html).toContain('<dd>0</dd>')
     expect(html).toContain('href="/admin/collections/assets/asset-1/edit"')
     expect(html).toContain('Edit asset')
+    // The detail view lists only the five worst matches, most severe first, and defers the rest
+    // to the vulnerability subview.
+    const positions = [
+      'CVE-2099-0003',
+      'CVE-2099-0002',
+      'CVE-2099-0007',
+      'CVE-2099-0005',
+      'CVE-2099-0004',
+    ].map((cve) => html.indexOf(`<li>${cve}<span`))
+    expect(positions.every((position) => position >= 0)).toBe(true)
+    expect(positions).toEqual([...positions].sort((left, right) => left - right))
+    expect(html).toContain('asset-view__severity--critical" title="CRITICAL">9.8</span>')
+    expect(html).not.toContain('CVE-2099-0001')
+    expect(html).not.toContain('CVE-2099-0006')
+    expect(html).toContain('View all 7 matches')
     expect(html).toContain('Change history')
     expect(html).toContain('operator@example.test')
     expect(html).toContain('offline → online')
@@ -269,17 +310,38 @@ describe('asset network fields', () => {
         createdAt: '2026-08-08T10:00:00.000Z',
         criticality: 'high',
         customFields: { active: true, installed: '2026-08-08', invalid: false },
+        firmwareVersion: '2.5',
         id: 'asset-3',
         macAddress: '02:00:00:00:00:30',
+        model: 'SIMATIC S7-1500',
         name: 'PLC 3',
         protocols: ['s7'],
         site: 3,
         status: 'online',
         updatedAt: '2026-08-08T11:00:00.000Z',
+        vendor: 'Siemens',
       },
       payload: {
         config: { routes: { admin: '/admin' } },
         find: vi.fn().mockImplementation(({ collection }: { collection: string }) => {
+          if (collection === 'vulnerabilities') {
+            return Promise.resolve({
+              docs: [
+                { cve: 'CVE-2099-0011', cvssScore: 4.0, knownExploited: false },
+                { cve: 'CVE-2099-0012', cvssScore: 8.8, knownExploited: false },
+              ].map((doc) => ({
+                ...doc,
+                affected: [
+                  {
+                    part: 'a',
+                    product: 'simatic_s7-1500_firmware',
+                    vendor: 'siemens',
+                    version: '2.5',
+                  },
+                ],
+              })),
+            })
+          }
           if (collection === 'asset-fields') {
             return Promise.resolve({
               docs: [
@@ -337,5 +399,14 @@ describe('asset network fields', () => {
     expect(html).toContain('Peer')
     expect(html).toContain('Other peer')
     expect(html).toContain('No changes recorded yet')
+    // At or below the cap every match is listed and the link offers details rather than a count.
+    expect(html).toContain(
+      '<li>CVE-2099-0012<span class="asset-view__severity--high" title="HIGH">8.8</span></li>',
+    )
+    expect(html).toContain(
+      '<li>CVE-2099-0011<span class="asset-view__severity--medium" title="MEDIUM">4</span></li>',
+    )
+    expect(html.indexOf('CVE-2099-0012')).toBeLessThan(html.indexOf('CVE-2099-0011'))
+    expect(html).toContain('View match details')
   })
 })

@@ -1,5 +1,6 @@
 import config from '@/payload.config'
 import { randomBytes, randomUUID } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 import { getPayload, handleEndpoints, type Payload } from 'payload'
 
@@ -158,6 +159,22 @@ const mutableExport = (localMAC: string, remoteMAC: string) =>
   exportFile(localMAC, remoteMAC) as unknown as MutableExport
 
 describe('OTserver Otter importer', () => {
+  it('accepts the minimal known-vulnerability PLC fixture', async () => {
+    const input = await readFile(
+      new URL('../otserver_otter_files/OTserver-Otter-known-vulnerability.json', import.meta.url),
+      'utf8',
+    )
+    const result = parseOTserverOtter(input)
+
+    expect(result.assets).toHaveLength(1)
+    expect(result.assets[0]).toMatchObject({
+      firmwareVersion: 'V2.8.0',
+      model: 'SIMATIC S7-1500 CPU',
+      name: 'Demo S7-1500 PLC',
+      vendor: 'Siemens AG',
+    })
+  })
+
   it('validates scanner files and rejects exported credentials', () => {
     const file = exportFile(randomMAC(), randomMAC())
     expect(parseOTserverOtter(JSON.stringify(file)).assets).toHaveLength(2)

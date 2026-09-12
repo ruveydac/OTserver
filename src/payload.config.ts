@@ -13,7 +13,9 @@ import { Sites } from './collections/Sites'
 import { initializeAuthorization, UserRoles } from './collections/UserRoles'
 import { Users } from './collections/Users'
 import { TopologyLinks } from './collections/TopologyLinks'
+import { Vulnerabilities, VulnerabilityFeeds } from './collections/Vulnerabilities'
 import { MAX_IMPORT_FILE_SIZE } from './importers/proneta'
+import { initializeVulnerabilityFeeds } from './vulnerabilities/feeds'
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -40,6 +42,7 @@ const initializeApplication = async (payload: Payload) => {
   await initializeAuthorization(payload)
   await cleanupTrashedAssets(payload)
   setInterval(() => void cleanupTrashedAssets(payload), CLEANUP_INTERVAL_MS)
+  await initializeVulnerabilityFeeds(payload)
 }
 
 export default buildConfig({
@@ -81,6 +84,8 @@ export default buildConfig({
     Users,
     AssetObservations,
     TopologyLinks,
+    Vulnerabilities,
+    VulnerabilityFeeds,
     AuditLogs,
   ].map(withAudit),
   db: mongooseAdapter({
