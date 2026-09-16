@@ -61,6 +61,50 @@ type AssetRecord = {
   status?: null | string
 }
 
+type EndpointRecord = {
+  id: string
+  asset: string
+  context: string
+  contextName: string
+  mac?: string
+  addresses: string[]
+}
+
+export const addEndpointTopology = (
+  graph: { edges: GraphEdge[]; nodes: GraphNode[] },
+  endpoints: EndpointRecord[],
+) => {
+  if (!endpoints.length) return graph
+  const nodes = graph.nodes.filter((node) => node.type !== 'layer2')
+  const edges = graph.edges.filter((edge) => edge.type !== 'layer2')
+  const assets = new Set(nodes.map(({ id }) => id))
+  const contexts = new Set<string>()
+  for (const endpoint of endpoints) {
+    if (!assets.has(endpoint.asset)) continue
+    const id = `network-context-${endpoint.context}`
+    if (!contexts.has(id)) {
+      contexts.add(id)
+      nodes.push({ id, type: 'layer2', label: `Network scope: ${endpoint.contextName}` })
+    }
+    edges.push({
+      id: `endpoint-${endpoint.id}`,
+      source: endpoint.asset,
+      target: id,
+      type: 'layer2',
+      label: [endpoint.mac, ...endpoint.addresses].filter(Boolean).join(' · '),
+    })
+  }
+  for (const node of nodes.filter(({ type }) => type !== 'layer2')) {
+    const addresses = [
+      ...new Set(
+        endpoints.filter(({ asset }) => asset === node.id).flatMap(({ addresses }) => addresses),
+      ),
+    ]
+    if (addresses.length) node.ipAddress = addresses.join(', ')
+  }
+  return { nodes, edges }
+}
+
 type LinkRecord = {
   id: string
   local: unknown
@@ -336,7 +380,7 @@ const TopologyView = async (props: AdminViewServerProps) => {
     )
   }
 
-  const [assets, links, arpObservations] = await Promise.all([
+  const [assets, links, arpObservations, endpoints] = await Promise.all([
     payload.find({
       collection: 'assets',
       depth: 1,
@@ -352,7 +396,12 @@ const TopologyView = async (props: AdminViewServerProps) => {
         status: true,
       },
       user,
-      where: { site: { equals: selectedSiteId } },
+      where: {
+        and: [
+          { site: { equals: selectedSiteId } },
+          { lifecycle: { not_in: ['merged', 'replaced', 'retired'] } },
+        ],
+      },
     }),
     payload.find({
       collection: 'topology-links',
@@ -373,6 +422,14 @@ const TopologyView = async (props: AdminViewServerProps) => {
       where: {
         and: [{ site: { equals: selectedSiteId } }, { source: { equals: 'arp' } }],
       },
+    }),
+    payload.find({
+      collection: 'network-endpoints',
+      depth: 1,
+      pagination: false,
+      overrideAccess: false,
+      user,
+      where: { and: [{ site: { equals: selectedSiteId } }, { endedAt: { exists: false } }] },
     }),
   ])
 
@@ -401,7 +458,23 @@ const TopologyView = async (props: AdminViewServerProps) => {
     asset: observation.asset ? String(observation.asset) : null,
     import: observation.import ? String(observation.import) : null,
   }))
-  const { edges, nodes } = buildTopologyGraph(assetDocs, linkDocs, arpDocs)
+  const { edges, nodes } = addEndpointTopology(
+    buildTopologyGraph(assetDocs, linkDocs, arpDocs),
+    endpoints.docs.map((endpoint) => ({
+      id: endpoint.id,
+      asset: typeof endpoint.asset === 'object' ? endpoint.asset?.id || '' : endpoint.asset || '',
+      context:
+        typeof endpoint.networkContext === 'object'
+          ? endpoint.networkContext.id
+          : endpoint.networkContext,
+      contextName:
+        typeof endpoint.networkContext === 'object'
+          ? endpoint.networkContext.name
+          : endpoint.networkContext,
+      mac: endpoint.macAddress || undefined,
+      addresses: (endpoint.addresses || []).map(({ address }) => address),
+    })),
+  )
 
   const selectedSite = siteOptions.find((site) => site.id === selectedSiteId)
 

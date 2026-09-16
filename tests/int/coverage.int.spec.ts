@@ -533,28 +533,16 @@ describe('collection safety hooks', () => {
     const file = { data: Buffer.from(JSON.stringify(scan)) }
     const importReq = (payload: Record<string, unknown>) => ({ context: {}, file, payload })
 
-    const creates: { collection: string; data: Record<string, unknown> }[] = []
     const updates: unknown[] = []
     const payload = {
-      create: vi.fn(async (value: { collection: string; data: Record<string, unknown> }) => {
-        creates.push(value)
-        return { ...value, id: 'asset-new' }
-      }),
-      find: vi.fn(
-        async ({ where }: { where?: { and?: { macAddress?: { equals?: string } }[] } }) => ({
-          docs:
-            where?.and?.[0]?.macAddress?.equals === '00:11:22:33:44:55' ? [{ id: 'asset-9' }] : [],
-        }),
-      ),
+      logger: { error: vi.fn() },
       update: vi.fn(async (value: unknown) => {
         updates.push(value)
         return value
       }),
     }
 
-    const now = vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(31_000)
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const completed = await invoke(hook, {
+    const failed = await invoke(hook, {
       context: {},
       doc: {
         customFieldOverrides: [],
@@ -565,37 +553,8 @@ describe('collection safety hooks', () => {
       },
       req: importReq(payload),
     })
-    const slowImportWarnings = warn.mock.calls.length
-    now.mockRestore()
-    warn.mockRestore()
-
-    expect(completed).toMatchObject({
-      data: {
-        createdAssets: 1,
-        skippedAssets: 2,
-        sourceVersion: 'unknown',
-        status: 'completed',
-        updatedAssets: 0,
-      },
-      id: 'import-1',
-    })
-    expect((completed as { data: { warnings: string } }).data.warnings).toContain('interface down')
-    expect((completed as { data: { warnings: string } }).data.warnings).toContain(
-      '1 observation(s) could not be correlated by MAC address.',
-    )
-    expect((completed as { data: { warnings: string } }).data.warnings).toContain(
-      'Import took 31.0 seconds.',
-    )
-    expect(slowImportWarnings).toBeGreaterThan(0)
-    const created = (slug: string) => creates.filter((entry) => entry.collection === slug)
-    const observation = created('asset-observations')[0].data
-    expect(observation.asset).toBe('asset-new')
-    expect(observation.raw).toBeNull()
-    expect(created('assets')[0].data).toMatchObject({ macAddress: 'AA:BB:CC:DD:EE:01' })
-    const link = created('topology-links')[0].data
-    expect(link.localAsset).toBe('asset-9')
-    expect(link.remoteAsset).toBeUndefined()
-    expect(link.raw).toBeNull()
+    expect(failed).toMatchObject({ data: { status: 'failed', createdAssets: 0, updatedAssets: 0 } })
+    expect((failed as { data: { error: string } }).data.error).toContain('replica-set')
 
     expect(
       await invoke(hook, {

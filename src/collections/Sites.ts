@@ -59,32 +59,31 @@ const preventHierarchyCycles: CollectionBeforeChangeHook = async ({ data, origin
 }
 
 const preventDeletingUsedSites: CollectionBeforeDeleteHook = async ({ id, req }) => {
-  const [children, assets, imports, roles] = await Promise.all([
-    req.payload.count({
-      collection: 'sites',
-      overrideAccess: true,
-      req,
-      where: { parent: { equals: id } },
-    }),
-    req.payload.count({
-      collection: 'assets',
-      overrideAccess: true,
-      req,
-      where: { site: { equals: id } },
-    }),
-    req.payload.count({
-      collection: 'asset-imports',
-      overrideAccess: true,
-      req,
-      where: { site: { equals: id } },
-    }),
-    req.payload.count({
-      collection: 'user-roles',
-      overrideAccess: true,
-      req,
-      where: { 'permissions.site': { equals: id } },
-    }),
-  ])
+  // MongoDB sessions cannot run parallel operations inside one transaction.
+  const children = await req.payload.count({
+    collection: 'sites',
+    overrideAccess: true,
+    req,
+    where: { parent: { equals: id } },
+  })
+  const assets = await req.payload.count({
+    collection: 'assets',
+    overrideAccess: true,
+    req,
+    where: { site: { equals: id } },
+  })
+  const imports = await req.payload.count({
+    collection: 'asset-imports',
+    overrideAccess: true,
+    req,
+    where: { site: { equals: id } },
+  })
+  const roles = await req.payload.count({
+    collection: 'user-roles',
+    overrideAccess: true,
+    req,
+    where: { 'permissions.site': { equals: id } },
+  })
 
   if (children.totalDocs || assets.totalDocs || imports.totalDocs || roles.totalDocs) {
     throw new APIError(

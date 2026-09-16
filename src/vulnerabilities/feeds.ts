@@ -184,7 +184,7 @@ export const affectedProducts = (configurations: unknown): AffectedProduct[] => 
         const cpe = parseCpe(item.criteria)
         if (!cpe) continue
 
-        const entry: AffectedProduct = { ...cpe }
+        const entry: AffectedProduct = { ...cpe, cpe: text(item.criteria) }
         for (const bound of VERSION_BOUNDS) {
           const value = text(item[bound])
           if (value) entry[bound] = value

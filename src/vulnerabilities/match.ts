@@ -1,6 +1,7 @@
 import type { CollectionBeforeChangeHook, Payload, PayloadRequest, TypedUser, Where } from 'payload'
 
 export type AffectedProduct = {
+  cpe?: string
   part: string
   product: string
   vendor: string
@@ -20,6 +21,8 @@ export type VulnerabilityCandidate = {
 }
 
 export type VulnerabilityMatch = {
+  cpe?: string
+  components?: { id: string; name: string; version: string }[]
   constraint: string
   cve: string
   cvssScore?: null | number
@@ -32,6 +35,7 @@ export type VulnerabilityMatch = {
 }
 
 export type AssetMatchInput = {
+  catalogNumber?: null | string
   firmwareVersion?: null | string
   hardwareVersion?: null | string
   model?: null | string
@@ -42,6 +46,7 @@ export type AssetMatchInput = {
 const MATCH_FIELDS = [
   'vendor',
   'model',
+  'catalogNumber',
   'operatingSystem',
   'firmwareVersion',
   'hardwareVersion',
@@ -247,10 +252,12 @@ export const matchAssetVulnerabilities = (
   if (!vendor || (!model && !operatingSystem)) return []
 
   const vendorTokens = searchTokens(vendor)
-  const productText = [model, operatingSystem].filter(Boolean).join(' ')
-  const assetProductKeys = [normalizeKey(model), normalizeKey(operatingSystem)].filter(
-    (key) => key.length > 1,
-  )
+  const productText = [model, operatingSystem, text(asset.catalogNumber)].filter(Boolean).join(' ')
+  const assetProductKeys = [
+    normalizeKey(model),
+    normalizeKey(operatingSystem),
+    normalizeKey(text(asset.catalogNumber)),
+  ].filter((key) => key.length > 1)
   const productTokens = searchTokens(productText)
   const distinctiveTokens = distinctive(productTokens)
   if (!distinctiveTokens.length) return []
@@ -278,6 +285,7 @@ export const matchAssetVulnerabilities = (
         if (!satisfiesConstraint(evidence.version, entry)) continue
         if (productScore > bestProductScore) {
           match = {
+            ...(entry.cpe ? { cpe: entry.cpe } : {}),
             constraint: describeConstraint(entry),
             cve: candidate.cve,
             cvssScore: candidate.cvssScore,
@@ -300,11 +308,15 @@ export const matchAssetVulnerabilities = (
 
 /** Indexed lookup terms for one asset: product keys plus distinctive product tokens. */
 export const vulnerabilityCandidateQuery = (asset: AssetMatchInput): Where | undefined => {
-  const productText = [text(asset.model), text(asset.operatingSystem)].filter(Boolean).join(' ')
+  const productText = [text(asset.model), text(asset.operatingSystem), text(asset.catalogNumber)]
+    .filter(Boolean)
+    .join(' ')
   const tokens = distinctive(searchTokens(productText))
-  const keys = [normalizeKey(text(asset.model)), normalizeKey(text(asset.operatingSystem))].filter(
-    (key) => key.length > 1,
-  )
+  const keys = [
+    normalizeKey(text(asset.model)),
+    normalizeKey(text(asset.operatingSystem)),
+    normalizeKey(text(asset.catalogNumber)),
+  ].filter((key) => key.length > 1)
   if (!tokens.length && !keys.length) return undefined
   return {
     or: [
@@ -340,6 +352,55 @@ export const findAssetVulnerabilities = async (
     where,
   })
   return matchAssetVulnerabilities(asset, result.docs as VulnerabilityCandidate[])
+}
+
+/** Distinct CVEs for the installed physical assembly; each match retains its module/version. */
+export const findAssemblyVulnerabilities = async (
+  payload: Payload,
+  asset: AssetMatchInput & { id?: string; name?: string },
+  access: { req?: PayloadRequest; user?: TypedUser | null } = {},
+): Promise<VulnerabilityMatch[]> => {
+  const matches = new Map<string, VulnerabilityMatch>()
+  const pending = [asset]
+  const visited = new Set<string>()
+  while (pending.length) {
+    const current = pending.shift()!
+    if (current.id && visited.has(current.id)) continue
+    if (current.id) visited.add(current.id)
+    for (const match of await findAssetVulnerabilities(payload, current, access)) {
+      const previous = matches.get(match.cve)
+      const components = [
+        ...(previous?.components || []),
+        ...(current.id
+          ? [{ id: current.id, name: current.name || current.id, version: match.version }]
+          : []),
+      ]
+      matches.set(match.cve, { ...(previous || match), components })
+    }
+    if (!current.id) continue
+    const installations = await payload.find({
+      collection: 'asset-installations',
+      depth: 0,
+      pagination: false,
+      where: { and: [{ parent: { equals: current.id } }, { removedAt: { exists: false } }] },
+      overrideAccess: false,
+      ...access,
+    })
+    for (const installation of installations.docs) {
+      const moduleID =
+        typeof installation.module === 'string' ? installation.module : installation.module.id
+      const component = await payload.findByID({
+        collection: 'assets',
+        id: moduleID,
+        depth: 0,
+        disableErrors: true,
+        overrideAccess: false,
+        ...access,
+      })
+      if (component && component.lifecycle === 'active') pending.push(component)
+    }
+  }
+  return [...matches.values()]
 }
 
 /**
@@ -432,6 +493,7 @@ export const recountAssetVulnerabilities = async (payload: Payload): Promise<num
         firmwareVersion: true,
         hardwareVersion: true,
         model: true,
+        catalogNumber: true,
         operatingSystem: true,
         vendor: true,
         vulnerabilityCount: true,

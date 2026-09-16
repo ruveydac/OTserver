@@ -152,6 +152,7 @@ describe('asset network fields', () => {
       payload: {
         config: { routes: { admin: '/admin' } },
         find: vi.fn().mockImplementation(({ collection }: { collection: string }) => {
+          if (collection === 'asset-installations') return Promise.resolve({ docs: [] })
           if (collection === 'vulnerabilities') {
             return Promise.resolve({
               docs: [

@@ -766,7 +766,7 @@ describe('asset CRUD', () => {
     }
   })
 
-  it('merges PRONETA and Nmap assets using only their MAC as identity', async () => {
+  it('correlates legacy imports by scoped MAC while preserving quality and scan chronology', async () => {
     const mac = `02:${randomBytes(5).toString('hex').toUpperCase().match(/.{2}/g)?.join(':')}`
     const importIDs: string[] = []
     let assetFieldID: string | undefined
@@ -886,7 +886,8 @@ describe('asset CRUD', () => {
         location: 'Building 1 / Cabinet A',
         site: siteID,
         sourceVersion: '7.95',
-        status: 'online',
+        // The Nmap observation predates the current inventory; it cannot establish current reachability.
+        status: 'unknown',
       })
       expect(importedAssets.docs[0]?.customFields).toMatchObject({ [assetFieldID]: 'Level 2' })
       assetID = importedAssets.docs[0]?.id
@@ -934,6 +935,8 @@ describe('asset CRUD', () => {
     } finally {
       for (const id of importIDs) await payload.delete({ collection: 'asset-imports', id })
       if (assetID) await payload.delete({ collection: 'assets', id: assetID })
+      if (!assetID && siteID)
+        await payload.delete({ collection: 'assets', where: { site: { equals: siteID } } })
       if (siteID) await payload.delete({ collection: 'sites', id: siteID })
       if (userID) await payload.delete({ collection: 'users', id: userID })
       if (assetFieldID) await payload.delete({ collection: 'asset-fields', id: assetFieldID })

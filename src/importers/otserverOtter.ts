@@ -8,6 +8,7 @@ import type {
   ImportResult,
 } from './types'
 import { normalizeMAC } from '../collections/Assets'
+import { endpointEvidence, expandPhysicalEvidence, serviceEvidence } from '../identity/evidence'
 
 const macPattern = /^(?:[0-9A-F]{2}:){5}[0-9A-F]{2}$/
 const sources: Record<string, DataQuality> = {
@@ -94,7 +95,8 @@ const safeFields = (value: unknown, identity: string) => {
   const fields = Object.fromEntries(
     Object.entries(record(value)).filter(([key]) => allowedFields.has(key)),
   )
-  fields.macAddress = identity
+  if (identity) fields.macAddress = identity
+  else delete fields.macAddress
   for (const field of textFields) {
     if (fields[field] !== undefined && typeof fields[field] !== 'string') delete fields[field]
   }
@@ -128,6 +130,8 @@ const safeFields = (value: unknown, identity: string) => {
 }
 
 export const parseOTserverOtter = (input: string): ImportResult => {
+  if (Buffer.byteLength(input, 'utf8') > 50 * 1024 * 1024)
+    throw new Error('Otter JSON exceeds the 50 MB import limit.')
   let parsed: unknown
   try {
     parsed = JSON.parse(input)
@@ -146,9 +150,15 @@ export const parseOTserverOtter = (input: string): ImportResult => {
   if (typeof scanner.version !== 'string' || typeof scan.id !== 'string') {
     throw new Error('Otter and scan metadata are required.')
   }
+  if (
+    !Array.isArray(root.devices) ||
+    (root.links !== undefined && !Array.isArray(root.links)) ||
+    (root.unresolved !== undefined && !Array.isArray(root.unresolved))
+  )
+    throw new Error('Otter devices, links, and unresolved observations must be arrays.')
 
   const identities = new Set<string>()
-  const assets = array(root.devices).map((entry, index): ImportedAsset => {
+  const assets = array(root.devices).flatMap((entry, index): ImportedAsset[] => {
     const device = record(entry)
     const identity = mac(device.macAddress, `devices[${index}].macAddress`)
     if (identities.has(identity)) throw new Error(`Duplicate device MAC address: ${identity}.`)
@@ -187,13 +197,43 @@ export const parseOTserverOtter = (input: string): ImportResult => {
       (result, observation) => ({ ...result, ...observation.fields }),
       {} as Record<string, unknown>,
     )
-    return {
+    return expandPhysicalEvidence({
       ...preferred,
       macAddress: identity,
       name: typeof preferred.name === 'string' && preferred.name ? preferred.name : identity,
       observations,
-    } as ImportedAsset
+      endpoints: endpointEvidence(device),
+      services: serviceEvidence(device),
+    } as ImportedAsset)
   })
+
+  const unresolved: unknown[] = []
+  for (const entry of array(root.unresolved)) {
+    const value = record(entry)
+    if (typeof value.observedAt !== 'string' || Number.isNaN(Date.parse(value.observedAt))) {
+      unresolved.push(entry)
+      continue
+    }
+    const source =
+      typeof value.source === 'string' && value.source in sources ? value.source : 'unknown'
+    const evidence = expandPhysicalEvidence({
+      name: 'Unresolved protocol target',
+      observations: [
+        {
+          fields: safeFields(value.fields, ''),
+          observedAt: value.observedAt,
+          quality: sources[source],
+          source,
+          raw: value.raw,
+          warnings: array(value.warnings).filter(
+            (item): item is string => typeof item === 'string',
+          ),
+        },
+      ],
+    }).filter((asset) => asset.identity)
+    if (evidence.length) assets.push(...evidence)
+    else unresolved.push(entry)
+  }
 
   const links = array(root.links).map((entry, index): ImportedTopologyLink => {
     const link = record(entry)
@@ -216,7 +256,7 @@ export const parseOTserverOtter = (input: string): ImportResult => {
     links,
     scanMetadata: { scan, scanner },
     sourceVersion: scanner.version,
-    unresolved: array(root.unresolved),
+    unresolved,
     warnings: [...array(root.warnings), ...array(root.errors)].filter(
       (item): item is string => typeof item === 'string',
     ),

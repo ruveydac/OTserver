@@ -22,6 +22,11 @@ type FieldKind = 'date' | 'keyword' | 'number' | 'text'
 
 const fields: Record<string, { kind: FieldKind; path: string }> = {
   assetowner: { kind: 'text', path: 'assetOwner' },
+  uuid: { kind: 'keyword', path: 'uuid' },
+  lifecycle: { kind: 'keyword', path: 'lifecycle' },
+  physicalkind: { kind: 'keyword', path: 'physicalKind' },
+  catalog: { kind: 'text', path: 'catalogNumber' },
+  catalognumber: { kind: 'text', path: 'catalogNumber' },
   assetclass: { kind: 'text', path: 'assetClass.name' },
   assetclassid: { kind: 'keyword', path: 'assetClass' },
   class: { kind: 'text', path: 'assetClass.name' },
@@ -220,9 +225,30 @@ export const parseAssetSearch = (query: string): Where => {
   }
 }
 
+export const expandNetworkWhere = (where: Where): Where => {
+  const conditions: Where[] = []
+  for (const [field, value] of Object.entries(where)) {
+    if (field === 'and' || field === 'or') {
+      conditions.push({ [field]: (value as Where[]).map(expandNetworkWhere) })
+    } else if (['ipAddress', 'macAddress'].includes(field)) {
+      const path = field === 'ipAddress' ? 'networkAddresses.address' : 'networkMACs.address'
+      const condition = value as Record<string, unknown>
+      const negative =
+        Object.keys(condition).some((operator) => operator.startsWith('not_')) ||
+        condition.exists === false
+      conditions.push({ [negative ? 'and' : 'or']: [{ [field]: value }, { [path]: value }] })
+    } else conditions.push({ [field]: value })
+  }
+  return conditions.length === 1 ? conditions[0] : { and: conditions }
+}
+
 export const applyAssetSearch: CollectionBeforeOperationHook = ({ args, operation, req }) => {
   const search = req.query.search
-  if (operation !== 'read' || typeof search !== 'string' || !('where' in args)) return args
+  if (operation !== 'read' || !('where' in args)) return args
+  if (typeof search !== 'string') {
+    if (args.where) args.where = expandNetworkWhere(args.where)
+    return args
+  }
 
   const parsed = parseAssetSearch(search)
   const graphicalWhere = req.query.where
@@ -235,5 +261,6 @@ export const applyAssetSearch: CollectionBeforeOperationHook = ({ args, operatio
     !graphicalOnly && args.where && Object.keys(args.where).length
       ? { and: [args.where, parsed] }
       : parsed
+  args.where = expandNetworkWhere(args.where)
   return args
 }

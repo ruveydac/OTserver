@@ -25,6 +25,9 @@ Main locations:
 - `src/collections/`: Payload collections and hooks.
 - `src/access/authorization.ts`: site-scoped authorization shared by collections and hooks.
 - `src/importers/`: PRONETA XML, Nmap XML, OTserver Otter JSON, source metadata, and quality merging.
+- `src/identity/`: physical hardware keys, scoped endpoint reconciliation, installations, lifecycle
+  actions, and explicit migration. Operator details are in `docs/device-identity.md`; deferred
+  scanner work is in `docs/otter-identity-roadmap.md`.
 - `src/search/`: Lucene syntax translation and graphical-filter integration.
 - `src/vulnerabilities/`: CISA/NVD/CSAF/ICS-advisory feed synchronization, CPE parsing, and passive
   asset matching.
@@ -36,12 +39,19 @@ Main locations:
 
 ### Asset identity
 
-- A normalized MAC address is the only asset identity key. Never merge or deduplicate by IP, name,
-  serial number, or site.
+- Assets represent physical hardware and may have no MAC. MAC addresses identify current endpoint
+  bindings within an explicit network context, not globally unique physical devices.
+- Automatic physical correlation requires an exact accepted, source-qualified manufacturer/scoped
+  serial key from `src/identity/keys.ts`. Generic serial strings, IP/name, topology, and adjacent MACs
+  cannot authorize automatic physical merges. Conflicts become identity cases.
+- UUIDv5 hardware keys are portable aliases; preserve Payload IDs and stable asset UUIDs. Keep module
+  identity independent from its current chassis/slot. Preserve unknown slot positions as unknown.
 - Store MAC addresses as uppercase colon-separated values via `normalizeMAC` in
   `src/collections/Assets.ts`.
-- Assets and imported assets require a MAC. Skip uncorrelatable observations instead of inventing an
-  asset identity.
+- Preserve unresolved observations instead of inventing physical identity or assigning gateway MACs
+  to routed targets. Qualified existing v2 evidence can identify MAC-free components.
+- Endpoint/service assignments and module installations retain historical records. Use lifecycle
+  states for retirement/replacement/merging; Payload trash is a separate deletion policy.
 - Every asset and every import belongs to a mandatory site.
 - Asset classes are first-class, admin-managed documents. Assets reference an asset class; do not
   replace the relationship with hard-coded class options.
@@ -62,6 +72,8 @@ Quality order is `human > high > medium > low`:
 - Lower quality must not overwrite higher quality.
 - Human edits are always recorded as human provenance and must survive imports.
 - Protocol arrays combine evidence instead of discarding lower-quality observations.
+- Identity resolution precedes descriptive field merging. Preserve conflicting identity evidence
+  instead of overwriting a serial. Old uploads must not regress lastSeen or current endpoint state.
 
 PRONETA is high quality, Nmap is medium quality, and scanner observations carry their own quality.
 The scanner-source fallback is low quality. User-entered import overrides are human quality.
@@ -80,6 +92,10 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
 - Reuse `getAuthorization` and the shared access helpers. Do not add one-off permission checks.
 - Avoid `overrideAccess: true` in user-facing operations. For necessary internal writes, pass the
   original `req`, keep the scope narrow, and add an authorization test.
+- Cross-site identity matches remain opaque until explicit reconciliation. Transfers require write
+  access to both sites; import site selection never silently moves an existing physical asset.
+- Identity relationships must belong to the same site. Graph/identifier changes lock the affected
+  assets (including ancestry) to prevent snapshot-isolation races. Preserve history site scope.
 
 ### Auditability
 
@@ -88,6 +104,8 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
   or sessions.
 - Asset-related observations and topology changes must retain their asset relationship so they appear
   in the asset detail history.
+- New audit entries snapshot their site; historical visibility must not migrate implicitly when the
+  asset moves. Merged/split views may resolve aliases and endpoint evidence without rewriting logs.
 - New collection mutations are covered by `withAudit`; custom actions outside collection hooks must
   call `writeAudit` explicitly with the original request and target context.
 - Never bypass auditing merely to simplify bulk operations or imports.
@@ -130,7 +148,7 @@ To add an importer:
 2. Implement a parser returning `ImportResult` from `src/importers/types.ts`.
 3. Register it in the parser map in `src/collections/AssetImports.ts`.
 4. Merge through `mergeAssetData`; do not update assets directly from parser-specific logic.
-5. Add an anonymized fixture and integration test covering parsing, MAC-only merging, quality, and
+5. Add an anonymized fixture and integration test covering parsing, scoped identity resolution, quality, and
    malformed input.
 
 PRONETA has no public stable schema: accept known paths and capitalization variants, tolerate missing
@@ -144,8 +162,11 @@ Human-supplied bulk import fields are declared once in `userSuppliedAssetFields`
 admin-managed in `asset-fields`, stored by definition ID, validated server-side, and cannot change
 type after creation.
 
-Imports currently execute synchronously and can be partially applied. Introduce a queue and database
-transaction only when real file sizes or atomicity requirements justify it.
+Imports execute synchronously in replica-set transactions, capped at 2000 device/component/link
+records. Parser failures are recorded; persistence failures must escape the hook to roll back the
+inventory. Exact file/context/source/override replays do not duplicate evidence. Introduce queued
+chunking when larger scans justify it. v2 lacks adequate negative coverage for automatic offline
+inference; do not interpret a missing/partial observation as proof that a device is offline.
 
 ## Search
 
@@ -165,20 +186,25 @@ nested queries must continue to fail with a clear HTTP 400 error.
 
 ## Local Setup and Checks
 
-Requirements: Node.js 20.9+, pnpm 9-11, and MongoDB. Copy `.env.example` to `.env` and use
+Requirements: Node.js 20.9+, pnpm 9-11, and a MongoDB replica set. Copy `.env.example` to `.env` and use
 a long random `OTSERVER_SECRET`. `docker compose up` can provide OTserver and MongoDB.
 
-Integration tests need a MongoDB matching `DATABASE_URL` in `.env`. Start a throwaway instance
+Integration tests need a replica set matching `DATABASE_URL`, or the optional `TEST_DATABASE_URL`
+override. Start a throwaway instance
 with Podman:
 
 ```bash
-podman run -d --rm --name otserver-test-mongo -p 27017:27017 \
-  -e MONGO_INITDB_ROOT_USERNAME=admin -e MONGO_INITDB_ROOT_PASSWORD=admin \
-  docker.io/library/mongo:8
+podman run -d --rm --name otserver-identity-test-mongo -p 27018:27017 \
+  docker.io/library/mongo:8 --replSet rs0 --bind_ip_all
+podman exec otserver-identity-test-mongo mongosh --quiet --eval \
+  'rs.initiate({_id:"rs0",members:[{_id:0,host:"localhost:27017"}]})'
+TEST_DATABASE_URL='mongodb://127.0.0.1:27018/otserver-test?replicaSet=rs0&directConnection=true' \
+  OTSERVER_VULNERABILITY_FEEDS=off pnpm test
 ```
 
-Tear it down with `podman stop otserver-test-mongo`; `--rm` removes it. The credentials match the
-`DATABASE_URL` in `.env`.
+Tear it down with `podman stop otserver-identity-test-mongo`; `--rm` removes it.
+MongoDB operations sharing a request transaction must run serially. `withAudit` establishes the
+transaction before Payload 3.87's parallel relationship validation can race its first command.
 
 `vitest.config.mts` sets a 60s per-test timeout because these tests boot Payload against a real
 MongoDB. A cold container makes the first run slower than later ones.

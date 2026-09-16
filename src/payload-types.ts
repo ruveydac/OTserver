@@ -70,6 +70,12 @@ export interface Config {
     sites: Site;
     'asset-classes': AssetClass;
     assets: Asset;
+    'network-contexts': NetworkContext;
+    'network-endpoints': NetworkEndpoint;
+    'service-bindings': ServiceBinding;
+    'asset-identifiers': AssetIdentifier;
+    'asset-installations': AssetInstallation;
+    'identity-cases': IdentityCase;
     'asset-imports': AssetImport;
     'asset-fields': AssetField;
     'user-roles': UserRole;
@@ -89,6 +95,12 @@ export interface Config {
     sites: SitesSelect<false> | SitesSelect<true>;
     'asset-classes': AssetClassesSelect<false> | AssetClassesSelect<true>;
     assets: AssetsSelect<false> | AssetsSelect<true>;
+    'network-contexts': NetworkContextsSelect<false> | NetworkContextsSelect<true>;
+    'network-endpoints': NetworkEndpointsSelect<false> | NetworkEndpointsSelect<true>;
+    'service-bindings': ServiceBindingsSelect<false> | ServiceBindingsSelect<true>;
+    'asset-identifiers': AssetIdentifiersSelect<false> | AssetIdentifiersSelect<true>;
+    'asset-installations': AssetInstallationsSelect<false> | AssetInstallationsSelect<true>;
+    'identity-cases': IdentityCasesSelect<false> | IdentityCasesSelect<true>;
     'asset-imports': AssetImportsSelect<false> | AssetImportsSelect<true>;
     'asset-fields': AssetFieldsSelect<false> | AssetFieldsSelect<true>;
     'user-roles': UserRolesSelect<false> | UserRolesSelect<true>;
@@ -192,6 +204,27 @@ export interface AssetClass {
  */
 export interface Asset {
   id: string;
+  identityRevision?: number | null;
+  uuid?: string | null;
+  physicalKind?: ('unknown' | 'device' | 'chassis' | 'module') | null;
+  catalogNumber?: string | null;
+  slotCapacity?: number | null;
+  lifecycle?: ('active' | 'retired' | 'replaced' | 'merged') | null;
+  baselined?: boolean | null;
+  mergedInto?: (string | null) | Asset;
+  replacedBy?: (string | null) | Asset;
+  networkAddresses?:
+    | {
+        address: string;
+        id?: string | null;
+      }[]
+    | null;
+  networkMACs?:
+    | {
+        address: string;
+        id?: string | null;
+      }[]
+    | null;
   name: string;
   description?: string | null;
   /**
@@ -221,7 +254,7 @@ export interface Asset {
     | null;
   assetType?: string | null;
   ipAddress?: string | null;
-  macAddress: string;
+  macAddress?: string | null;
   networkMask?: string | null;
   gatewayAddress?: string | null;
   vendor?: string | null;
@@ -265,13 +298,183 @@ export interface Asset {
   deletedAt?: string | null;
 }
 /**
- * Upload discovery files to create or update assets by MAC address.
+ * A shared collector network scope. VLAN numbers and IP addresses are not global identities.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "network-contexts".
+ */
+export interface NetworkContext {
+  id: string;
+  site: string | Site;
+  name: string;
+  uuid?: string | null;
+  legacyKey?: string | null;
+  vlan?: number | null;
+  routingDomain?: string | null;
+  description?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "network-endpoints".
+ */
+export interface NetworkEndpoint {
+  id: string;
+  site: string | Site;
+  asset?: (string | null) | Asset;
+  networkContext: string | NetworkContext;
+  bindingKey?: string | null;
+  interfaceKey?: string | null;
+  name?: string | null;
+  macAddress?: string | null;
+  addresses?:
+    | {
+        address: string;
+        networkMask?: string | null;
+        gatewayAddress?: string | null;
+        id?: string | null;
+      }[]
+    | null;
+  firstSeen: string;
+  lastSeen?: string | null;
+  endedAt?: string | null;
+  reachability?: ('online' | 'offline' | 'unknown') | null;
+  source?: string | null;
+  fieldProvenance?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "service-bindings".
+ */
+export interface ServiceBinding {
+  id: string;
+  site: string | Site;
+  asset?: (string | null) | Asset;
+  endpoint: string | NetworkEndpoint;
+  bindingKey?: string | null;
+  address?: string | null;
+  transport: 'tcp' | 'udp' | 'ethernet';
+  port?: number | null;
+  protocol: string;
+  /**
+   * Only record a route actually observed or explicitly supplied.
+   */
+  route?: string | null;
+  firstSeen: string;
+  lastSeen?: string | null;
+  endedAt?: string | null;
+  source?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "asset-identifiers".
+ */
+export interface AssetIdentifier {
+  id: string;
+  site: string | Site;
+  asset: string | Asset;
+  key?: string | null;
+  /**
+   * Serial issuer namespace, e.g. cip, siemens, or a verified manufacturer namespace.
+   */
+  authority: string;
+  manufacturer: string;
+  scope: 'device' | 'chassis' | 'cpu' | 'adapter' | 'module';
+  serial: string;
+  productScope?: string | null;
+  state: 'accepted' | 'contested' | 'revoked';
+  source?: string | null;
+  evidence?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "asset-installations".
+ */
+export interface AssetInstallation {
+  id: string;
+  site: string | Site;
+  parent: string | Asset;
+  module: string | Asset;
+  /**
+   * Leave empty when containment is known but slot position is not reported.
+   */
+  slotPath?: string | null;
+  slotUUID?: string | null;
+  activeSlot?: string | null;
+  activeModule?: string | null;
+  installedAt: string;
+  removedAt?: string | null;
+  source?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "identity-cases".
+ */
+export interface IdentityCase {
+  id: string;
+  site: string | Site;
+  asset?: (string | null) | Asset;
+  candidate?: (string | null) | Asset;
+  caseKey?: string | null;
+  kind: 'identity-conflict' | 'possible-duplicate' | 'replacement' | 'cross-site';
+  /**
+   * Ordinal rule score, not a probability: 3 hardware, 2 endpoint, 1 heuristic, 0 unresolved.
+   */
+  confidence?: number | null;
+  reason: string;
+  evidence?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  status: 'open' | 'resolved' | 'rejected';
+  resolution?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Import physical identity and network evidence into a selected site and network context.
  *
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "asset-imports".
  */
 export interface AssetImport {
   id: string;
+  /**
+   * Select the shared network scope. Empty uses this site’s legacy/unspecified scope.
+   */
+  networkContext?: (string | null) | NetworkContext;
+  appliedKey?: string | null;
+  duplicateOf?: (string | null) | AssetImport;
   /**
    * Every asset in this file will be assigned to this site.
    */
@@ -415,6 +618,16 @@ export interface AssetObservation {
   asset: string | Asset;
   import: string | AssetImport;
   source: string;
+  endpoint?: (string | null) | NetworkEndpoint;
+  identityEvidence?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
   quality: 'high' | 'medium' | 'low';
   observedAt: string;
   fields:
@@ -593,6 +806,7 @@ export interface VulnerabilityFeed {
  */
 export interface AuditLog {
   id: string;
+  site?: (string | null) | Site;
   summary: string;
   action: 'create' | 'update' | 'delete' | 'login' | 'logout' | 'custom';
   targetCollection: string;
@@ -654,6 +868,30 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'assets';
         value: string | Asset;
+      } | null)
+    | ({
+        relationTo: 'network-contexts';
+        value: string | NetworkContext;
+      } | null)
+    | ({
+        relationTo: 'network-endpoints';
+        value: string | NetworkEndpoint;
+      } | null)
+    | ({
+        relationTo: 'service-bindings';
+        value: string | ServiceBinding;
+      } | null)
+    | ({
+        relationTo: 'asset-identifiers';
+        value: string | AssetIdentifier;
+      } | null)
+    | ({
+        relationTo: 'asset-installations';
+        value: string | AssetInstallation;
+      } | null)
+    | ({
+        relationTo: 'identity-cases';
+        value: string | IdentityCase;
       } | null)
     | ({
         relationTo: 'asset-imports';
@@ -750,6 +988,27 @@ export interface AssetClassesSelect<T extends boolean = true> {
  * via the `definition` "assets_select".
  */
 export interface AssetsSelect<T extends boolean = true> {
+  identityRevision?: T;
+  uuid?: T;
+  physicalKind?: T;
+  catalogNumber?: T;
+  slotCapacity?: T;
+  lifecycle?: T;
+  baselined?: T;
+  mergedInto?: T;
+  replacedBy?: T;
+  networkAddresses?:
+    | T
+    | {
+        address?: T;
+        id?: T;
+      };
+  networkMACs?:
+    | T
+    | {
+        address?: T;
+        id?: T;
+      };
   name?: T;
   description?: T;
   site?: T;
@@ -785,9 +1044,132 @@ export interface AssetsSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "network-contexts_select".
+ */
+export interface NetworkContextsSelect<T extends boolean = true> {
+  site?: T;
+  name?: T;
+  uuid?: T;
+  legacyKey?: T;
+  vlan?: T;
+  routingDomain?: T;
+  description?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "network-endpoints_select".
+ */
+export interface NetworkEndpointsSelect<T extends boolean = true> {
+  site?: T;
+  asset?: T;
+  networkContext?: T;
+  bindingKey?: T;
+  interfaceKey?: T;
+  name?: T;
+  macAddress?: T;
+  addresses?:
+    | T
+    | {
+        address?: T;
+        networkMask?: T;
+        gatewayAddress?: T;
+        id?: T;
+      };
+  firstSeen?: T;
+  lastSeen?: T;
+  endedAt?: T;
+  reachability?: T;
+  source?: T;
+  fieldProvenance?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "service-bindings_select".
+ */
+export interface ServiceBindingsSelect<T extends boolean = true> {
+  site?: T;
+  asset?: T;
+  endpoint?: T;
+  bindingKey?: T;
+  address?: T;
+  transport?: T;
+  port?: T;
+  protocol?: T;
+  route?: T;
+  firstSeen?: T;
+  lastSeen?: T;
+  endedAt?: T;
+  source?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "asset-identifiers_select".
+ */
+export interface AssetIdentifiersSelect<T extends boolean = true> {
+  site?: T;
+  asset?: T;
+  key?: T;
+  authority?: T;
+  manufacturer?: T;
+  scope?: T;
+  serial?: T;
+  productScope?: T;
+  state?: T;
+  source?: T;
+  evidence?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "asset-installations_select".
+ */
+export interface AssetInstallationsSelect<T extends boolean = true> {
+  site?: T;
+  parent?: T;
+  module?: T;
+  slotPath?: T;
+  slotUUID?: T;
+  activeSlot?: T;
+  activeModule?: T;
+  installedAt?: T;
+  removedAt?: T;
+  source?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "identity-cases_select".
+ */
+export interface IdentityCasesSelect<T extends boolean = true> {
+  site?: T;
+  asset?: T;
+  candidate?: T;
+  caseKey?: T;
+  kind?: T;
+  confidence?: T;
+  reason?: T;
+  evidence?: T;
+  status?: T;
+  resolution?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "asset-imports_select".
  */
 export interface AssetImportsSelect<T extends boolean = true> {
+  networkContext?: T;
+  appliedKey?: T;
+  duplicateOf?: T;
   site?: T;
   source?: T;
   assetOverrides?:
@@ -884,6 +1266,8 @@ export interface AssetObservationsSelect<T extends boolean = true> {
   asset?: T;
   import?: T;
   source?: T;
+  endpoint?: T;
+  identityEvidence?: T;
   quality?: T;
   observedAt?: T;
   fields?: T;
@@ -964,6 +1348,7 @@ export interface VulnerabilityFeedsSelect<T extends boolean = true> {
  * via the `definition` "audit-logs_select".
  */
 export interface AuditLogsSelect<T extends boolean = true> {
+  site?: T;
   summary?: T;
   action?: T;
   targetCollection?: T;

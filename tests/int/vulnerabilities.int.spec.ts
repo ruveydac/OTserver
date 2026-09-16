@@ -100,7 +100,7 @@ describe('vocabulary normalization', () => {
     expect(similarity('', 'siemens')).toBe(0)
     expect(similarity('a', 'b')).toBe(0)
     expect(assetFingerprint(feedDocument)).toBe(
-      'Siemens AG|SIMATIC S7-1500 CPU 1516-3 PN/DP||V2.5|1.0',
+      'Siemens AG|SIMATIC S7-1500 CPU 1516-3 PN/DP|||V2.5|1.0',
     )
   })
 })
@@ -236,6 +236,7 @@ describe('feed parsing', () => {
     // Negated nodes and non-vulnerable matches never become evidence.
     expect(first.set.affected).toEqual([
       {
+        cpe: 'cpe:2.3:a:siemens:simatic_s7-1500_firmware:*:*:*:*:*:*:*:*',
         part: 'a',
         product: 'simatic_s7-1500_firmware',
         vendor: 'siemens',
@@ -252,7 +253,13 @@ describe('feed parsing', () => {
     expect(documents[3].set.affected).toEqual([])
     expect(documents[4].set).toMatchObject({ affected: [], status: 'Rejected' })
     expect(documents[6].set.affected).toEqual([
-      { part: 'o', product: 'windows_10', vendor: 'microsoft', version: '1607' },
+      {
+        cpe: 'cpe:2.3:o:microsoft:windows_10:1607:*:*:*:*:*:*:*',
+        part: 'o',
+        product: 'windows_10',
+        vendor: 'microsoft',
+        version: '1607',
+      },
     ])
   })
 
