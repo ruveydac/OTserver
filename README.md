@@ -142,6 +142,9 @@ Then open <http://localhost:3000/admin>. The first account receives the protecte
 
 For container-based development, the repository's `docker-compose.yml` runs the source with
 `pnpm dev`: prepare `.env` as above and run `docker compose up` from the repository root.
+The source bind mount uses `:z` to allow container access on SELinux hosts (ignored on hosts
+without SELinux). If an existing container reports `EACCES` opening `/home/node/app/package.json`,
+apply the current Compose file with `docker compose up -d --force-recreate otserver`.
 
 ## First inventory
 

@@ -1,13 +1,11 @@
 services:
   otserver:
-    image: node:22-alpine
     ports:
       - '3000:3000'
     volumes:
-      - .:/home/node/app
+      - .:/home/node/app:z # Label the source mount for container access on SELinux hosts.
       - node_modules:/home/node/app/node_modules
-    working_dir: /home/node/app/
-    command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm dev"
+    build: ./
     depends_on:
       mongo:
         condition: service_healthy
