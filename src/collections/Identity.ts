@@ -67,41 +67,9 @@ const base = (slug: CollectionConfig['slug'], fields: Field[]): CollectionConfig
   },
 })
 
-export const NetworkContexts: CollectionConfig = {
-  ...base('network-contexts', [
-    { name: 'name', type: 'text', required: true },
-    {
-      name: 'uuid',
-      type: 'text',
-      unique: true,
-      index: true,
-      defaultValue: randomUUID,
-      access: internal,
-      admin: { readOnly: true },
-    },
-    { name: 'legacyKey', type: 'text', unique: true, access: internal, admin: { hidden: true } },
-    { name: 'vlan', type: 'number', min: 0, max: 4094 },
-    { name: 'routingDomain', type: 'text' },
-    { name: 'description', type: 'textarea' },
-  ]),
-  admin: {
-    group: 'Device identity',
-    useAsTitle: 'name',
-    description:
-      'A shared collector network scope. VLAN numbers and IP addresses are not global identities.',
-  },
-}
-
 export const NetworkEndpoints: CollectionConfig = {
   ...base('network-endpoints', [
     asset,
-    {
-      name: 'networkContext',
-      type: 'relationship',
-      relationTo: 'network-contexts',
-      required: true,
-      index: true,
-    },
     { name: 'bindingKey', type: 'text', unique: true, access: internal, admin: { hidden: true } },
     { name: 'interfaceKey', type: 'text' },
     { name: 'name', type: 'text' },
@@ -140,7 +108,7 @@ export const NetworkEndpoints: CollectionConfig = {
   ]),
   admin: {
     group: 'Device identity',
-    defaultColumns: ['asset', 'networkContext', 'macAddress', 'lastSeen', 'endedAt'],
+    defaultColumns: ['asset', 'site', 'macAddress', 'lastSeen', 'endedAt'],
   },
   hooks: {
     beforeChange: [
@@ -157,7 +125,7 @@ export const NetworkEndpoints: CollectionConfig = {
         data.bindingKey = value.endedAt
           ? scopedKey('historical-endpoint', originalDoc?.id || randomUUID())
           : endpointBindingKey(
-              idOf(value.networkContext),
+              idOf(value.site),
               value.macAddress,
               idOf(value.asset),
               value.interfaceKey || originalDoc?.id || randomUUID(),
@@ -169,7 +137,7 @@ export const NetworkEndpoints: CollectionConfig = {
     ],
     afterChange: [syncEndpointProjection],
   },
-  indexes: [{ fields: ['networkContext', 'macAddress'] }, { fields: ['asset', 'endedAt'] }],
+  indexes: [{ fields: ['site', 'macAddress'] }, { fields: ['asset', 'endedAt'] }],
 }
 
 export const ServiceBindings = base('service-bindings', [

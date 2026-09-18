@@ -39,7 +39,6 @@ export const enforceIdentityRelationships: CollectionBeforeChangeHook = async ({
     ['candidate', 'assets'],
     ['parent', 'assets'],
     ['module', 'assets'],
-    ['networkContext', 'network-contexts'],
     ['endpoint', 'network-endpoints'],
   ] as const
   for (const [field, slug] of references) {

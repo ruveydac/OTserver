@@ -49,7 +49,6 @@ export const openIdentityCase = async (
 export const resolveImportedIdentity = async (
   input: ImportedAsset,
   site: string,
-  networkContext: string,
   req: PayloadRequest,
 ) => {
   let current: Asset | undefined
@@ -65,7 +64,7 @@ export const resolveImportedIdentity = async (
       req,
       where: {
         and: [
-          { networkContext: { equals: networkContext } },
+          { site: { equals: site } },
           { macAddress: { equals: input.macAddress } },
           { endedAt: { exists: false } },
         ],
@@ -207,7 +206,6 @@ export const bindImportedIdentity = async (
   input: ImportedAsset,
   asset: Asset,
   site: string,
-  context: string,
   observedAt: string,
   blocked: boolean,
   endpointAsset: Asset | undefined,
@@ -277,7 +275,7 @@ export const bindImportedIdentity = async (
   const bound: NetworkEndpoint[] = []
   for (const endpoint of evidence) {
     const bindingKey = endpointBindingKey(
-      context,
+      site,
       endpoint.macAddress,
       asset.id,
       endpoint.interfaceKey || '',
@@ -314,7 +312,6 @@ export const bindImportedIdentity = async (
       ...endpoint,
       site,
       asset: asset.id,
-      networkContext: context,
       lastSeen: observedAt,
       reachability: 'online' as const,
       bindingKey,

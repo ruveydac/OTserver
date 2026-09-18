@@ -4,7 +4,7 @@ import { getAuthorization } from '../access/authorization'
 import { writeAudit } from '../collections/AuditLogs'
 import { idOf, requireTransaction, requireWritableAsset } from './access'
 import { record, text } from './keys'
-import { defaultNetworkContext, inIdentityContext, syncManualEndpoint } from './relationships'
+import { inIdentityContext, syncManualEndpoint } from './relationships'
 import type { Asset, NetworkEndpoint } from '../payload-types'
 
 export const atomicIdentity = async <T>(
@@ -220,7 +220,6 @@ export const performIdentityAction = async (
             data: {
               site: idOf(source.site),
               asset: target.id,
-              networkContext: idOf(endpoint.networkContext),
               macAddress: endpoint.macAddress,
               interfaceKey: endpoint.interfaceKey,
               addresses: endpoint.addresses,
@@ -357,7 +356,6 @@ export const performIdentityAction = async (
         overrideAccess: false,
         req,
       })
-      const context = await defaultNetworkContext(site, req)
       const keys = await req.payload.find({
         collection: 'asset-identifiers',
         pagination: false,
@@ -380,7 +378,6 @@ export const performIdentityAction = async (
           data: {
             site,
             asset: id,
-            networkContext: context.id,
             macAddress: endpoint.macAddress,
             interfaceKey: endpoint.interfaceKey,
             firstSeen: at,

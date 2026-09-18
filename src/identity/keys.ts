@@ -93,8 +93,8 @@ export const scopedKey = (...parts: unknown[]): string =>
   uuidV5(OT_NAMESPACE, JSON.stringify(parts))
 
 export const endpointBindingKey = (
-  context: string,
+  site: string,
   mac: string | undefined,
   asset: string,
   interfaceKey: string,
-) => scopedKey('endpoint', context, mac || ['interface', asset, interfaceKey])
+) => scopedKey('endpoint', site, mac || ['interface', asset, interfaceKey])

@@ -9,7 +9,6 @@ import {
   type Where,
 } from 'payload'
 import { idOf, requireTransaction } from './access'
-import { scopedKey } from './keys'
 import { record } from './keys'
 import { mergeAssetData, type DataQuality } from '../importers/assetQuality'
 
@@ -46,31 +45,6 @@ export const lockIdentityAssets = async (ids: string[], req: PayloadRequest) => 
       }),
     )
   }
-}
-
-export const defaultNetworkContext = async (site: string, req: PayloadRequest) => {
-  const legacyKey = scopedKey('legacy-network-context', site)
-  const result = await req.payload.find({
-    collection: 'network-contexts',
-    where: { legacyKey: { equals: legacyKey } },
-    limit: 1,
-    depth: 0,
-    overrideAccess: !req.user,
-    req,
-  })
-  if (result.docs[0]) return result.docs[0]
-  return req.payload.create({
-    collection: 'network-contexts',
-    data: {
-      name: 'Legacy / unspecified network',
-      site,
-      legacyKey,
-      description:
-        'Compatibility scope for imports without a selected network context. Select explicit contexts for overlapping networks.',
-    },
-    overrideAccess: true,
-    req,
-  })
 }
 
 export const syncEndpointProjection: CollectionAfterChangeHook = async ({
@@ -214,7 +188,6 @@ export const syncManualEndpoint: CollectionAfterChangeHook = async ({ doc, previ
     (field) => doc[field] !== previousDoc?.[field],
   )
   if (!changed) return doc
-  const context = await defaultNetworkContext(idOf(doc.site), req)
   const previousEndpoint = await req.payload.find({
     collection: 'network-endpoints',
     depth: 0,
@@ -258,7 +231,6 @@ export const syncManualEndpoint: CollectionAfterChangeHook = async ({ doc, previ
   const data = {
     asset: doc.id,
     site: idOf(doc.site),
-    networkContext: current ? idOf(current.networkContext) : context.id,
     macAddress: doc.macAddress,
     interfaceKey: current?.interfaceKey || `manual:${doc.uuid}`,
     addresses,

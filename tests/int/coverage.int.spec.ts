@@ -281,11 +281,15 @@ describe('collection safety hooks', () => {
 
     const userReq = {
       payload: {
-        count: vi.fn().mockResolvedValue({ totalDocs: 0 }),
-        create: vi.fn(),
-        find: vi.fn().mockResolvedValue({
-          docs: [{ id: 'admin-role', isAdmin: true, name: 'Admin', permissions: [] }],
+        count: vi.fn(() => {
+          throw new Error('count must not run in the first-user transaction')
         }),
+        create: vi.fn(),
+        find: vi.fn(async ({ collection }: { collection: string }) =>
+          collection === 'users'
+            ? { docs: [] }
+            : { docs: [{ id: 'admin-role', isAdmin: true, name: 'Admin', permissions: [] }] },
+        ),
       },
     }
     expect(
@@ -295,6 +299,10 @@ describe('collection safety hooks', () => {
         req: userReq,
       }),
     ).toMatchObject({ role: 'admin-role' })
+    expect(userReq.payload.count).not.toHaveBeenCalled()
+    expect(userReq.payload.find).toHaveBeenCalledWith(
+      expect.objectContaining({ collection: 'users', pagination: false }),
+    )
     const roleField = Users.fields.find(
       (field) => field.type === 'relationship' && field.name === 'role',
     ) as {

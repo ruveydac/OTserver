@@ -188,7 +188,6 @@ describe('device identity', () => {
         'asset-observations',
         'topology-links',
         'asset-imports',
-        'network-contexts',
         'assets',
       ] as const)
         await payload.delete({
@@ -274,13 +273,12 @@ describe('device identity', () => {
     warnings: [],
     errors: [],
   })
-  const upload = async (site: string, value: unknown, actor = user, networkContext?: string) => {
+  const upload = async (site: string, value: unknown, actor = user) => {
     const data = Buffer.from(JSON.stringify(value))
     return payload.create({
       collection: 'asset-imports',
       data: {
         site,
-        networkContext,
         source: 'otserver-otter',
         sourceVersion: '0.4',
         status: 'pending',
@@ -652,7 +650,7 @@ describe('device identity', () => {
     await expect(asset(siteID, { lifecycle: 'merged' })).rejects.toThrow('New hardware')
   })
 
-  it('prevents concurrent graph cycles, isolates duplicate network contexts, and retries collector conflicts safely', async () => {
+  it('prevents concurrent graph cycles, scopes MACs by exact site, and retries collector conflicts safely', async () => {
     const siteID = await site()
     const nodes: Asset[] = []
     for (let i = 0; i < 4; i++) nodes.push(await asset(siteID))
@@ -698,22 +696,26 @@ describe('device identity', () => {
         })
       ).totalDocs,
     ).toBe(2)
-    const network = await payload.create({
-      collection: 'network-contexts',
-      data: { site: siteID, name: 'Isolated VLAN' },
-      user,
-      overrideAccess: false,
-    })
     const unqualified = scan(serial(), [[mac(), '192.0.2.10']])
     unqualified.devices[0].observations[0].raw = {} as never
     unqualified.devices[0].observations[0].fields.serialNumber = ''
     await upload(siteID, unqualified)
-    await upload(
-      siteID,
-      { ...unqualified, scan: { ...unqualified.scan, id: randomUUID() } },
-      user,
-      network.id,
-    )
+    await upload(siteID, { ...unqualified, scan: { ...unqualified.scan, id: randomUUID() } })
+    expect(
+      (
+        await payload.count({
+          collection: 'network-endpoints',
+          where: {
+            and: [
+              { site: { equals: siteID } },
+              { macAddress: { equals: unqualified.devices[0].macAddress } },
+            ],
+          },
+        })
+      ).totalDocs,
+    ).toBe(1)
+    const otherSite = await site()
+    await upload(otherSite, { ...unqualified, scan: { ...unqualified.scan, id: randomUUID() } })
     expect(
       (
         await payload.count({
@@ -1204,7 +1206,6 @@ describe('device identity', () => {
       data: {
         site: origin,
         asset: newCPU.id,
-        networkContext: idOf(currentEndpoint.networkContext),
         interfaceKey: 'ifIndex:1',
         addresses: [],
         firstSeen: new Date().toISOString(),
@@ -1217,7 +1218,6 @@ describe('device identity', () => {
       data: {
         site: origin,
         asset: rackTarget.id,
-        networkContext: idOf(currentEndpoint.networkContext),
         interfaceKey: 'ifIndex:1',
         addresses: [{ address: '2001:db8::1' }],
         firstSeen: new Date().toISOString(),

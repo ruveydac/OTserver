@@ -15,6 +15,7 @@
     "payload": "cross-env NODE_OPTIONS=--no-deprecation payload",
     "start": "cross-env NODE_OPTIONS=--no-deprecation next start",
     "test": "pnpm run test:int",
+    "test:container": "sh tests/container-bootstrap.sh",
     "test:coverage": "pnpm run test:coverage:app",
     "test:coverage:app": "cross-env NODE_OPTIONS=--no-deprecation vitest run --config=vitest.config.mts --coverage",
     "test:int": "cross-env NODE_OPTIONS=--no-deprecation vitest run --config=vitest.config.mts"

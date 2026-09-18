@@ -40,7 +40,8 @@ Main locations:
 ### Asset identity
 
 - Assets represent physical hardware and may have no MAC. MAC addresses identify current endpoint
-  bindings within an explicit network context, not globally unique physical devices.
+  bindings within one exact site, not globally unique physical devices. Site hierarchy affects
+  authorization only; parent and child sites remain separate endpoint identity namespaces.
 - Automatic physical correlation requires an exact accepted, source-qualified manufacturer/scoped
   serial key from `src/identity/keys.ts`. Generic serial strings, IP/name, topology, and adjacent MACs
   cannot authorize automatic physical merges. Conflicts become identity cases.
@@ -164,7 +165,7 @@ type after creation.
 
 Imports execute synchronously in replica-set transactions, capped at 2000 device/component/link
 records. Parser failures are recorded; persistence failures must escape the hook to roll back the
-inventory. Exact file/context/source/override replays do not duplicate evidence. Introduce queued
+inventory. Exact file/site/source/override replays do not duplicate evidence. Introduce queued
 chunking when larger scans justify it. v2 lacks adequate negative coverage for automatic offline
 inference; do not interpret a missing/partial observation as proof that a device is offline.
 
@@ -205,6 +206,10 @@ TEST_DATABASE_URL='mongodb://127.0.0.1:27018/otserver-test?replicaSet=rs0&direct
 Tear it down with `podman stop otserver-identity-test-mongo`; `--rm` removes it.
 MongoDB operations sharing a request transaction must run serially. `withAudit` establishes the
 transaction before Payload 3.87's parallel relationship validation can race its first command.
+
+Run `pnpm test:container` after changing the Dockerfile or startup/bootstrap behavior. It detects
+Docker or Podman, builds the production image, starts an isolated MongoDB replica set, verifies the
+fresh-database seeds and first-user registration, and removes its containers and network.
 
 `vitest.config.mts` sets a 60s per-test timeout because these tests boot Payload against a real
 MongoDB. A cold container makes the first run slower than later ones.

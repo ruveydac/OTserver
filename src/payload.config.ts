@@ -17,7 +17,6 @@ import { Vulnerabilities, VulnerabilityFeeds } from './collections/Vulnerabiliti
 import { MAX_IMPORT_FILE_SIZE } from './importers/proneta'
 import { initializeVulnerabilityFeeds } from './vulnerabilities/feeds'
 import {
-  NetworkContexts,
   NetworkEndpoints,
   ServiceBindings,
   AssetIdentifiers,
@@ -86,7 +85,6 @@ export default buildConfig({
     Sites,
     AssetClasses,
     Assets,
-    NetworkContexts,
     NetworkEndpoints,
     ServiceBindings,
     AssetIdentifiers,

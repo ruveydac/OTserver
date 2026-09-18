@@ -45,7 +45,7 @@ field merging, flexible hierarchies, role-based access, search, and a complete a
 - **Discovery imports** — Ingest Siemens PRONETA XML, Nmap XML, and OTserver Otter JSON into a
   selected site.
 - **Physical device identity** — Correlate qualified hardware identities across multiple network
-  interfaces; retain scoped MAC bindings, module installations, and replacement history.
+  interfaces; retain site-scoped MAC bindings, module installations, and replacement history.
 - **Evidence-aware merging** — Higher-quality discoveries can improve lower-quality data while
   human edits remain authoritative. Protocol evidence is combined across sources.
 - **Search and filters** — Use the graphical filter builder or a supported Lucene query syntax for
@@ -155,7 +155,7 @@ apply the current Compose file with `docker compose up -d --force-recreate otser
 
 ## How it works
 
-Every asset and import belongs to a site. Assets represent physical hardware; scoped network
+Every asset and import belongs to a site. Assets represent physical hardware; site-scoped network
 endpoints store their interfaces and addresses. Qualified manufacturer/component serial identities
 can correlate multiple interfaces to one device. Ambiguous identities create review cases, and
 cross-site matches require explicit reconciliation. MAC-free chassis/modules can be inventoried.
@@ -316,6 +316,14 @@ pnpm test
 pnpm lint
 pnpm build
 ```
+
+Verify the production container and fresh-database bootstrap with Docker or Podman:
+
+```bash
+pnpm test:container
+```
+
+Set `CONTAINER_RUNTIME=docker` or `CONTAINER_RUNTIME=podman` to select one explicitly.
 
 Coverage is enforced at 90% for the application:
 

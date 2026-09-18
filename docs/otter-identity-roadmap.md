@@ -13,8 +13,8 @@ require a coordinated Otter release, importer updates, shared fixtures, and a su
 - Export component containment and slot/subslot positions separately from module identity.
 - Preserve a service's listening address, transport, port, and full industrial routing path.
   Distinguish the listener/adapter from the target CPU or module reached through it.
-- Include stable collector and network-context identifiers shared across collectors. An OS
-  interface name, IP subnet, or VLAN number alone cannot identify a network globally.
+- Include stable collector identifiers as observation provenance. Endpoint identity remains scoped
+  by the exact site selected in the manager.
 - Include per-target and per-protocol outcomes, attempted coverage, cancellation, and incomplete
   inventories. Distinguish an empty slot from inaccessible, unsupported, and failed queries.
 - Preserve unresolved observations without inventing physical IDs or assigning next-hop MACs.

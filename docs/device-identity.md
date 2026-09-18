@@ -5,9 +5,8 @@
 `assets` represent persistent physical entities and may have no MAC address. Asset classes remain
 admin-managed. A chassis and its CPU/communication/I/O modules have separate records and versions.
 
-- `network-contexts` identify an operator-defined network scope shared by collectors.
 - `network-endpoints` record interface/address evidence and its association with an asset.
-  MAC uniqueness applies only to a current binding within one context. Ended associations remain.
+  MAC uniqueness applies only to a current binding within one exact site. Ended associations remain.
 - `service-bindings` record listeners for which an address/transport/port association is known.
 - `asset-installations` record time-bounded parent/module containment, with an optional slot path.
   Unknown positions stay empty. Slot and module identities are independent.
@@ -22,13 +21,13 @@ include merged aliases and observations attached to reassigned endpoints, subjec
 
 The manager automatically associates exact accepted component-specific hardware keys within the
 owning site. IP, names, OUI, and topology do not authorize automatic physical merges. Existing
-scoped MAC bindings continue provisional tracking. Changed or ambiguous hardware serials create
+site-scoped MAC bindings continue provisional tracking. Changed or ambiguous hardware serials create
 review cases instead of overwriting an established identity.
 
 The confidence field is ordinal (3 hardware, 2 endpoint, 1 heuristic, 0 unresolved), not a percentage.
 Field-value quality remains separate: `human > high > medium > low`, using `mergeAssetData`.
 `lastSeen` advances by observation time; old uploads retain evidence without regressing current
-network state. A duplicate file with identical site, context, source, and overrides is reported as
+network state. A duplicate file with identical site, source, and overrides is reported as
 `duplicateOf` and does not repeat its observations.
 
 Hardware UUID keys use namespace `a346ed7e-daca-4e40-8bb1-72f0a9119943` and UUIDv5 over the UTF-8
@@ -57,10 +56,10 @@ Revoke an incorrect key and add a corrected one rather than editing its canonica
   protocol's observation identifies one unambiguous listening address. Unknown ownership/routes
   are left unspecified. A protocol-target association is not proof of physical NIC ownership.
 
-PRONETA and Nmap use the same scoped endpoint and field-quality pipeline. A site has a default
-`Legacy / unspecified network` context for backward-compatible imports. Select explicit contexts
-for overlapping address spaces. The topology view labels these as network scopes, not proof of
-physical cable connectivity.
+PRONETA and Nmap use the same site-scoped endpoint and field-quality pipeline. Site hierarchy is an
+authorization mechanism only: parent and child sites have separate endpoint identity namespaces.
+The topology view infers network membership from recorded subnet, ARP, and topology evidence rather
+than treating the site itself as proof of physical cable connectivity.
 
 ## Operator actions
 
@@ -118,14 +117,15 @@ queued/chunked import design rather than raising this bound blindly.
    ```
 
    The script is idempotent and does not change documents. Startup creates the new non-unique MAC
-   lookup index and the unique scoped identity indexes. Do not run the old manager after this step.
+   lookup index and the unique site-scoped identity indexes. Do not run the old manager after this
+   step.
 4. Start the manager. As an administrator, POST to `/api/assets/migrate-identity` with `{"page":1}`
    for a dry run. POST `{"page":1,"apply":true}` to apply a batch of 100 records, then increment
    `page` while `hasNextPage` is true. Batches are transactional and can be repeated. Keep writers
    paused until the final page so pagination remains stable.
 5. Verify UUIDs, endpoint counts, owning sites, search, and historical evidence on representative
    records. Legacy serial strings are deliberately not promoted into accepted hardware identities.
-6. Resume writers and import new evidence. Review identity cases and assign explicit network contexts.
+6. Resume writers and import new evidence. Review identity cases.
 
 Rollback before resuming writes is a restore of the database/files backup and the prior manager
 version. Once multi-interface/MACless identities exist, rolling back only the code is incompatible.

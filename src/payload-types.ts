@@ -70,7 +70,6 @@ export interface Config {
     sites: Site;
     'asset-classes': AssetClass;
     assets: Asset;
-    'network-contexts': NetworkContext;
     'network-endpoints': NetworkEndpoint;
     'service-bindings': ServiceBinding;
     'asset-identifiers': AssetIdentifier;
@@ -95,7 +94,6 @@ export interface Config {
     sites: SitesSelect<false> | SitesSelect<true>;
     'asset-classes': AssetClassesSelect<false> | AssetClassesSelect<true>;
     assets: AssetsSelect<false> | AssetsSelect<true>;
-    'network-contexts': NetworkContextsSelect<false> | NetworkContextsSelect<true>;
     'network-endpoints': NetworkEndpointsSelect<false> | NetworkEndpointsSelect<true>;
     'service-bindings': ServiceBindingsSelect<false> | ServiceBindingsSelect<true>;
     'asset-identifiers': AssetIdentifiersSelect<false> | AssetIdentifiersSelect<true>;
@@ -298,24 +296,6 @@ export interface Asset {
   deletedAt?: string | null;
 }
 /**
- * A shared collector network scope. VLAN numbers and IP addresses are not global identities.
- *
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "network-contexts".
- */
-export interface NetworkContext {
-  id: string;
-  site: string | Site;
-  name: string;
-  uuid?: string | null;
-  legacyKey?: string | null;
-  vlan?: number | null;
-  routingDomain?: string | null;
-  description?: string | null;
-  updatedAt: string;
-  createdAt: string;
-}
-/**
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "network-endpoints".
  */
@@ -323,7 +303,6 @@ export interface NetworkEndpoint {
   id: string;
   site: string | Site;
   asset?: (string | null) | Asset;
-  networkContext: string | NetworkContext;
   bindingKey?: string | null;
   interfaceKey?: string | null;
   name?: string | null;
@@ -462,17 +441,13 @@ export interface IdentityCase {
   createdAt: string;
 }
 /**
- * Import physical identity and network evidence into a selected site and network context.
+ * Import physical identity and network evidence into a selected site.
  *
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "asset-imports".
  */
 export interface AssetImport {
   id: string;
-  /**
-   * Select the shared network scope. Empty uses this site’s legacy/unspecified scope.
-   */
-  networkContext?: (string | null) | NetworkContext;
   appliedKey?: string | null;
   duplicateOf?: (string | null) | AssetImport;
   /**
@@ -870,10 +845,6 @@ export interface PayloadLockedDocument {
         value: string | Asset;
       } | null)
     | ({
-        relationTo: 'network-contexts';
-        value: string | NetworkContext;
-      } | null)
-    | ({
         relationTo: 'network-endpoints';
         value: string | NetworkEndpoint;
       } | null)
@@ -1044,27 +1015,11 @@ export interface AssetsSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "network-contexts_select".
- */
-export interface NetworkContextsSelect<T extends boolean = true> {
-  site?: T;
-  name?: T;
-  uuid?: T;
-  legacyKey?: T;
-  vlan?: T;
-  routingDomain?: T;
-  description?: T;
-  updatedAt?: T;
-  createdAt?: T;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "network-endpoints_select".
  */
 export interface NetworkEndpointsSelect<T extends boolean = true> {
   site?: T;
   asset?: T;
-  networkContext?: T;
   bindingKey?: T;
   interfaceKey?: T;
   name?: T;
@@ -1167,7 +1122,6 @@ export interface IdentityCasesSelect<T extends boolean = true> {
  * via the `definition` "asset-imports_select".
  */
 export interface AssetImportsSelect<T extends boolean = true> {
-  networkContext?: T;
   appliedKey?: T;
   duplicateOf?: T;
   site?: T;

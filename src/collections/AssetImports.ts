@@ -22,7 +22,6 @@ import type { ImportResult } from '../importers/types'
 import { importSources, type ImportSource } from '../importers/sources'
 import { createHash } from 'node:crypto'
 import { idOf, requireTransaction } from '../identity/access'
-import { defaultNetworkContext } from '../identity/relationships'
 import {
   bindImportedIdentity,
   descriptiveFields,
@@ -87,21 +86,9 @@ const runImport: CollectionAfterChangeHook = async ({ context, doc, req }) => {
     mutating = true
     req.context.assetImport = true
     req.context.identityImportSource = doc.source
-    const networkContext =
-      idOf(doc.networkContext) || (await defaultNetworkContext(String(site), req)).id
-    const selectedContext = await req.payload.findByID({
-      collection: 'network-contexts',
-      id: networkContext,
-      depth: 0,
-      overrideAccess: false,
-      req,
-    })
-    if (idOf(selectedContext.site) !== String(site))
-      throw new Error('The network context must belong to the import site.')
     const appliedKey = scopedKey(
       'import-v1',
       site,
-      networkContext,
       doc.source,
       createHash('sha256').update(contents).digest('hex'),
       assetOverrides,
@@ -139,7 +126,7 @@ const runImport: CollectionAfterChangeHook = async ({ context, doc, req }) => {
     // ponytail: bounded synchronous import transaction; queue/chunk larger discovery batches.
     for (const asset of topology.assets) {
       const { observations, ...assetData } = asset
-      const resolution = await resolveImportedIdentity(asset, String(site), networkContext, req)
+      const resolution = await resolveImportedIdentity(asset, String(site), req)
       const current = resolution.current
       const observedAt = importObservedAt(asset, importedAt)
       if (resolution.unresolved) {
@@ -259,7 +246,6 @@ const runImport: CollectionAfterChangeHook = async ({ context, doc, req }) => {
         asset,
         resolved,
         String(site),
-        networkContext,
         observedAt,
         resolution.blocked || stale,
         resolution.endpointAsset,
@@ -321,7 +307,7 @@ const runImport: CollectionAfterChangeHook = async ({ context, doc, req }) => {
         where: {
           and: [
             { macAddress: { equals: macAddress } },
-            { networkContext: { equals: networkContext } },
+            { site: { equals: site } },
             { endedAt: { exists: false } },
           ],
         },
@@ -380,7 +366,6 @@ const runImport: CollectionAfterChangeHook = async ({ context, doc, req }) => {
       data: {
         createdAssets: created,
         appliedKey,
-        networkContext,
         error: null,
         projectName: topology.projectName,
         scanMetadata: topology.scanMetadata,
@@ -442,21 +427,11 @@ export const AssetImports: CollectionConfig = {
       'updatedAssets',
       'skippedAssets',
     ],
-    description:
-      'Import physical identity and network evidence into a selected site and network context.',
+    description: 'Import physical identity and network evidence into a selected site.',
     group: 'OT Inventory',
     useAsTitle: 'filename',
   },
   fields: [
-    {
-      name: 'networkContext',
-      type: 'relationship',
-      relationTo: 'network-contexts',
-      admin: {
-        description:
-          'Select the shared network scope. Empty uses this site’s legacy/unspecified scope.',
-      },
-    },
     {
       name: 'appliedKey',
       type: 'text',

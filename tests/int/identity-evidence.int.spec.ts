@@ -17,7 +17,6 @@ import {
 } from '@/identity/keys'
 import { importObservedAt, descriptiveFields } from '@/identity/reconcile'
 import { expandNetworkWhere, parseAssetSearch } from '@/search/assetLucene'
-import { addEndpointTopology } from '@/components/TopologyView'
 
 vi.mock('@payloadcms/ui', () => ({ DefaultListView: () => null }))
 vi.mock('@payloadcms/next/templates', () => ({ DefaultTemplate: () => null }))
@@ -38,13 +37,16 @@ describe('identity evidence boundaries', () => {
     expect(() => slotUUID(OT_NAMESPACE, 'x'.repeat(101))).toThrow('slot')
     expect(record([])).toEqual({})
     expect(text(1)).toBe('')
-    expect(endpointBindingKey('network', undefined, 'device-a', 'ifIndex:1')).not.toBe(
-      endpointBindingKey('network', undefined, 'device-b', 'ifIndex:1'),
+    expect(endpointBindingKey('site-a', undefined, 'device-a', 'ifIndex:1')).not.toBe(
+      endpointBindingKey('site-a', undefined, 'device-b', 'ifIndex:1'),
     )
-    expect(endpointBindingKey('network', '00:11:22:33:44:55', 'device-a', '')).toBe(
-      endpointBindingKey('network', '00:11:22:33:44:55', 'device-b', ''),
+    expect(endpointBindingKey('site-a', '00:11:22:33:44:55', 'device-a', '')).toBe(
+      endpointBindingKey('site-a', '00:11:22:33:44:55', 'device-b', ''),
     )
-    expect(scopedKey('context-a', '192.0.2.1')).not.toBe(scopedKey('context-b', '192.0.2.1'))
+    expect(endpointBindingKey('site-a', '00:11:22:33:44:55', 'device-a', '')).not.toBe(
+      endpointBindingKey('site-b', '00:11:22:33:44:55', 'device-a', ''),
+    )
+    expect(scopedKey('site-a', '192.0.2.1')).not.toBe(scopedKey('site-b', '192.0.2.1'))
   })
 
   it('does not mistake malformed or partial protocol values for physical identity', () => {
@@ -158,7 +160,7 @@ describe('identity evidence boundaries', () => {
     expect(serviceEvidence({})).toEqual([])
   })
 
-  it('searches all current addresses consistently, including exclusions, and shows explicit network scopes', () => {
+  it('searches all current addresses consistently, including exclusions', () => {
     expect(expandNetworkWhere({ macAddress: { not_equals: '00:11:22:33:44:55' } })).toEqual({
       and: [
         { macAddress: { not_equals: '00:11:22:33:44:55' } },
@@ -172,30 +174,5 @@ describe('identity evidence boundaries', () => {
       }),
     ).toHaveProperty('or')
     expect(parseAssetSearch('lifecycle:active AND catalog:"6ES7"')).toHaveProperty('and')
-    const graph = addEndpointTopology(
-      {
-        nodes: [
-          { id: 'a', label: 'Dual-homed CPU', type: 'asset' },
-          { id: 'inferred', label: 'old', type: 'layer2' },
-        ],
-        edges: [],
-      },
-      [
-        { id: 'e1', asset: 'a', context: 'n1', contextName: 'Control', addresses: ['192.0.2.1'] },
-        {
-          id: 'e2',
-          asset: 'a',
-          context: 'n2',
-          contextName: 'Management',
-          mac: '00:11:22:33:44:55',
-          addresses: ['198.51.100.1'],
-        },
-        { id: 'e3', asset: 'hidden', context: 'n1', contextName: 'Control', addresses: [] },
-      ],
-    )
-    expect(graph.nodes).toHaveLength(3)
-    expect(graph.edges).toHaveLength(2)
-    expect(graph.nodes[0].ipAddress).toBe('192.0.2.1, 198.51.100.1')
-    expect(addEndpointTopology(graph, [])).toBe(graph)
   })
 })

@@ -135,12 +135,7 @@ export default async function DeviceIdentity({
               endpoint.id,
               endpoint.macAddress || endpoint.interfaceKey || endpoint.id,
             )}{' '}
-            ·{' '}
-            {typeof endpoint.networkContext === 'object'
-              ? endpoint.networkContext?.name || 'Unavailable network scope'
-              : endpoint.networkContext}
-            {' · '}
-            {endpoint.addresses?.map(({ address }) => address).join(', ') || 'No recorded IP'}
+            · {endpoint.addresses?.map(({ address }) => address).join(', ') || 'No recorded IP'}
             {' · '}
             {endpoint.endedAt
               ? `Ended ${formatDateTime(endpoint.endedAt)}`
