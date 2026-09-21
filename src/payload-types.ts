@@ -272,6 +272,7 @@ export interface Asset {
         | 'ethernet-ip'
         | 'iec61850'
         | 'modbus-tcp'
+        | 'netbios'
         | 'niagara-fox'
         | 'omron-fins'
         | 'profinet'

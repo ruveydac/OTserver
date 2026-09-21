@@ -28,13 +28,28 @@ const exportFile = (localMAC: string, remoteMAC: string) => ({
       macAddresses: [localMAC],
       ipAddresses: ['192.0.2.10'],
       interfaces: [{ key: 'ifIndex:1', source: 'snmp' }],
-      ports: [],
+      ports: [{ key: 'udp:137', source: 'netbios', raw: { state: 'open' } }],
       observations: [
         {
           source: 'arp',
           observedAt: '2026-08-10T10:00:05Z',
           fields: { macAddress: localMAC, vendor: 'Siemens AG' },
           raw: {},
+          warnings: [],
+        },
+        {
+          source: 'netbios',
+          observedAt: '2026-08-10T10:00:06Z',
+          ipAddress: '192.0.2.10',
+          fields: {
+            name: 'MAIN-PLC',
+            protocols: ['netbios'],
+          },
+          raw: {
+            names: [{ name: 'MAIN-PLC', suffix: 0, flags: 1024, group: false }],
+            workgroup: 'OTLAB',
+            unitId: '00:00:00:00:00:00',
+          },
           warnings: [],
         },
         {
@@ -173,6 +188,13 @@ describe('OTserver Otter importer', () => {
       name: 'Demo S7-1500 PLC',
       vendor: 'Siemens AG',
     })
+    expect(result.assets[0].observations?.[1]).toMatchObject({
+      fields: { protocols: ['netbios'] },
+      ports: [{ key: 'udp:137', source: 'netbios' }],
+      quality: 'medium',
+      raw: { unitId: '00:00:00:00:00:00', workgroup: 'OTLAB' },
+      source: 'netbios',
+    })
   })
 
   it('validates scanner files and rejects exported credentials', () => {
@@ -184,6 +206,7 @@ describe('OTserver Otter importer', () => {
       ),
     ).toEqual([
       ['arp', 'medium', undefined],
+      ['netbios', 'medium', ['netbios']],
       ['profinet-dcp', 'high', ['profinet']],
       ['niagara-fox', 'medium', ['niagara-fox']],
       ['opc-ua', 'medium', ['opc-ua']],
@@ -341,7 +364,7 @@ describe('OTserver Otter importer', () => {
         model: 'SIMATIC S7-1500 CPU',
         name: 'Main PLC',
         operatingSystem: 'Embedded Linux',
-        protocols: ['profinet', 'niagara-fox', 'opc-ua', 'dnp3', 'iec61850'],
+        protocols: ['netbios', 'profinet', 'niagara-fox', 'opc-ua', 'dnp3', 'iec61850'],
         vendor: 'Siemens AG',
       })
       expect(assets.docs.find(({ macAddress }) => macAddress === remoteMAC)?.protocols).toEqual([
@@ -354,7 +377,13 @@ describe('OTserver Otter importer', () => {
         pagination: false,
         where: { import: { equals: importID } },
       })
-      expect(observations.docs).toHaveLength(7)
+      expect(observations.docs).toHaveLength(8)
+      expect(observations.docs.find(({ source }) => source === 'netbios')).toMatchObject({
+        fields: { name: 'MAIN-PLC', protocols: ['netbios'] },
+        ports: [{ key: 'udp:137', source: 'netbios' }],
+        quality: 'medium',
+        raw: { unitId: '00:00:00:00:00:00', workgroup: 'OTLAB' },
+      })
       expect(observations.docs.map(({ quality }) => quality)).toEqual(
         expect.arrayContaining(['high', 'medium']),
       )

@@ -329,6 +329,7 @@ export const Assets: CollectionConfig = {
         { label: 'EtherNet/IP', value: 'ethernet-ip' },
         { label: 'IEC 61850', value: 'iec61850' },
         { label: 'Modbus TCP', value: 'modbus-tcp' },
+        { label: 'NetBIOS', value: 'netbios' },
         { label: 'Niagara Fox', value: 'niagara-fox' },
         { label: 'Omron FINS', value: 'omron-fins' },
         { label: 'PROFINET', value: 'profinet' },

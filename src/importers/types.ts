@@ -41,6 +41,7 @@ export type ImportedAsset = {
     | 'ethernet-ip'
     | 'iec61850'
     | 'modbus-tcp'
+    | 'netbios'
     | 'niagara-fox'
     | 'omron-fins'
     | 'opc-ua'
