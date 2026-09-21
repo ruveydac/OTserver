@@ -1,7 +1,10 @@
 import type { DataQuality } from './assetQuality'
+import type { HardwareIdentity } from '../identity/keys'
+import type { EndpointEvidence, ServiceEvidence } from '../identity/evidence'
 
 export type ImportedObservation = {
   fields: Record<string, unknown>
+  mergeFields?: Record<string, unknown>
   interfaces?: unknown[]
   observedAt: string
   ports?: unknown[]
@@ -17,7 +20,14 @@ export type ImportedAsset = {
   ipAddress?: string
   lastSeen?: string
   location?: string
-  macAddress: string
+  macAddress?: string
+  identity?: HardwareIdentity
+  endpoints?: EndpointEvidence[]
+  services?: ServiceEvidence[]
+  componentRef?: string
+  parentComponentRef?: string
+  slotPath?: string
+  observedViaMAC?: string
   model?: string
   name: string
   networkMask?: string
@@ -31,6 +41,7 @@ export type ImportedAsset = {
     | 'ethernet-ip'
     | 'iec61850'
     | 'modbus-tcp'
+    | 'netbios'
     | 'niagara-fox'
     | 'omron-fins'
     | 'opc-ua'

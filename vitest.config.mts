@@ -23,7 +23,7 @@ export default defineConfig({
     },
     environment: 'node',
     fileParallelism: false,
-    include: ['tests/int/**/*.int.spec.ts'],
+    include: ['tests/int/**/*.int.spec.{ts,tsx}'],
     setupFiles: ['./vitest.setup.ts'],
     // Integration tests boot Payload against a real MongoDB; the 5s default is too tight.
     testTimeout: 60_000,

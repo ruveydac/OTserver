@@ -44,8 +44,8 @@ field merging, flexible hierarchies, role-based access, search, and a complete a
   protected Admin role retains unrestricted access.
 - **Discovery imports** — Ingest Siemens PRONETA XML, Nmap XML, and OTserver Otter JSON into a
   selected site.
-- **Reliable correlation** — Assets are identified only by normalized MAC address, never by a
-  changeable IP address or device name.
+- **Physical device identity** — Correlate qualified hardware identities across multiple network
+  interfaces; retain site-scoped MAC bindings, module installations, and replacement history.
 - **Evidence-aware merging** — Higher-quality discoveries can improve lower-quality data while
   human edits remain authoritative. Protocol evidence is combined across sources.
 - **Search and filters** — Use the graphical filter builder or a supported Lucene query syntax for
@@ -74,16 +74,30 @@ services:
     ports:
       - '3000:3000'
     environment:
-      DATABASE_URL: mongodb://mongo:27017/otserver
+      DATABASE_URL: mongodb://mongo:27017/otserver?replicaSet=rs0
       OTSERVER_SECRET: ${OTSERVER_SECRET:?Set OTSERVER_SECRET in .env}
     volumes:
       - import-files:/app/import-files
     depends_on:
-      - mongo
+      mongo:
+        condition: service_healthy
 
   mongo:
     image: mongo:8
     restart: unless-stopped
+    command: ['--replSet', 'rs0', '--bind_ip_all']
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'mongosh',
+          '--quiet',
+          '--eval',
+          'try { if (!rs.status().ok) quit(1) } catch (e) { rs.initiate({_id:"rs0",members:[{_id:0,host:"mongo:27017"}]}); quit(1) }',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
     volumes:
       - data:/data/db
 
@@ -108,12 +122,14 @@ docker compose up -d
 Open <http://localhost:3000/admin> and create the first administrator account.
 The named volumes persist database data and uploaded import files.
 
-To upgrade, back up those volumes, update the image tag if pinned, then run
+For an upgrade from MAC-only inventory, follow the [identity migration](docs/device-identity.md#upgrade-from-mac-only-inventory)
+before starting this version. It requires a replica set and removal of the legacy unique MAC index.
+For subsequent upgrades, back up those volumes, update the image tag if pinned, then run
 `docker compose pull && docker compose up -d` again.
 
 ### Local development
 
-Requirements: Node.js 20.9+, pnpm 9–11, and MongoDB.
+Requirements: Node.js 20.9+, pnpm 9–11, and a MongoDB replica set.
 
 ```bash
 cp .env.example .env
@@ -126,6 +142,9 @@ Then open <http://localhost:3000/admin>. The first account receives the protecte
 
 For container-based development, the repository's `docker-compose.yml` runs the source with
 `pnpm dev`: prepare `.env` as above and run `docker compose up` from the repository root.
+The source bind mount uses `:z` to allow container access on SELinux hosts (ignored on hosts
+without SELinux). If an existing container reports `EACCES` opening `/home/node/app/package.json`,
+apply the current Compose file with `docker compose up -d --force-recreate otserver`.
 
 ## First inventory
 
@@ -136,9 +155,14 @@ For container-based development, the repository's `docker-compose.yml` runs the 
 
 ## How it works
 
-Every asset and import belongs to a site. During import, the application normalizes each MAC address
-to uppercase colon-separated form and uses it as the sole identity key. Records without a usable MAC
-address are skipped rather than attached to the wrong device.
+Every asset and import belongs to a site. Assets represent physical hardware; site-scoped network
+endpoints store their interfaces and addresses. Qualified manufacturer/component serial identities
+can correlate multiple interfaces to one device. Ambiguous identities create review cases, and
+cross-site matches require explicit reconciliation. MAC-free chassis/modules can be inventoried.
+
+See [device identity and migration](docs/device-identity.md) for the model, supported evidence,
+operator actions, transaction requirements, and compatibility behavior. Scanner changes are tracked
+in the [future Otter identity roadmap](docs/otter-identity-roadmap.md).
 
 Field values are merged in this order:
 
@@ -292,6 +316,14 @@ pnpm test
 pnpm lint
 pnpm build
 ```
+
+Verify the production container and fresh-database bootstrap with Docker or Podman:
+
+```bash
+pnpm test:container
+```
+
+Set `CONTAINER_RUNTIME=docker` or `CONTAINER_RUNTIME=podman` to select one explicitly.
 
 Coverage is enforced at 90% for the application:
 

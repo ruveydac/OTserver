@@ -33,7 +33,25 @@ export const exportAssetsCSV: PayloadHandler = async (req) => {
       req,
       where,
     })
-    docs.push(...(result.docs as unknown as Record<string, unknown>[]))
+    const endpoints = await req.payload.find({
+      collection: 'network-endpoints',
+      depth: 0,
+      pagination: false,
+      where: {
+        and: [{ asset: { in: result.docs.map(({ id }) => id) } }, { endedAt: { exists: false } }],
+      },
+      overrideAccess: false,
+      req,
+    })
+    docs.push(
+      ...result.docs.map((asset) => ({
+        ...asset,
+        endpoints: endpoints.docs.filter(
+          (endpoint) =>
+            (typeof endpoint.asset === 'object' ? endpoint.asset?.id : endpoint.asset) === asset.id,
+        ),
+      })),
+    )
     if (!result.hasNextPage) break
     page += 1
   }

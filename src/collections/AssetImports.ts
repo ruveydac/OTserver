@@ -20,6 +20,18 @@ import { parseProneta } from '../importers/proneta'
 import { mergeAssetData, type FieldProvenance } from '../importers/assetQuality'
 import type { ImportResult } from '../importers/types'
 import { importSources, type ImportSource } from '../importers/sources'
+import { createHash } from 'node:crypto'
+import { idOf, requireTransaction } from '../identity/access'
+import {
+  bindImportedIdentity,
+  descriptiveFields,
+  importObservedAt,
+  recordContainment,
+  resolveImportedIdentity,
+  suggestAdjacentInterfaces,
+  suggestAttachmentChange,
+} from '../identity/reconcile'
+import { scopedKey } from '../identity/keys'
 
 const parsers = {
   nmap: parseNmap,
@@ -49,6 +61,7 @@ const runImport: CollectionAfterChangeHook = async ({ context, doc, req }) => {
   const startedAt = Date.now()
   let created = 0
   let updated = 0
+  let mutating = false
 
   try {
     const contents = req.file.data.toString('utf8')
@@ -65,43 +78,119 @@ const runImport: CollectionAfterChangeHook = async ({ context, doc, req }) => {
         : {}
 
     if (!site) throw new Error('Select a site before importing assets.')
-
-    const assetIDs = new Map<string, string>()
-
-    // ponytail: imports run synchronously and can be partial; move this loop to a queued
-    // transaction if large production files make atomic imports necessary.
-    for (const asset of topology.assets) {
-      const { observations, ...assetData } = asset
-      const existing = await req.payload.find({
-        collection: 'assets',
-        depth: 0,
-        limit: 1,
+    if (topology.assets.length + (topology.links?.length || 0) > 2000)
+      throw new Error(
+        'Identity imports are limited to 2000 device/component/link records per transaction. Split this file into smaller scans.',
+      )
+    await requireTransaction(req)
+    mutating = true
+    req.context.assetImport = true
+    req.context.identityImportSource = doc.source
+    const appliedKey = scopedKey(
+      'import-v1',
+      site,
+      doc.source,
+      createHash('sha256').update(contents).digest('hex'),
+      assetOverrides,
+      customFieldOverrides,
+    )
+    const replay = await req.payload.find({
+      collection: 'asset-imports',
+      depth: 0,
+      limit: 1,
+      where: { appliedKey: { equals: appliedKey } },
+      overrideAccess: false,
+      req,
+    })
+    if (replay.docs[0]) {
+      context.skipAssetImport = true
+      return req.payload.update({
+        collection: 'asset-imports',
+        id: doc.id,
         overrideAccess: false,
         req,
-        where: { macAddress: { equals: asset.macAddress } },
+        context: { skipAssetImport: true },
+        data: {
+          status: 'completed',
+          duplicateOf: replay.docs[0].id,
+          createdAssets: 0,
+          updatedAssets: 0,
+          warnings: 'This exact import and its overrides were already applied.',
+        },
       })
-      const current = existing.docs[0] as unknown as Record<string, unknown> | undefined
+    }
+
+    const assetIDs = new Map<string, string>()
+    const componentIDs = new Map<string, string>()
+
+    // ponytail: bounded synchronous import transaction; queue/chunk larger discovery batches.
+    for (const asset of topology.assets) {
+      const { observations, ...assetData } = asset
+      const resolution = await resolveImportedIdentity(asset, String(site), req)
+      const current = resolution.current
+      const observedAt = importObservedAt(asset, importedAt)
+      if (resolution.unresolved) {
+        topology.unresolved ||= []
+        topology.unresolved.push({ reason: 'Identity requires reconciliation', observations })
+        continue
+      }
       const automaticData = {
         ...(doc.source === 'proneta' ? { protocols: ['profinet'] } : {}),
         ...assetData,
       }
       const automaticGroups = observations?.length
-        ? observations.map(({ fields, quality, source }) => ({ data: fields, quality, source }))
+        ? observations.map(({ fields, mergeFields, quality, source }) => ({
+            data: descriptiveFields(mergeFields || fields),
+            quality,
+            source,
+          }))
         : [
             {
-              data: automaticData,
+              data: descriptiveFields(automaticData),
               quality: importSources.find((s) => s.value === doc.source)?.quality || 'low',
               source: doc.source,
             },
           ]
-      const merged = mergeAssetData(current || {}, [
-        ...automaticGroups,
+      const stale = Boolean(current?.lastSeen && observedAt < current.lastSeen)
+      const merged = mergeAssetData((current || {}) as unknown as Record<string, unknown>, [
+        ...(resolution.suppressFields
+          ? []
+          : automaticGroups.map((group) => ({
+              ...group,
+              data: stale
+                ? Object.fromEntries(
+                    Object.entries(group.data).filter(
+                      ([key]) =>
+                        key === 'protocols' ||
+                        !(current as unknown as Record<string, unknown>)[key],
+                    ),
+                  )
+                : group.data,
+            }))),
         {
-          data: { customFields: customFieldOverrides, site, ...assetOverrides },
+          data: {
+            customFields: customFieldOverrides,
+            ...(!current ? { site } : {}),
+            ...assetOverrides,
+          },
           quality: 'human',
           source: 'human',
         },
       ])
+      if (!current) merged.data.name ||= asset.name || asset.identity?.serial
+      if (!current?.lastSeen || observedAt > current.lastSeen) {
+        merged.data.lastSeen = observedAt
+        merged.changed = true
+      }
+      if (asset.identity && !current) {
+        merged.data.physicalKind =
+          asset.identity.scope === 'chassis'
+            ? 'chassis'
+            : asset.observedViaMAC
+              ? 'module'
+              : 'device'
+        merged.data.serialNumber = asset.identity.serial
+      }
       let assetID: string
 
       if (current && merged.changed) {
@@ -146,13 +235,34 @@ const runImport: CollectionAfterChangeHook = async ({ context, doc, req }) => {
       } else {
         assetID = String(current.id)
       }
-      assetIDs.set(asset.macAddress, assetID)
+      const resolved = await req.payload.findByID({
+        collection: 'assets',
+        id: assetID,
+        depth: 0,
+        overrideAccess: false,
+        req,
+      })
+      const endpoints = await bindImportedIdentity(
+        asset,
+        resolved,
+        String(site),
+        observedAt,
+        resolution.blocked || stale,
+        resolution.endpointAsset,
+        req,
+      )
+      if (asset.macAddress && !resolution.blocked) assetIDs.set(asset.macAddress, assetID)
+      if (asset.componentRef) componentIDs.set(asset.componentRef, assetID)
+      if (!current && asset.macAddress && !asset.identity)
+        await suggestAdjacentInterfaces(resolved, asset.macAddress, req)
 
       for (const observation of observations || []) {
         await req.payload.create({
           collection: 'asset-observations',
           data: {
             asset: assetID,
+            endpoint: endpoints[0]?.id,
+            identityEvidence: asset.identity,
             fields: observation.fields,
             import: doc.id,
             interfaces: observation.interfaces,
@@ -170,32 +280,63 @@ const runImport: CollectionAfterChangeHook = async ({ context, doc, req }) => {
       }
     }
 
+    for (const asset of topology.assets) {
+      const id = asset.componentRef && componentIDs.get(asset.componentRef)
+      const parent = asset.parentComponentRef && componentIDs.get(asset.parentComponentRef)
+      if (id && parent)
+        await recordContainment(
+          asset,
+          id,
+          parent,
+          String(site),
+          importObservedAt(asset, importedAt),
+          req,
+        )
+    }
+
     const findAssetID = async (endpoint: Record<string, unknown>) => {
       const macAddress = typeof endpoint.macAddress === 'string' ? endpoint.macAddress : ''
       if (!macAddress) return undefined
       if (assetIDs.has(macAddress)) return assetIDs.get(macAddress)
       const result = await req.payload.find({
-        collection: 'assets',
+        collection: 'network-endpoints',
         depth: 0,
         limit: 1,
         overrideAccess: false,
         req,
-        where: { and: [{ macAddress: { equals: macAddress } }, { site: { equals: site } }] },
+        where: {
+          and: [
+            { macAddress: { equals: macAddress } },
+            { site: { equals: site } },
+            { endedAt: { exists: false } },
+          ],
+        },
       })
-      return result.docs[0] ? String(result.docs[0].id) : undefined
+      return idOf(result.docs[0]?.asset) || undefined
     }
 
     for (const link of topology.links || []) {
+      const localAsset = await findAssetID(link.local)
+      const remoteAsset = await findAssetID(link.remote)
+      if (localAsset && remoteAsset && typeof link.local.portId === 'string')
+        await suggestAttachmentChange(
+          String(site),
+          localAsset,
+          remoteAsset,
+          link.local.portId,
+          link.observedAt,
+          req,
+        )
       await req.payload.create({
         collection: 'topology-links',
         data: {
           import: doc.id,
           local: link.local,
-          localAsset: await findAssetID(link.local),
+          localAsset,
           observedAt: link.observedAt,
           raw: link.raw === undefined ? null : JSON.parse(JSON.stringify(link.raw)),
           remote: link.remote,
-          remoteAsset: await findAssetID(link.remote),
+          remoteAsset,
           site,
           source: link.source,
         },
@@ -208,7 +349,7 @@ const runImport: CollectionAfterChangeHook = async ({ context, doc, req }) => {
     const warnings = [
       ...topology.warnings,
       ...(topology.unresolved?.length
-        ? [`${topology.unresolved.length} observation(s) could not be correlated by MAC address.`]
+        ? [`${topology.unresolved.length} observation(s) require identity reconciliation.`]
         : []),
       ...(durationSeconds > 30 ? [`Import took ${durationSeconds.toFixed(1)} seconds.`] : []),
     ]
@@ -218,14 +359,19 @@ const runImport: CollectionAfterChangeHook = async ({ context, doc, req }) => {
     }
 
     context.skipAssetImport = true
+    context.appliedImportKey = appliedKey
     return req.payload.update({
       collection: 'asset-imports',
+      context: { skipAssetImport: true, appliedImportKey: appliedKey },
       data: {
         createdAssets: created,
+        appliedKey,
         error: null,
         projectName: topology.projectName,
         scanMetadata: topology.scanMetadata,
-        skippedAssets: topology.warnings.length + (topology.unresolved?.length || 0),
+        skippedAssets:
+          topology.warnings.length +
+          (doc.source === 'otserver-otter' ? topology.unresolved?.length || 0 : 0),
         sourceVersion,
         status: 'completed',
         topologyName: topology.topologyName,
@@ -238,9 +384,13 @@ const runImport: CollectionAfterChangeHook = async ({ context, doc, req }) => {
       req,
     })
   } catch (error) {
+    req.payload.logger.error(error)
+    // A write failure must escape the hook so Payload rolls back the entire inventory transaction.
+    if (mutating) throw error
     context.skipAssetImport = true
     return req.payload.update({
       collection: 'asset-imports',
+      context: { skipAssetImport: true },
       data: {
         createdAssets: created,
         error: error instanceof Error ? error.message : 'Import failed.',
@@ -277,11 +427,24 @@ export const AssetImports: CollectionConfig = {
       'updatedAssets',
       'skippedAssets',
     ],
-    description: 'Upload discovery files to create or update assets by MAC address.',
+    description: 'Import physical identity and network evidence into a selected site.',
     group: 'OT Inventory',
     useAsTitle: 'filename',
   },
   fields: [
+    {
+      name: 'appliedKey',
+      type: 'text',
+      unique: true,
+      access: { create: () => false, update: () => false },
+      admin: { hidden: true },
+    },
+    {
+      name: 'duplicateOf',
+      type: 'relationship',
+      relationTo: 'asset-imports',
+      admin: { readOnly: true },
+    },
     {
       name: 'site',
       type: 'relationship',
@@ -407,7 +570,14 @@ export const AssetImports: CollectionConfig = {
   hooks: {
     afterChange: [runImport],
     beforeValidate: [normalizeLegacyOtterSource],
-    beforeChange: [enforceWritableSite, sanitizeCustomFieldValues],
+    beforeChange: [
+      enforceWritableSite,
+      sanitizeCustomFieldValues,
+      ({ data, context }) => {
+        if (context.appliedImportKey) data.appliedKey = context.appliedImportKey
+        return data
+      },
+    ],
   },
   upload: {
     bulkUpload: false,

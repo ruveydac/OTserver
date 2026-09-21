@@ -6,8 +6,10 @@ import type {
   CollectionAfterLoginHook,
   CollectionAfterLogoutHook,
   CollectionConfig,
+  CollectionBeforeOperationHook,
   Access,
   PayloadRequest,
+  Where,
 } from 'payload'
 
 import { getAuthorization, hideFromNonAdmins } from '../access/authorization'
@@ -21,7 +23,15 @@ const sensitiveField = /api[-_]?key|hash|password|salt|secret|session|token/i
 
 const canReadAuditLogs: Access = async ({ req }) => {
   const authorization = await getAuthorization(req)
-  return authorization.isAdmin ? true : { 'asset.site': { in: authorization.readableSiteIDs } }
+  const scoped: Where = {
+    or: [
+      { site: { in: authorization.readableSiteIDs } },
+      {
+        and: [{ site: { exists: false } }, { 'asset.site': { in: authorization.readableSiteIDs } }],
+      },
+    ],
+  }
+  return authorization.isAdmin ? true : scoped
 }
 
 const clean = (value: unknown): Document => {
@@ -70,7 +80,9 @@ export const writeAudit = async ({
   const actor = clean(req.user)
   const documentID = document.id === undefined ? undefined : String(document.id)
   const documentLabel = labelFor(document)
-  const relatedAsset = relationshipID(document.asset ?? document.localAsset)
+  const relatedAsset = relationshipID(
+    document.asset ?? document.localAsset ?? document.module ?? document.parent,
+  )
   const assetID =
     targetCollection === 'assets' ? documentID : relatedAsset ? String(relatedAsset) : undefined
   const forwardedFor = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
@@ -80,6 +92,7 @@ export const writeAudit = async ({
     collection: 'audit-logs',
     data: {
       action,
+      ...(relationshipID(document.site) ? { site: relationshipID(document.site) as string } : {}),
       actorEmail: typeof actor.email === 'string' ? actor.email : undefined,
       actorID: actor.id === undefined ? undefined : String(actor.id),
       actorName: typeof actor.name === 'string' ? actor.name : undefined,
@@ -130,6 +143,24 @@ const afterLogout: CollectionAfterLogoutHook = async ({ collection, req }) => {
   await writeAudit({ action: 'logout', after: req.user, req, targetCollection: collection.slug })
 }
 
+// Payload 3.87 validates relationships concurrently. Establish the Mongo transaction on
+// the server before those reads can race its first (startTransaction) command.
+const startTransactionRead: CollectionBeforeOperationHook = async ({ args, operation, req }) => {
+  if (!['create', 'update', 'delete'].includes(operation)) return args
+  const transaction = await req.transactionID
+  if (!transaction || req.context.startedTransaction === transaction) return args
+  req.context.startedTransaction = transaction
+  await req.payload.find({
+    collection: 'audit-logs',
+    limit: 1,
+    depth: 0,
+    select: { action: true },
+    overrideAccess: true,
+    req,
+  })
+  return args
+}
+
 export const withAudit = (collection: CollectionConfig): CollectionConfig => {
   if (collection.slug === 'audit-logs') return collection
   const hooks = collection.hooks || {}
@@ -138,6 +169,7 @@ export const withAudit = (collection: CollectionConfig): CollectionConfig => {
     ...collection,
     hooks: {
       ...hooks,
+      beforeOperation: [startTransactionRead, ...(hooks.beforeOperation || [])],
       afterChange: [...(hooks.afterChange || []), afterChange],
       afterDelete: [...(hooks.afterDelete || []), afterDelete],
       ...(collection.auth
@@ -171,6 +203,7 @@ export const AuditLogs: CollectionConfig = {
   disableBulkDelete: true,
   disableBulkEdit: true,
   fields: [
+    { name: 'site', type: 'relationship', relationTo: 'sites', index: true, maxDepth: 0 },
     { name: 'summary', type: 'text', required: true },
     {
       name: 'action',

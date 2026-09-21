@@ -16,6 +16,13 @@ import { TopologyLinks } from './collections/TopologyLinks'
 import { Vulnerabilities, VulnerabilityFeeds } from './collections/Vulnerabilities'
 import { MAX_IMPORT_FILE_SIZE } from './importers/proneta'
 import { initializeVulnerabilityFeeds } from './vulnerabilities/feeds'
+import {
+  NetworkEndpoints,
+  ServiceBindings,
+  AssetIdentifiers,
+  AssetInstallations,
+  IdentityCases,
+} from './collections/Identity'
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -78,6 +85,11 @@ export default buildConfig({
     Sites,
     AssetClasses,
     Assets,
+    NetworkEndpoints,
+    ServiceBindings,
+    AssetIdentifiers,
+    AssetInstallations,
+    IdentityCases,
     AssetImports,
     AssetFields,
     UserRoles,
@@ -90,6 +102,8 @@ export default buildConfig({
   ].map(withAudit),
   db: mongooseAdapter({
     url: process.env.DATABASE_URL,
+    // Identity uniqueness must exist before the first transaction or import can run.
+    ensureIndexes: true,
   }),
   secret: process.env.OTSERVER_SECRET,
   onInit: initializeApplication,

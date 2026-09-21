@@ -2,7 +2,7 @@ import Link from 'next/link'
 import type { DocumentViewServerProps } from 'payload'
 
 import { formatDateTime } from '@/components/labels'
-import { bySeverity, findAssetVulnerabilities } from '@/vulnerabilities/match'
+import { bySeverity, findAssemblyVulnerabilities } from '@/vulnerabilities/match'
 import type { Asset } from '@/payload-types'
 
 import './AssetView/index.scss'
@@ -15,9 +15,9 @@ const AssetVulnerabilitiesView = async (props: DocumentViewServerProps) => {
   const assetURL = `${adminRoute}/collections/assets/${asset.id}`
   const page = Math.max(1, Number(props.searchParams?.page) || 1)
 
-  const matches = (await findAssetVulnerabilities(props.payload, asset, { user: props.user })).sort(
-    bySeverity,
-  )
+  const matches = (
+    await findAssemblyVulnerabilities(props.payload, asset, { user: props.user })
+  ).sort(bySeverity)
   const pages = Math.max(1, Math.ceil(matches.length / PAGE_SIZE))
   const visible = matches.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
@@ -135,6 +135,25 @@ const AssetVulnerabilitiesView = async (props: DocumentViewServerProps) => {
                       Matched {match.matchedVendor} {match.matchedProduct} · {match.versionEvidence}{' '}
                       {match.version} satisfies {match.constraint}
                     </p>
+                    {match.cpe ? (
+                      <p className="asset-view__match-reason">
+                        Catalog CPE: <code>{match.cpe}</code>
+                      </p>
+                    ) : null}
+                    {match.components?.length ? (
+                      <p className="asset-view__match-reason">
+                        Affected hardware:{' '}
+                        {match.components.map((component, index) => (
+                          <span key={component.id}>
+                            {index ? ', ' : ''}
+                            <Link href={`${adminRoute}/collections/assets/${component.id}`}>
+                              {component.name}
+                            </Link>{' '}
+                            ({component.version})
+                          </span>
+                        ))}
+                      </p>
+                    ) : null}
                     {detail?.kevRequiredAction ? (
                       <p className="asset-view__match-reason">
                         CISA action: {detail.kevRequiredAction}

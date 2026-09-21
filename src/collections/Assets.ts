@@ -15,6 +15,9 @@ import { assignDefaultAssetClass } from './AssetClasses'
 import { exportAssetsCSV } from './AssetExport'
 import { sanitizeCustomFieldValues } from './AssetFields'
 import { assignVulnerabilityCount } from '../vulnerabilities/match'
+import { randomUUID } from 'node:crypto'
+import { protectAssetIdentity, syncManualEndpoint } from '../identity/relationships'
+import { identityAction, migrateIdentity } from '../identity/actions'
 
 const macAddressPattern = /^(?:[0-9A-F]{2}:){5}[0-9A-F]{2}$/
 
@@ -41,7 +44,13 @@ export const userSuppliedAssetFields = [
 ] as const
 
 const recordHumanChanges: CollectionBeforeChangeHook = ({ context, data, originalDoc, req }) => {
-  if (context.assetImport || context.assetClassMigration || context.vulnerabilityCountSync)
+  if (
+    context.assetImport ||
+    context.assetClassMigration ||
+    context.vulnerabilityCountSync ||
+    context.networkProjection ||
+    context.identityAction
+  )
     return data
 
   const tracked = trackHumanAssetChanges(data, originalDoc)
@@ -98,6 +107,8 @@ export const Assets: CollectionConfig = {
   },
   defaultSort: 'name',
   endpoints: [
+    { handler: identityAction, method: 'post', path: '/:id/identity' },
+    { handler: migrateIdentity, method: 'post', path: '/migrate-identity' },
     {
       handler: exportAssetsCSV,
       method: 'get',
@@ -105,6 +116,53 @@ export const Assets: CollectionConfig = {
     },
   ],
   fields: [
+    {
+      name: 'identityRevision',
+      type: 'number',
+      defaultValue: 0,
+      admin: { hidden: true },
+      access: { create: () => false, update: () => false },
+    },
+    {
+      name: 'uuid',
+      type: 'text',
+      unique: true,
+      index: true,
+      defaultValue: randomUUID,
+      access: { create: () => false, update: () => false },
+      admin: { readOnly: true },
+    },
+    {
+      name: 'physicalKind',
+      type: 'select',
+      defaultValue: 'unknown',
+      options: ['unknown', 'device', 'chassis', 'module'],
+    },
+    { name: 'catalogNumber', type: 'text', label: 'Catalog / part number' },
+    { name: 'slotCapacity', type: 'number', min: 0, max: 65536 },
+    {
+      name: 'lifecycle',
+      type: 'select',
+      defaultValue: 'active',
+      options: ['active', 'retired', 'replaced', 'merged'],
+      index: true,
+      admin: { readOnly: true, position: 'sidebar' },
+    },
+    { name: 'baselined', type: 'checkbox', defaultValue: false, admin: { position: 'sidebar' } },
+    { name: 'mergedInto', type: 'relationship', relationTo: 'assets', admin: { readOnly: true } },
+    { name: 'replacedBy', type: 'relationship', relationTo: 'assets', admin: { readOnly: true } },
+    {
+      name: 'networkAddresses',
+      type: 'array',
+      admin: { hidden: true },
+      fields: [{ name: 'address', type: 'text', index: true, required: true }],
+    },
+    {
+      name: 'networkMACs',
+      type: 'array',
+      admin: { hidden: true },
+      fields: [{ name: 'address', type: 'text', index: true, required: true }],
+    },
     {
       name: 'name',
       type: 'text',
@@ -192,8 +250,6 @@ export const Assets: CollectionConfig = {
           },
           index: true,
           label: 'MAC address',
-          required: true,
-          unique: true,
           validate: validateMACAddress,
         },
       ],
@@ -273,6 +329,7 @@ export const Assets: CollectionConfig = {
         { label: 'EtherNet/IP', value: 'ethernet-ip' },
         { label: 'IEC 61850', value: 'iec61850' },
         { label: 'Modbus TCP', value: 'modbus-tcp' },
+        { label: 'NetBIOS', value: 'netbios' },
         { label: 'Niagara Fox', value: 'niagara-fox' },
         { label: 'Omron FINS', value: 'omron-fins' },
         { label: 'PROFINET', value: 'profinet' },
@@ -366,11 +423,13 @@ export const Assets: CollectionConfig = {
     // assignVulnerabilityCount runs last so the derived count never enters field provenance.
     beforeChange: [
       enforceWritableSite,
+      protectAssetIdentity,
       sanitizeCustomFieldValues,
       recordHumanChanges,
       assignVulnerabilityCount,
     ],
     beforeOperation: [applyAssetSearch],
+    afterChange: [syncManualEndpoint],
   },
   indexes: [{ fields: ['site', 'status'] }, { fields: ['site', 'assetClass'] }],
   timestamps: true,

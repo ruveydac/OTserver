@@ -9,11 +9,22 @@ import {
 } from '../../access/authorization'
 import { ensureAdminRole } from '../UserRoles'
 
+const hasUsers = async (req: PayloadRequest) =>
+  (
+    await req.payload.find({
+      collection: 'users',
+      depth: 0,
+      limit: 1,
+      overrideAccess: true,
+      pagination: false,
+      req,
+    })
+  ).docs.length > 0
+
 const assignFirstUserToAdmin: CollectionBeforeValidateHook = async ({ data, operation, req }) => {
   if (operation !== 'create' || data?.role) return data
 
-  const users = await req.payload.count({ collection: 'users', overrideAccess: true, req })
-  if (users.totalDocs) return data
+  if (await hasUsers(req)) return data
 
   const adminRole = await ensureAdminRole(req.payload, req)
   return { ...data, role: adminRole.id }
@@ -22,8 +33,7 @@ const assignFirstUserToAdmin: CollectionBeforeValidateHook = async ({ data, oper
 const firstUserAdminRoleDefault = async ({ req }: { req: PayloadRequest }) => {
   if (req.user) return undefined
 
-  const users = await req.payload.count({ collection: 'users', overrideAccess: true, req })
-  if (users.totalDocs) return undefined
+  if (await hasUsers(req)) return undefined
 
   return (await ensureAdminRole(req.payload, req)).id
 }

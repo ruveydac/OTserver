@@ -352,7 +352,12 @@ const TopologyView = async (props: AdminViewServerProps) => {
         status: true,
       },
       user,
-      where: { site: { equals: selectedSiteId } },
+      where: {
+        and: [
+          { site: { equals: selectedSiteId } },
+          { lifecycle: { not_in: ['merged', 'replaced', 'retired'] } },
+        ],
+      },
     }),
     payload.find({
       collection: 'topology-links',

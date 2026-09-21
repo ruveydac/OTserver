@@ -105,7 +105,15 @@ describe('audit log', () => {
       user: reader,
       where: { assetID: { equals: asset.id } },
     })
-    expect(readerAssetLogs.docs.map(({ action }) => action)).toEqual(['create', 'update'])
+    expect(readerAssetLogs.docs.map(({ action }) => action)).toEqual([
+      'update',
+      'create',
+      'create',
+      'update',
+    ])
+    expect(
+      readerAssetLogs.docs.some(({ targetCollection }) => targetCollection === 'network-endpoints'),
+    ).toBe(true)
     const readerSettingLogs = await payload.find({
       collection: 'audit-logs',
       overrideAccess: false,
@@ -128,10 +136,24 @@ describe('audit log', () => {
       sort: 'createdAt',
       where: { assetID: { equals: asset.id } },
     })
-    expect(assetLogs.docs.map(({ action }) => action)).toEqual(['create', 'update', 'delete'])
+    expect(assetLogs.docs.map(({ action }) => action)).toEqual([
+      'update',
+      'create',
+      'create',
+      'update',
+      'delete',
+    ])
     expect(assetLogs.docs.every(({ asset: relatedAsset }) => relatedAsset === asset.id)).toBe(true)
     expect(assetLogs.docs.every(({ actorID }) => actorID === user.id)).toBe(true)
-    expect(assetLogs.docs[1]?.changes).toMatchObject({
+    expect(
+      assetLogs.docs.find(
+        ({ changes }) =>
+          changes &&
+          typeof changes === 'object' &&
+          'status' in changes &&
+          JSON.stringify(changes.status).includes('before'),
+      )?.changes,
+    ).toMatchObject({
       status: { after: 'online', before: 'offline' },
     })
 

@@ -106,6 +106,11 @@ export const parseNmap = (xml: string): ImportResult => {
         result.warnings.push(`${label} was skipped because the host is not up.`)
       } else if (!mac || validateMACAddress(mac) !== true) {
         result.warnings.push(`${label} was skipped because it has no valid MAC address.`)
+        result.unresolved ||= []
+        result.unresolved.push({
+          fields: currentHost,
+          reason: 'No target MAC or qualified physical identity.',
+        })
       } else {
         if (currentHost.ipAddress && validateIPAddress(currentHost.ipAddress) !== true) {
           result.warnings.push(`${mac} has an invalid IP address; that value was ignored.`)

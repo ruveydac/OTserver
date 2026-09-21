@@ -109,6 +109,11 @@ export const parseProneta = (xml: string): ImportResult => {
         result.warnings.push(
           `${currentDevice.name || 'Unnamed device'} was skipped because it has no valid MAC address.`,
         )
+        result.unresolved ||= []
+        result.unresolved.push({
+          fields: currentDevice,
+          reason: 'No target MAC or qualified physical identity.',
+        })
       } else if (assets.has(mac)) {
         result.warnings.push(`Duplicate device MAC ${mac} was ignored.`)
       } else {

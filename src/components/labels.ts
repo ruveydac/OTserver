@@ -11,6 +11,7 @@ export const protocolLabels: Record<string, string> = {
   'ethernet-ip': 'EtherNet/IP',
   iec61850: 'IEC 61850',
   'modbus-tcp': 'Modbus TCP',
+  netbios: 'NetBIOS',
   'niagara-fox': 'Niagara Fox',
   'omron-fins': 'Omron FINS',
   'opc-ua': 'OPC UA',

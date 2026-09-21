@@ -86,10 +86,8 @@ export const getAuthorization = async (req: PayloadRequest): Promise<Authorizati
       if (permission.access === 'read-write') writableRoots.add(String(siteID))
     }
 
-    const [readableSiteIDs, writableSiteIDs] = await Promise.all([
-      getSiteAndDescendantIDs([...readableRoots], req),
-      getSiteAndDescendantIDs([...writableRoots], req),
-    ])
+    const readableSiteIDs = await getSiteAndDescendantIDs([...readableRoots], req)
+    const writableSiteIDs = await getSiteAndDescendantIDs([...writableRoots], req)
     return { isAdmin: false, readableSiteIDs, writableSiteIDs }
   })()
 

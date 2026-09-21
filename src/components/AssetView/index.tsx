@@ -9,7 +9,9 @@ import {
   statusLabels,
 } from '@/components/labels'
 import type { Asset, AuditLog } from '@/payload-types'
-import { bySeverity, findAssetVulnerabilities } from '@/vulnerabilities/match'
+import { bySeverity, findAssemblyVulnerabilities } from '@/vulnerabilities/match'
+import DeviceIdentity from '@/components/DeviceIdentity'
+import { assetHistoryScope } from '@/identity/relationships'
 
 import './index.scss'
 
@@ -133,6 +135,12 @@ const AssetView = async (props: DocumentViewServerProps) => {
   const assetURL = `${adminRoute}/collections/assets/${asset.id}`
   const site = typeof asset.site === 'object' ? asset.site : undefined
   const assetClass = typeof asset.assetClass === 'object' ? asset.assetClass : undefined
+  const historyScope = asset.uuid
+    ? await assetHistoryScope(asset.id, props.payload, props.user)
+    : {
+        assets: { asset: { equals: asset.id } },
+        observations: { asset: { equals: asset.id } },
+      }
   const customFields =
     asset.customFields &&
     typeof asset.customFields === 'object' &&
@@ -156,7 +164,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
         pagination: false,
         sort: '-createdAt',
         user: props.user,
-        where: { asset: { equals: asset.id } },
+        where: historyScope.assets,
       }),
       props.payload.find({
         collection: 'asset-observations',
@@ -165,7 +173,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
         overrideAccess: false,
         sort: '-observedAt',
         user: props.user,
-        where: { asset: { equals: asset.id } },
+        where: historyScope.observations,
       }),
       props.payload.find({
         collection: 'topology-links',
@@ -178,7 +186,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
           or: [{ localAsset: { equals: asset.id } }, { remoteAsset: { equals: asset.id } }],
         },
       }),
-      findAssetVulnerabilities(props.payload, asset, { user: props.user }),
+      findAssemblyVulnerabilities(props.payload, asset, { user: props.user }),
     ])
   const visibleVulnerabilities = vulnerabilityMatches
     .sort(bySeverity)
@@ -207,6 +215,9 @@ const AssetView = async (props: DocumentViewServerProps) => {
       </header>
 
       <div className="asset-view__grid">
+        {props.user ? (
+          <DeviceIdentity asset={asset} payload={props.payload} user={props.user} />
+        ) : null}
         <Section
           details={[
             { label: 'Name', value: asset.name },
