@@ -13,21 +13,12 @@ jobs:
     name: Application
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    services:
-      mongo:
-        image: mongo:8
-        ports:
-          - 27017:27017
-        options: >-
-          --health-cmd "mongosh --eval 'db.runCommand({ ping: 1 })'"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     env:
-      DATABASE_URL: mongodb://127.0.0.1:27017/otserver-ci
+      DATABASE_URL: mongodb://127.0.0.1:27017/otserver-ci?replicaSet=rs0&directConnection=true
       OTSERVER_SECRET: ci-only-secret
     steps:
       - uses: actions/checkout@v6
+      - run: docker compose up --detach --wait mongo
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6
         with:
