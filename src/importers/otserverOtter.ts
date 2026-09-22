@@ -180,8 +180,12 @@ export const parseOTserverOtter = (input: string): ImportResult => {
             `devices[${index}].observations[${observationIndex}].observedAt is invalid.`,
           )
         }
+        const fields = safeFields(observation.fields, identity)
+        const ouiVendor = record(observation.raw).ouiVendor
+        if (source === 'arp' && !fields.vendor && typeof ouiVendor === 'string')
+          fields.vendor = ouiVendor
         return {
-          fields: safeFields(observation.fields, identity),
+          fields,
           interfaces: array(device.interfaces),
           observedAt: observation.observedAt,
           ports: array(device.ports),

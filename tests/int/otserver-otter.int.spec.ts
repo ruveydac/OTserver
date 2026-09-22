@@ -14,28 +14,78 @@ const randomMAC = () =>
 const exportFile = (localMAC: string, remoteMAC: string) => ({
   format: 'otserver-scan',
   schemaVersion: 2,
-  scanner: { name: 'OTserver Otter', version: '0.2.0' },
+  scanner: { name: 'OTserver Otter', version: '0.2.0', npcapVersion: '1.83' },
   scan: {
     id: randomUUID(),
     startedAt: '2026-08-10T10:00:00Z',
     finishedAt: '2026-08-10T10:01:00Z',
     targets: ['192.0.2.0/24'],
-    interface: { id: 'test', name: 'test' },
+    interface: {
+      id: 'test',
+      name: 'Test adapter',
+      macAddress: localMAC,
+      addresses: ['192.0.2.1/24'],
+    },
+    partial: true,
   },
   devices: [
     {
       macAddress: localMAC,
       macAddresses: [localMAC],
       ipAddresses: ['192.0.2.10'],
-      interfaces: [{ key: 'ifIndex:1', source: 'snmp' }],
-      ports: [{ key: 'udp:137', source: 'netbios', raw: { state: 'open' } }],
+      interfaces: [
+        {
+          key: 'ifIndex:1',
+          source: 'snmp',
+          name: 'eth0',
+          description: 'Control interface',
+          macAddress: localMAC,
+          ipAddresses: [],
+          adminStatus: 'up',
+          operStatus: 'up',
+          speed: 1_000_000_000,
+          mtu: 1500,
+          raw: { ifType: 6 },
+        },
+      ],
+      ports: [
+        {
+          key: 'udp:137',
+          source: 'netbios',
+          interfaceKey: 'ifIndex:1',
+          portId: '137',
+          description: 'NetBIOS Name Service',
+          macAddress: localMAC,
+          vlans: [10],
+          raw: { state: 'open' },
+        },
+      ],
       observations: [
         {
           source: 'arp',
           observedAt: '2026-08-10T10:00:05Z',
-          fields: { macAddress: localMAC, vendor: 'Siemens AG' },
-          raw: {},
-          warnings: [],
+          ipAddress: '192.0.2.10',
+          macAddress: localMAC,
+          fields: {
+            description: 'ARP description',
+            firmwareVersion: 'ARP-FW',
+            gatewayAddress: '192.0.2.1',
+            hardwareVersion: 'ARP-HW',
+            ipAddress: '192.0.2.10',
+            lastSeen: '2026-08-10T10:00:05Z',
+            location: 'ARP location',
+            macAddress: localMAC,
+            model: 'ARP model',
+            name: 'ARP name',
+            networkMask: '255.255.255.0',
+            operatingSystem: 'ARP OS',
+            osAccuracy: 60,
+            protocols: ['other'],
+            serialNumber: 'ARP-SERIAL',
+            status: 'online',
+          },
+          raw: { ouiVendor: 'Siemens AG' },
+          warnings: ['ARP warning'],
         },
         {
           source: 'netbios',
@@ -59,7 +109,6 @@ const exportFile = (localMAC: string, remoteMAC: string) => ({
             macAddress: localMAC,
             model: 'SIMATIC S7-1500 CPU',
             name: 'Main PLC',
-            ipAddress: '192.0.2.10',
             protocols: ['profinet'],
           },
           raw: { deviceId: 1 },
@@ -138,14 +187,36 @@ const exportFile = (localMAC: string, remoteMAC: string) => ({
     {
       source: 'lldp',
       observedAt: '2026-08-10T10:00:30Z',
-      local: { macAddress: localMAC, portId: '1' },
-      remote: { macAddress: remoteMAC, portId: '2' },
-      raw: {},
+      local: {
+        macAddress: localMAC,
+        stationName: 'Main PLC',
+        interfaceKey: 'ifIndex:1',
+        portId: '1',
+        portMac: localMAC,
+      },
+      remote: {
+        macAddress: remoteMAC,
+        stationName: 'Remote IO',
+        interfaceKey: 'ifIndex:2',
+        portId: '2',
+        portMac: remoteMAC,
+      },
+      raw: { chassisIdSubtype: 4 },
     },
   ],
-  unresolved: [],
-  warnings: [],
-  errors: [],
+  unresolved: [
+    {
+      source: 'unknown',
+      observedAt: '2026-08-10T10:00:40Z',
+      ipAddress: '198.51.100.10',
+      macAddress: remoteMAC,
+      fields: { name: 'Unresolved target' },
+      raw: ['opaque'],
+      warnings: ['Unresolved warning'],
+    },
+  ],
+  warnings: ['Scan warning'],
+  errors: ['Scan error'],
 })
 
 type MutableExport = {
@@ -205,7 +276,7 @@ describe('OTserver Otter importer', () => {
         ({ fields, quality, source }) => [source, quality, fields.protocols],
       ),
     ).toEqual([
-      ['arp', 'medium', undefined],
+      ['arp', 'medium', ['other']],
       ['netbios', 'medium', ['netbios']],
       ['profinet-dcp', 'high', ['profinet']],
       ['niagara-fox', 'medium', ['niagara-fox']],
@@ -303,7 +374,7 @@ describe('OTserver Otter importer', () => {
     expect(parseOTserverOtter(JSON.stringify(unknownLinkSource)).links?.[0].source).toBe('unknown')
   })
 
-  it('imports evidence and topology while merging fields by source quality', async () => {
+  it('imports every contract shape and supported asset field while merging by quality', async () => {
     const payload: Payload = await getPayload({ config })
     const localMAC = randomMAC()
     const remoteMAC = randomMAC()
@@ -331,7 +402,8 @@ describe('OTserver Otter importer', () => {
         user,
       })
       siteID = site.id
-      const data = Buffer.from(JSON.stringify(exportFile(localMAC, remoteMAC)))
+      const file = exportFile(localMAC, remoteMAC)
+      const data = Buffer.from(JSON.stringify(file))
       const imported = await payload.create({
         collection: 'asset-imports',
         data: {
@@ -347,8 +419,12 @@ describe('OTserver Otter importer', () => {
       importID = imported.id
       expect(imported).toMatchObject({
         createdAssets: 2,
+        scanMetadata: { scan: file.scan, scanner: file.scanner },
+        skippedAssets: 3,
         sourceVersion: '0.2.0',
         status: 'completed',
+        unresolved: file.unresolved,
+        warnings: 'Scan warning\nScan error\n1 observation(s) require identity reconciliation.',
       })
 
       const assets = await payload.find({
@@ -357,20 +433,64 @@ describe('OTserver Otter importer', () => {
         pagination: false,
         where: { site: { equals: siteID } },
       })
-      expect(assets.docs.find(({ macAddress }) => macAddress === localMAC)).toMatchObject({
+      const localAsset = assets.docs.find(({ macAddress }) => macAddress === localMAC)
+      expect(localAsset).toMatchObject({
         assetClass: plcClass.id,
-        fieldProvenance: { assetClass: { quality: 'medium', source: 'asset-class-rule' } },
+        description: 'Test Device',
+        fieldProvenance: {
+          assetClass: { quality: 'medium', source: 'asset-class-rule' },
+          vendor: { quality: 'medium', source: 'arp' },
+        },
+        firmwareVersion: '2.1.0',
+        gatewayAddress: '192.0.2.1',
         hardwareVersion: 'HW-2',
+        ipAddress: '192.0.2.10',
+        lastSeen: '2026-08-10T10:00:27.000Z',
+        location: 'Plant1/Line3/Cell2',
+        macAddress: localMAC,
         model: 'SIMATIC S7-1500 CPU',
         name: 'Main PLC',
+        networkMask: '255.255.255.0',
         operatingSystem: 'Embedded Linux',
-        protocols: ['netbios', 'profinet', 'niagara-fox', 'opc-ua', 'dnp3', 'iec61850'],
+        osAccuracy: 60,
+        protocols: ['other', 'netbios', 'profinet', 'niagara-fox', 'opc-ua', 'dnp3', 'iec61850'],
+        serialNumber: 'OPCLAB0001',
+        status: 'online',
         vendor: 'Siemens AG',
       })
       expect(assets.docs.find(({ macAddress }) => macAddress === remoteMAC)?.protocols).toEqual([
         's7',
         'ethernet-ip',
       ])
+      const endpoints = await payload.find({
+        collection: 'network-endpoints',
+        depth: 0,
+        where: { asset: { equals: localAsset!.id } },
+      })
+      expect(endpoints.docs[0]).toMatchObject({
+        addresses: [
+          {
+            address: '192.0.2.10',
+            gatewayAddress: '192.0.2.1',
+            networkMask: '255.255.255.0',
+          },
+        ],
+        interfaceKey: 'ifIndex:1',
+        macAddress: localMAC,
+        source: 'snmp',
+      })
+      const services = await payload.find({
+        collection: 'service-bindings',
+        depth: 0,
+        where: { asset: { equals: localAsset!.id } },
+      })
+      expect(services.docs[0]).toMatchObject({
+        address: '192.0.2.10',
+        port: 137,
+        protocol: 'netbios',
+        source: 'netbios',
+        transport: 'udp',
+      })
       const observations = await payload.find({
         collection: 'asset-observations',
         depth: 0,
@@ -378,6 +498,32 @@ describe('OTserver Otter importer', () => {
         where: { import: { equals: importID } },
       })
       expect(observations.docs).toHaveLength(8)
+      expect(observations.docs.find(({ source }) => source === 'arp')).toMatchObject({
+        fields: {
+          description: 'ARP description',
+          firmwareVersion: 'ARP-FW',
+          gatewayAddress: '192.0.2.1',
+          hardwareVersion: 'ARP-HW',
+          ipAddress: '192.0.2.10',
+          lastSeen: '2026-08-10T10:00:05Z',
+          location: 'ARP location',
+          macAddress: localMAC,
+          model: 'ARP model',
+          name: 'ARP name',
+          networkMask: '255.255.255.0',
+          operatingSystem: 'ARP OS',
+          osAccuracy: 60,
+          protocols: ['other'],
+          serialNumber: 'ARP-SERIAL',
+          status: 'online',
+          vendor: 'Siemens AG',
+        },
+        interfaces: file.devices[0].interfaces,
+        ports: file.devices[0].ports,
+        quality: 'medium',
+        raw: { ouiVendor: 'Siemens AG' },
+        warnings: ['ARP warning'],
+      })
       expect(observations.docs.find(({ source }) => source === 'netbios')).toMatchObject({
         fields: { name: 'MAIN-PLC', protocols: ['netbios'] },
         ports: [{ key: 'udp:137', source: 'netbios' }],
@@ -393,7 +539,11 @@ describe('OTserver Otter importer', () => {
         where: { import: { equals: importID } },
       })
       expect(links.docs[0]).toMatchObject({
+        local: file.links[0].local,
         localAsset: expect.any(String),
+        observedAt: '2026-08-10T10:00:30.000Z',
+        raw: file.links[0].raw,
+        remote: file.links[0].remote,
         remoteAsset: expect.any(String),
         source: 'lldp',
       })
