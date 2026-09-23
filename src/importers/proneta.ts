@@ -1,4 +1,4 @@
-import { validateIPAddress, validateMACAddress, normalizeMAC } from '../collections/Assets'
+import { validateIPAddress, validateMACAddress, normalizeMAC } from '../domain/network'
 import { SaxesParser } from 'saxes'
 
 import type { ImportedAsset, ImportResult } from './types'

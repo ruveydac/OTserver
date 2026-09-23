@@ -5,7 +5,31 @@ services:
     volumes:
       - .:/home/node/app:z # Label the source mount for container access on SELinux hosts.
       - node_modules:/home/node/app/node_modules
+      - import-files:/app/import-files
     build: ./
+    depends_on:
+      mongo:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: mongodb://mongo:27017/otserver?replicaSet=rs0
+  import-worker:
+    build: ./
+    command: ['node_modules/.bin/tsx', 'src/worker.ts', 'imports']
+    depends_on:
+      mongo:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: mongodb://mongo:27017/otserver?replicaSet=rs0
+    volumes:
+      - import-files:/app/import-files:ro
+
+  maintenance-worker:
+    build: ./
+    command: ['node_modules/.bin/tsx', 'src/worker.ts', 'maintenance']
     depends_on:
       mongo:
         condition: service_healthy
@@ -41,4 +65,5 @@ services:
 
 volumes:
   data:
+  import-files:
   node_modules:

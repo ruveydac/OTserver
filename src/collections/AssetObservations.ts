@@ -56,7 +56,10 @@ export const AssetObservations: CollectionConfig = {
     { name: 'raw', type: 'json' },
     { name: 'warnings', type: 'json' },
   ],
-  indexes: [{ fields: ['asset', 'observedAt'] }],
+  indexes: [
+    { fields: ['asset', 'observedAt'] },
+    { fields: ['site', 'source', 'asset', 'observedAt'] },
+  ],
   lockDocuments: false,
   timestamps: true,
 }

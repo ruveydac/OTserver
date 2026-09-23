@@ -3,3 +3,12 @@ allowBuilds:
   sharp: true
   unrs-resolver: true
   workerd: true
+overrides:
+  'postcss@<8.5.23': '>=8.5.23'
+  'dompurify@<3.4.13': '>=3.4.13'
+  'sharp@<0.35.4': '>=0.35.4'
+  'fast-uri@>=3.0.0 <3.1.6': '>=3.1.6'
+  'next@>=16.0.0 <16.3.3': '>=16.3.3'
+  'vitest@>=2.1.0 <4.1.11': '>=4.1.11'
+  '@vitest/mocker@>=2.1.0 <4.1.11': '>=4.1.11'
+  'js-yaml@>=4.0.0 <4.3.2': '>=4.3.2'

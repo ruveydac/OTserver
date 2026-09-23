@@ -7,7 +7,7 @@ import type {
   ImportedTopologyLink,
   ImportResult,
 } from './types'
-import { normalizeMAC } from '../collections/Assets'
+import { normalizeMAC } from '../domain/network'
 import { endpointEvidence, expandPhysicalEvidence, serviceEvidence } from '../identity/evidence'
 
 const macPattern = /^(?:[0-9A-F]{2}:){5}[0-9A-F]{2}$/

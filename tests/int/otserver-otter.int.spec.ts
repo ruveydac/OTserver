@@ -645,6 +645,16 @@ describe('OTserver Otter importer', () => {
       })
       userID = user.id
 
+      const visibleUser = await handleEndpoints({
+        config,
+        path: `/api/users/${user.id}`,
+        request: new Request(`http://localhost/api/users/${user.id}`, {
+          headers: { Authorization: `users API-Key ${apiKey}` },
+        }),
+      })
+      expect(visibleUser.status).toBe(200)
+      expect(JSON.stringify(await visibleUser.json())).not.toContain(apiKey)
+
       const response = await upload(writableSite.id)
       expect(response.status).toBe(201)
       const result = (await response.json()) as {

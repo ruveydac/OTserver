@@ -11,18 +11,13 @@ import {
 import { idOf, requireTransaction } from './access'
 import { record } from './keys'
 import { mergeAssetData, type DataQuality } from '../importers/assetQuality'
+import { withRequestContext } from '../integrations/payload/context'
 
 export const inIdentityContext = async <T>(
   req: PayloadRequest,
   work: () => Promise<T>,
 ): Promise<T> => {
-  const previous = req.context.identityAction
-  req.context.identityAction = true
-  try {
-    return await work()
-  } finally {
-    req.context.identityAction = previous
-  }
+  return withRequestContext(req, { identityAction: true }, work)
 }
 
 /** Serialize overlapping graph/identifier changes under MongoDB snapshot isolation. */

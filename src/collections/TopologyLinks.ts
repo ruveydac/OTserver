@@ -39,7 +39,11 @@ export const TopologyLinks: CollectionConfig = {
     { name: 'remote', type: 'json', required: true },
     { name: 'raw', type: 'json' },
   ],
-  indexes: [{ fields: ['localAsset', 'observedAt'] }, { fields: ['remoteAsset', 'observedAt'] }],
+  indexes: [
+    { fields: ['localAsset', 'observedAt'] },
+    { fields: ['remoteAsset', 'observedAt'] },
+    { fields: ['site', 'localAsset', 'remoteAsset', 'observedAt'] },
+  ],
   lockDocuments: false,
   timestamps: true,
 }

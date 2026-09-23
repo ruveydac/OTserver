@@ -16,59 +16,100 @@ const csvCell = (value: unknown): string => {
 
 export const exportAssetsCSV: PayloadHandler = async (req) => {
   const { where } = parseParams(req.query)
+  const cutoff = new Date().toISOString()
 
-  // The local API defaults to overrideAccess; opt into the collection read
-  // access that limits results to readable sites. The applyAssetSearch hook
-  // applies req.query.search.
-  // ponytail: loads every match into memory; stream pages to disk if inventories outgrow it.
-  const docs: Record<string, unknown>[] = []
-  let page = 1
-  for (;;) {
-    const result = await req.payload.find({
-      collection: 'assets',
-      depth: 0,
-      limit: 1000,
-      overrideAccess: false,
-      page,
-      req,
-      where,
-    })
-    const endpoints = await req.payload.find({
-      collection: 'network-endpoints',
-      depth: 0,
-      pagination: false,
-      where: {
-        and: [{ asset: { in: result.docs.map(({ id }) => id) } }, { endedAt: { exists: false } }],
+  const rows = async function* (withEndpoints: boolean) {
+    let after: string | undefined
+    for (;;) {
+      const assets = await req.payload.find({
+        collection: 'assets',
+        depth: 0,
+        limit: 100,
+        pagination: false,
+        sort: 'id',
+        overrideAccess: false,
+        req,
+        where: {
+          and: [
+            where || {},
+            { createdAt: { less_than_equal: cutoff } },
+            ...(after ? [{ id: { greater_than: after } }] : []),
+          ],
+        },
+      })
+
+      for (const asset of assets.docs) {
+        const endpoints = []
+        if (withEndpoints) {
+          let endpointAfter: string | undefined
+          for (;;) {
+            const page = await req.payload.find({
+              collection: 'network-endpoints',
+              depth: 0,
+              limit: 100,
+              pagination: false,
+              sort: 'id',
+              overrideAccess: false,
+              req,
+              where: {
+                and: [
+                  { asset: { equals: asset.id } },
+                  { endedAt: { exists: false } },
+                  ...(endpointAfter ? [{ id: { greater_than: endpointAfter } }] : []),
+                ],
+              },
+            })
+            endpoints.push(...page.docs)
+            if (page.docs.length < 100) break
+            endpointAfter = page.docs.at(-1)!.id
+          }
+        }
+        yield { ...asset, endpoints } as Record<string, unknown>
+      }
+
+      if (assets.docs.length < 100) break
+      after = assets.docs.at(-1)!.id
+    }
+  }
+
+  // The first pass retains only column names. The second emits one row per stream pull.
+  const columns = new Set<string>()
+  for await (const doc of rows(false)) for (const key of Object.keys(doc)) columns.add(key)
+  if (!columns.size) columns.add('id')
+  const keys = [...columns]
+  const encoder = new TextEncoder()
+  const iterator = rows(true)
+  let header = true
+
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        try {
+          if (header) {
+            header = false
+            controller.enqueue(encoder.encode(`\uFEFF${keys.map(csvCell).join(',')}\r\n`))
+            return
+          }
+          const row = await iterator.next()
+          if (row.done) controller.close()
+          else
+            controller.enqueue(
+              encoder.encode(`${keys.map((column) => csvCell(row.value[column])).join(',')}\r\n`),
+            )
+        } catch (error) {
+          controller.error(error)
+        }
       },
-      overrideAccess: false,
-      req,
-    })
-    docs.push(
-      ...result.docs.map((asset) => ({
-        ...asset,
-        endpoints: endpoints.docs.filter(
-          (endpoint) =>
-            (typeof endpoint.asset === 'object' ? endpoint.asset?.id : endpoint.asset) === asset.id,
-        ),
-      })),
-    )
-    if (!result.hasNextPage) break
-    page += 1
-  }
-
-  const columns: string[] = []
-  for (const doc of docs) {
-    for (const key of Object.keys(doc)) if (!columns.includes(key)) columns.push(key)
-  }
-  if (!columns.length) columns.push('id')
-
-  const rows = [columns.map(csvCell).join(',')]
-  for (const doc of docs) rows.push(columns.map((column) => csvCell(doc[column])).join(','))
-
-  return new Response(`\uFEFF${rows.join('\r\n')}\r\n`, {
-    headers: {
-      'Content-Disposition': `attachment; filename="assets-${new Date().toISOString().slice(0, 10)}.csv"`,
-      'Content-Type': 'text/csv; charset=utf-8',
+      async cancel() {
+        await iterator.return()
+      },
+    }),
+    {
+      headers: {
+        'Cache-Control': 'no-store',
+        'Content-Disposition': `attachment; filename="assets-${cutoff.slice(0, 10)}.csv"`,
+        'Content-Type': 'text/csv; charset=utf-8',
+      },
     },
-  })
+  )
 }

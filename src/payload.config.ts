@@ -15,7 +15,10 @@ import { Users } from './collections/Users'
 import { TopologyLinks } from './collections/TopologyLinks'
 import { Vulnerabilities, VulnerabilityFeeds } from './collections/Vulnerabilities'
 import { MAX_IMPORT_FILE_SIZE } from './importers/proneta'
-import { initializeVulnerabilityFeeds } from './vulnerabilities/feeds'
+import { jobs } from './jobs/config'
+import { WorkerLeases, WorkerHeartbeats } from './collections/WorkerState'
+import { readiness, workerDiagnostics } from './jobs/diagnostics'
+import { migrations } from './migrations'
 import {
   NetworkEndpoints,
   ServiceBindings,
@@ -26,33 +29,17 @@ import {
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 
-const TRASH_RETENTION_DAYS = 90
-const CLEANUP_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000
-
-const cleanupTrashedAssets = async (payload: Payload) => {
-  const cutoff = new Date(Date.now() - TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString()
-  const result = await payload.delete({
-    collection: 'assets',
-    overrideAccess: true,
-    trash: true,
-    where: { deletedAt: { less_than_equal: cutoff } },
-  })
-  if ('docs' in result && result.docs.length) {
-    payload.logger.info(
-      `Permanently deleted ${result.docs.length} trashed asset(s) older than ${TRASH_RETENTION_DAYS} days.`,
-    )
-  }
-}
-
 const initializeApplication = async (payload: Payload) => {
   await initializeAssetClasses(payload)
   await initializeAuthorization(payload)
-  await cleanupTrashedAssets(payload)
-  setInterval(() => void cleanupTrashedAssets(payload), CLEANUP_INTERVAL_MS)
-  await initializeVulnerabilityFeeds(payload)
 }
 
 export default buildConfig({
+  jobs,
+  endpoints: [
+    { path: '/health/ready', method: 'get', handler: readiness },
+    { path: '/operations', method: 'get', handler: workerDiagnostics },
+  ],
   admin: {
     components: {
       afterNavLinks: ['@/components/TopologyNavLink'],
@@ -99,15 +86,20 @@ export default buildConfig({
     Vulnerabilities,
     VulnerabilityFeeds,
     AuditLogs,
+    WorkerLeases,
+    WorkerHeartbeats,
   ].map(withAudit),
   db: mongooseAdapter({
     url: process.env.DATABASE_URL,
+    migrationDir: path.resolve(dirname, 'migrations'),
+    prodMigrations: migrations,
     // Identity uniqueness must exist before the first transaction or import can run.
     ensureIndexes: true,
   }),
   secret: process.env.OTSERVER_SECRET,
   onInit: initializeApplication,
   upload: {
+    requestSizeLimit: 52 * 1024 * 1024,
     abortOnLimit: true,
     limits: { fileSize: Math.max(MAX_IMPORT_FILE_SIZE, 50 * 1024 * 1024) },
     preserveExtension: true,

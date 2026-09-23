@@ -13,8 +13,8 @@ rule, command, contract, or architectural boundary.
 
 ## Project Summary
 
-OTserver is an OT asset-management application built with Payload CMS 3, Next.js 16, React 19, and
-MongoDB. It manages assets, hierarchical sites, scoped user roles, imports, observations, topology,
+OTserver is an OT asset-management application built with Payload CMS 3.90.1, Next.js 16.3.4,
+React 19.2.6, Node 22, pnpm 10, and MongoDB 8. It manages assets, hierarchical sites, scoped user roles, imports, observations, topology,
 custom asset fields, and an immutable audit trail. Its product domain is `otserver.org`.
 
 OTserver integrates with OTserver Otter, a separate AGPL Rust discovery tool that exports
@@ -32,6 +32,8 @@ Main locations:
 - `src/vulnerabilities/`: CISA/NVD/CSAF/ICS-advisory feed synchronization, CPE parsing, and passive
   asset matching.
 - `src/components/`: custom Payload admin views and fields.
+- `src/domain/`, `src/application/`, `src/integrations/`: pure rules, use cases, and Payload/MongoDB boundaries.
+- `src/jobs/`, `src/worker.ts`: fenced import and maintenance queues using Payload jobs.
 - `otserver-otter/contracts/otserver-scan-v2.schema.json`: pinned canonical Otter wire contract.
 - `tests/int/`: application and importer integration tests.
 
@@ -169,6 +171,12 @@ inventory. Exact file/site/source/override replays do not duplicate evidence. In
 chunking when larger scans justify it. v2 lacks adequate negative coverage for automatic offline
 inference; do not interpret a missing/partial observation as proof that a device is offline.
 
+Queued imports retain the same 2000-record atomic limit and call the shared `processImport` service.
+Workers must reload the executing user, recheck current site permissions, verify upload digests, and
+run under the database fence. Never put credentials or serialized requests in job inputs. Start
+workers with `pnpm worker:imports` and `pnpm worker:maintenance`; enable queued uploads only with
+`OTSERVER_QUEUED_IMPORTS=on` after both workers are healthy.
+
 ## Search
 
 Asset search accepts the supported Lucene subset in `src/search/assetLucene.ts`. The graphical filter
@@ -223,6 +231,10 @@ pnpm lint
 pnpm build
 git diff --check
 ```
+
+Run `pnpm check:generated` for generated-file drift. Production upgrades drain workers, back up the
+database and uploads, and apply versioned migrations before workers restart; see `docs/operations.md`.
+The full `pnpm benchmark:capacity` dataset is release-only and must use a disposable database.
 
 `pnpm test:coverage` enforces at least 90% statements, branches, functions, and lines for the
 application.

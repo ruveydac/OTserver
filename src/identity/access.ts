@@ -1,3 +1,5 @@
+import { requireTransaction } from '../integrations/payload/transactions'
+export { requireTransaction } from '../integrations/payload/transactions'
 import { APIError, type CollectionBeforeChangeHook, type PayloadRequest } from 'payload'
 import { getAuthorization, relationshipID } from '../access/authorization'
 
@@ -15,14 +17,6 @@ export const requireWritableAsset = async (id: string, req: PayloadRequest) => {
   if (!authorization.isAdmin && !authorization.writableSiteIDs.includes(idOf(asset.site)))
     throw new APIError('Write access to every affected asset is required.', 403)
   return asset
-}
-
-export const requireTransaction = async (req: PayloadRequest) => {
-  if (!(await req.transactionID))
-    throw new APIError(
-      'Identity writes require MongoDB replica-set transactions. See docs/device-identity.md.',
-      503,
-    )
 }
 
 /** User-created relationships must never smuggle an asset from another permission scope. */

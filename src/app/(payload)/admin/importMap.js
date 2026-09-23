@@ -6,6 +6,7 @@ import { default as default_8c78f84184d3f470067b66c225a03900 } from '@/component
 import { default as default_9457ad88e2d5b6ca2f12d87d9c9f8443 } from '@/components/AssetView'
 import { DefaultEditView as DefaultEditView_3817bf644402e67bfe6577f60ef982de } from '@payloadcms/ui'
 import { default as default_d749ea13566f53f6012b380234b84c90 } from '@/components/AssetVulnerabilitiesView'
+import { default as default_8712540e86c8ec1b8842171d5455844e } from '@/components/ImportStatus'
 import { default as default_269ec8e6f70d6b068e7aa5ffa27b8110 } from '@/components/ImportInstructions'
 import { default as default_db9ac62598c46d0f1db201f6af05442e } from '@/components/LogoutButton'
 import { Icon as Icon_ea112afe978e228c434ec2fb66c71b02 } from '@/components/Brand'
@@ -25,6 +26,7 @@ export const importMap = {
   '@/components/AssetView#default': default_9457ad88e2d5b6ca2f12d87d9c9f8443,
   '@payloadcms/ui#DefaultEditView': DefaultEditView_3817bf644402e67bfe6577f60ef982de,
   '@/components/AssetVulnerabilitiesView#default': default_d749ea13566f53f6012b380234b84c90,
+  '@/components/ImportStatus#default': default_8712540e86c8ec1b8842171d5455844e,
   '@/components/ImportInstructions#default': default_269ec8e6f70d6b068e7aa5ffa27b8110,
   '@/components/LogoutButton#default': default_db9ac62598c46d0f1db201f6af05442e,
   '@/components/Brand#Icon': Icon_ea112afe978e228c434ec2fb66c71b02,

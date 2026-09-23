@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import type { DocumentViewClientProps, DocumentViewServerProps } from 'payload'
+import type { DocumentViewServerProps } from 'payload'
 import type { ReactNode } from 'react'
 
 import {
@@ -12,6 +12,7 @@ import type { Asset, AuditLog } from '@/payload-types'
 import { bySeverity, findAssemblyVulnerabilities } from '@/vulnerabilities/match'
 import DeviceIdentity from '@/components/DeviceIdentity'
 import { assetHistoryScope } from '@/identity/relationships'
+import { documentClientProps } from '@/integrations/payload/admin'
 
 import './index.scss'
 
@@ -110,29 +111,18 @@ const Section = ({
 const AssetView = async (props: DocumentViewServerProps) => {
   if (props.routeSegments.at(-1) === 'create') {
     const { DefaultEditView } = await import('@payloadcms/ui')
-    const clientProps: DocumentViewClientProps = {
-      BeforeDocumentControls: props.BeforeDocumentControls,
-      Description: props.Description,
-      documentSubViewType: props.documentSubViewType,
-      EditMenuItems: props.EditMenuItems,
-      formState: props.formState,
-      LivePreview: props.LivePreview,
-      PreviewButton: props.PreviewButton,
-      PublishButton: props.PublishButton,
-      SaveButton: props.SaveButton,
-      SaveDraftButton: props.SaveDraftButton,
-      Status: props.Status,
-      UnpublishButton: props.UnpublishButton,
-      Upload: props.Upload,
-      UploadControls: props.UploadControls,
-      viewType: props.viewType,
-    }
-    return <DefaultEditView {...clientProps} />
+    return <DefaultEditView {...documentClientProps(props)} />
   }
 
   const asset = props.doc as Asset
   const adminRoute = props.payload.config.routes.admin
   const assetURL = `${adminRoute}/collections/assets/${asset.id}`
+  const historyPageParam = props.searchParams?.historyPage
+  const requestedHistoryPage = Number(
+    Array.isArray(historyPageParam) ? historyPageParam[0] : historyPageParam,
+  )
+  const historyPage =
+    Number.isInteger(requestedHistoryPage) && requestedHistoryPage > 0 ? requestedHistoryPage : 1
   const site = typeof asset.site === 'object' ? asset.site : undefined
   const assetClass = typeof asset.assetClass === 'object' ? asset.assetClass : undefined
   const historyScope = asset.uuid
@@ -160,8 +150,9 @@ const AssetView = async (props: DocumentViewServerProps) => {
       props.payload.find({
         collection: 'audit-logs',
         depth: 0,
+        limit: 50,
         overrideAccess: false,
-        pagination: false,
+        page: historyPage,
         sort: '-createdAt',
         user: props.user,
         where: historyScope.assets,
@@ -419,6 +410,21 @@ const AssetView = async (props: DocumentViewServerProps) => {
           title="Change history"
           wide
         />
+        {auditLogs.totalPages > 1 ? (
+          <nav aria-label="Change history pages" className="asset-view__pagination">
+            {auditLogs.hasPrevPage ? (
+              <Link href={`${assetURL}?historyPage=${historyPage - 1}`}>← Newer</Link>
+            ) : (
+              <span />
+            )}
+            <span>
+              History page {auditLogs.page} of {auditLogs.totalPages}
+            </span>
+            {auditLogs.hasNextPage ? (
+              <Link href={`${assetURL}?historyPage=${historyPage + 1}`}>Older →</Link>
+            ) : null}
+          </nav>
+        ) : null}
       </div>
     </main>
   )

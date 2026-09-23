@@ -1,5 +1,5 @@
 import { isIP } from 'node:net'
-import { normalizeMAC, validateMACAddress } from '../collections/Assets'
+import { normalizeMAC, validateMACAddress } from '../domain/network'
 import type { ImportedAsset, ImportedObservation } from '../importers/types'
 import { hardwareKey, normalizeIdentity, record, text, type HardwareIdentity } from './keys'
 

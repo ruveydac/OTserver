@@ -76,8 +76,34 @@ services:
     environment:
       DATABASE_URL: mongodb://mongo:27017/otserver?replicaSet=rs0
       OTSERVER_SECRET: ${OTSERVER_SECRET:?Set OTSERVER_SECRET in .env}
+      OTSERVER_QUEUED_IMPORTS: ${OTSERVER_QUEUED_IMPORTS:-off}
     volumes:
       - import-files:/app/import-files
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  import-worker:
+    image: ghcr.io/ruveydac/otserver:latest
+    restart: unless-stopped
+    command: ['node_modules/.bin/tsx', 'src/worker.ts', 'imports']
+    environment:
+      DATABASE_URL: mongodb://mongo:27017/otserver?replicaSet=rs0
+      OTSERVER_SECRET: ${OTSERVER_SECRET:?Set OTSERVER_SECRET in .env}
+    volumes:
+      - import-files:/app/import-files
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  maintenance-worker:
+    image: ghcr.io/ruveydac/otserver:latest
+    restart: unless-stopped
+    command: ['node_modules/.bin/tsx', 'src/worker.ts', 'maintenance']
+    environment:
+      DATABASE_URL: mongodb://mongo:27017/otserver?replicaSet=rs0
+      OTSERVER_SECRET: ${OTSERVER_SECRET:?Set OTSERVER_SECRET in .env}
+      OTSERVER_VULNERABILITY_FEEDS: ${OTSERVER_VULNERABILITY_FEEDS:-on}
     depends_on:
       mongo:
         condition: service_healthy
@@ -122,6 +148,10 @@ docker compose up -d
 Open <http://localhost:3000/admin> and create the first administrator account.
 The named volumes persist database data and uploaded import files.
 
+Keep `OTSERVER_QUEUED_IMPORTS=off` until both workers are running and their heartbeats appear in the
+administrator operations endpoint. See [deployment and recovery](docs/operations.md), the
+[application boundaries](docs/architecture.md), and the [capacity benchmark](docs/capacity-benchmark.md).
+
 For an upgrade from MAC-only inventory, follow the [identity migration](docs/device-identity.md#upgrade-from-mac-only-inventory)
 before starting this version. It requires a replica set and removal of the legacy unique MAC index.
 For subsequent upgrades, back up those volumes, update the image tag if pinned, then run
@@ -129,7 +159,7 @@ For subsequent upgrades, back up those volumes, update the image tag if pinned, 
 
 ### Local development
 
-Requirements: Node.js 20.9+, pnpm 9–11, and a MongoDB replica set.
+Requirements: Node.js 22, pnpm 10, and a MongoDB 8 replica set.
 
 ```bash
 cp .env.example .env

@@ -84,7 +84,10 @@ export interface Config {
     vulnerabilities: Vulnerability;
     'vulnerability-feeds': VulnerabilityFeed;
     'audit-logs': AuditLog;
+    'worker-leases': WorkerLease;
+    'worker-heartbeats': WorkerHeartbeat;
     'payload-kv': PayloadKv;
+    'payload-jobs': PayloadJob;
     'payload-locked-documents': PayloadLockedDocument;
     'payload-preferences': PayloadPreference;
     'payload-migrations': PayloadMigration;
@@ -108,7 +111,10 @@ export interface Config {
     vulnerabilities: VulnerabilitiesSelect<false> | VulnerabilitiesSelect<true>;
     'vulnerability-feeds': VulnerabilityFeedsSelect<false> | VulnerabilityFeedsSelect<true>;
     'audit-logs': AuditLogsSelect<false> | AuditLogsSelect<true>;
+    'worker-leases': WorkerLeasesSelect<false> | WorkerLeasesSelect<true>;
+    'worker-heartbeats': WorkerHeartbeatsSelect<false> | WorkerHeartbeatsSelect<true>;
     'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
+    'payload-jobs': PayloadJobsSelect<false> | PayloadJobsSelect<true>;
     'payload-locked-documents': PayloadLockedDocumentsSelect<false> | PayloadLockedDocumentsSelect<true>;
     'payload-preferences': PayloadPreferencesSelect<false> | PayloadPreferencesSelect<true>;
     'payload-migrations': PayloadMigrationsSelect<false> | PayloadMigrationsSelect<true>;
@@ -125,7 +131,14 @@ export interface Config {
   };
   user: User;
   jobs: {
-    tasks: unknown;
+    tasks: {
+      'import-v1': TaskImportV1;
+      'maintenance-v1': TaskMaintenanceV1;
+      inline: {
+        input: unknown;
+        output: unknown;
+      };
+    };
     workflows: unknown;
   };
 }
@@ -449,6 +462,28 @@ export interface IdentityCase {
  */
 export interface AssetImport {
   id: string;
+  /**
+   * Queued imports require deployed workers and OTSERVER_QUEUED_IMPORTS=on.
+   */
+  executionMode?: ('sync' | 'queued') | null;
+  jobID?: string | null;
+  submittedBy?: string | null;
+  executorID?: string | null;
+  retriedBy?: string | null;
+  fileDigest?: string | null;
+  processingInput?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  queuedAt?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  attemptCount?: number | null;
   appliedKey?: string | null;
   duplicateOf?: (string | null) | AssetImport;
   /**
@@ -473,7 +508,7 @@ export interface AssetImport {
     | boolean
     | null;
   sourceVersion: string;
-  status: 'pending' | 'completed' | 'failed';
+  status: 'pending' | 'running' | 'completed' | 'failed';
   createdAssets?: number | null;
   updatedAssets?: number | null;
   skippedAssets?: number | null;
@@ -567,11 +602,13 @@ export interface User {
   enableAPIKey?: boolean | null;
   apiKey?: string | null;
   apiKeyIndex?: string | null;
+  hasAPIKey?: boolean | null;
   email: string;
   resetPasswordToken?: string | null;
   resetPasswordExpiration?: string | null;
   salt?: string | null;
   hash?: string | null;
+  resetPasswordRequestedAt?: string | null;
   loginAttempts?: number | null;
   lockUntil?: string | null;
   sessions?:
@@ -811,6 +848,33 @@ export interface AuditLog {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "worker-leases".
+ */
+export interface WorkerLease {
+  id: string;
+  queue: string;
+  owner: string;
+  revision?: number | null;
+  lastSuccessAt?: string | null;
+  lastJobID?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "worker-heartbeats".
+ */
+export interface WorkerHeartbeat {
+  id: string;
+  queue: string;
+  owner: string;
+  heartbeatAt: string;
+  expiresAt: string;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "payload-kv".
  */
 export interface PayloadKv {
@@ -825,6 +889,98 @@ export interface PayloadKv {
     | number
     | boolean
     | null;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payload-jobs".
+ */
+export interface PayloadJob {
+  id: string;
+  /**
+   * Input data provided to the job
+   */
+  input?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  taskStatus?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  completedAt?: string | null;
+  totalTried?: number | null;
+  /**
+   * If hasError is true this job will not be retried
+   */
+  hasError?: boolean | null;
+  /**
+   * If hasError is true, this is the error that caused it
+   */
+  error?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  /**
+   * Task execution log
+   */
+  log?:
+    | {
+        executedAt: string;
+        completedAt: string;
+        taskSlug: 'inline' | 'import-v1' | 'maintenance-v1';
+        taskID: string;
+        input?:
+          | {
+              [k: string]: unknown;
+            }
+          | unknown[]
+          | string
+          | number
+          | boolean
+          | null;
+        output?:
+          | {
+              [k: string]: unknown;
+            }
+          | unknown[]
+          | string
+          | number
+          | boolean
+          | null;
+        state: 'failed' | 'succeeded';
+        error?:
+          | {
+              [k: string]: unknown;
+            }
+          | unknown[]
+          | string
+          | number
+          | boolean
+          | null;
+        id?: string | null;
+      }[]
+    | null;
+  taskSlug?: ('inline' | 'import-v1' | 'maintenance-v1') | null;
+  queue?: string | null;
+  waitUntil?: string | null;
+  processing?: boolean | null;
+  updatedAt: string;
+  createdAt: string;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -880,6 +1036,14 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'users';
         value: string | User;
+      } | null)
+    | ({
+        relationTo: 'worker-leases';
+        value: string | WorkerLease;
+      } | null)
+    | ({
+        relationTo: 'worker-heartbeats';
+        value: string | WorkerHeartbeat;
       } | null);
   globalSlug?: string | null;
   user: {
@@ -1123,6 +1287,17 @@ export interface IdentityCasesSelect<T extends boolean = true> {
  * via the `definition` "asset-imports_select".
  */
 export interface AssetImportsSelect<T extends boolean = true> {
+  executionMode?: T;
+  jobID?: T;
+  submittedBy?: T;
+  executorID?: T;
+  retriedBy?: T;
+  fileDigest?: T;
+  processingInput?: T;
+  queuedAt?: T;
+  startedAt?: T;
+  completedAt?: T;
+  attemptCount?: T;
   appliedKey?: T;
   duplicateOf?: T;
   site?: T;
@@ -1197,11 +1372,13 @@ export interface UsersSelect<T extends boolean = true> {
   enableAPIKey?: T;
   apiKey?: T;
   apiKeyIndex?: T;
+  hasAPIKey?: T;
   email?: T;
   resetPasswordToken?: T;
   resetPasswordExpiration?: T;
   salt?: T;
   hash?: T;
+  resetPasswordRequestedAt?: T;
   loginAttempts?: T;
   lockUntil?: T;
   sessions?:
@@ -1324,11 +1501,67 @@ export interface AuditLogsSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "worker-leases_select".
+ */
+export interface WorkerLeasesSelect<T extends boolean = true> {
+  queue?: T;
+  owner?: T;
+  revision?: T;
+  lastSuccessAt?: T;
+  lastJobID?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "worker-heartbeats_select".
+ */
+export interface WorkerHeartbeatsSelect<T extends boolean = true> {
+  queue?: T;
+  owner?: T;
+  heartbeatAt?: T;
+  expiresAt?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "payload-kv_select".
  */
 export interface PayloadKvSelect<T extends boolean = true> {
   key?: T;
   data?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payload-jobs_select".
+ */
+export interface PayloadJobsSelect<T extends boolean = true> {
+  input?: T;
+  taskStatus?: T;
+  completedAt?: T;
+  totalTried?: T;
+  hasError?: T;
+  error?: T;
+  log?:
+    | T
+    | {
+        executedAt?: T;
+        completedAt?: T;
+        taskSlug?: T;
+        taskID?: T;
+        input?: T;
+        output?: T;
+        state?: T;
+        error?: T;
+        id?: T;
+      };
+  taskSlug?: T;
+  queue?: T;
+  waitUntil?: T;
+  processing?: T;
+  updatedAt?: T;
+  createdAt?: T;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -1371,6 +1604,27 @@ export interface CollectionsWidget {
     [k: string]: unknown;
   };
   width: 'full';
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskImport-v1".
+ */
+export interface TaskImportV1 {
+  input: {
+    version: number;
+    importID: string;
+  };
+  output?: unknown;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskMaintenance-v1".
+ */
+export interface TaskMaintenanceV1 {
+  input: {
+    version: number;
+  };
+  output?: unknown;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema

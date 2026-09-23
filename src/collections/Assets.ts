@@ -1,4 +1,5 @@
-import { isIP } from 'node:net'
+import { normalizeMAC, validateIPAddress, validateMACAddress } from '../domain/network'
+export { normalizeMAC, validateIPAddress, validateMACAddress } from '../domain/network'
 
 import type { CollectionBeforeChangeHook, CollectionConfig } from 'payload'
 
@@ -19,29 +20,8 @@ import { randomUUID } from 'node:crypto'
 import { protectAssetIdentity, syncManualEndpoint } from '../identity/relationships'
 import { identityAction, migrateIdentity } from '../identity/actions'
 
-const macAddressPattern = /^(?:[0-9A-F]{2}:){5}[0-9A-F]{2}$/
-
-export const normalizeMAC = (value: string): string =>
-  value.trim().replaceAll('-', ':').toUpperCase()
-
-export const validateIPAddress = (value: null | string | undefined): string | true =>
-  !value || isIP(value.trim()) !== 0 || 'Enter a valid IPv4 or IPv6 address.'
-
-export const validateMACAddress = (value: null | string | undefined): string | true =>
-  !value || macAddressPattern.test(normalizeMAC(value)) || 'Enter a valid MAC address.'
-
-export const userSuppliedAssetFields = [
-  {
-    label: 'Asset owner',
-    name: 'assetOwner',
-    placeholder: 'Operations team or responsible person',
-  },
-  {
-    label: 'Physical location',
-    name: 'location',
-    placeholder: 'Building / room / cabinet',
-  },
-] as const
+import { userSuppliedAssetFields } from '../domain/assetFields'
+export { userSuppliedAssetFields } from '../domain/assetFields'
 
 const recordHumanChanges: CollectionBeforeChangeHook = ({ context, data, originalDoc, req }) => {
   if (

@@ -1,3 +1,5 @@
+import { primeTransaction } from '../integrations/payload/transactions'
+import { guardWorkerWrite } from '../integrations/payload/workerContext'
 import { isDeepStrictEqual } from 'node:util'
 
 import type {
@@ -147,17 +149,8 @@ const afterLogout: CollectionAfterLogoutHook = async ({ collection, req }) => {
 // the server before those reads can race its first (startTransaction) command.
 const startTransactionRead: CollectionBeforeOperationHook = async ({ args, operation, req }) => {
   if (!['create', 'update', 'delete'].includes(operation)) return args
-  const transaction = await req.transactionID
-  if (!transaction || req.context.startedTransaction === transaction) return args
-  req.context.startedTransaction = transaction
-  await req.payload.find({
-    collection: 'audit-logs',
-    limit: 1,
-    depth: 0,
-    select: { action: true },
-    overrideAccess: true,
-    req,
-  })
+  await primeTransaction(req)
+  await guardWorkerWrite(req)
   return args
 }
 
@@ -238,7 +231,11 @@ export const AuditLogs: CollectionConfig = {
     { name: 'requestPath', type: 'text', label: 'Request path' },
     { name: 'changes', type: 'json' },
   ],
-  indexes: [{ fields: ['targetCollection', 'documentID'] }, { fields: ['asset', 'action'] }],
+  indexes: [
+    { fields: ['targetCollection', 'documentID', 'createdAt'] },
+    { fields: ['asset', 'createdAt'] },
+    { fields: ['site', 'createdAt'] },
+  ],
   lockDocuments: false,
   timestamps: true,
 }

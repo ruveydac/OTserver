@@ -4,10 +4,12 @@ import { useRouter } from 'next/navigation'
 
 export const SiteSelector = ({
   adminRoute,
+  filter,
   selectedSiteId,
   sites,
 }: {
   adminRoute: string
+  filter?: string
   selectedSiteId?: string
   sites: { id: string; name: string }[]
 }) => {
@@ -21,7 +23,11 @@ export const SiteSelector = ({
         id="topology-site"
         onChange={(event) => {
           const value = event.target.value
-          router.push(value ? `${adminRoute}/topology?site=${value}` : `${adminRoute}/topology`)
+          router.push(
+            value
+              ? `${adminRoute}/topology?site=${value}${filter ? `&filter=${encodeURIComponent(filter)}` : ''}`
+              : `${adminRoute}/topology`,
+          )
         }}
       >
         <option value="">Choose a site…</option>
@@ -31,6 +37,20 @@ export const SiteSelector = ({
           </option>
         ))}
       </select>
+      {selectedSiteId ? (
+        <form action={`${adminRoute}/topology`} method="get">
+          <input name="site" type="hidden" value={selectedSiteId} />
+          <label htmlFor="topology-filter">Asset filter</label>
+          <input
+            defaultValue={filter}
+            id="topology-filter"
+            name="filter"
+            placeholder="Name, IP, or MAC"
+            type="search"
+          />
+          <button type="submit">Apply</button>
+        </form>
+      ) : null}
     </div>
   )
 }

@@ -11,3 +11,5 @@
 !src/**
 !public/
 !public/**
+!scripts/
+!scripts/**

@@ -1,42 +1,15 @@
+import { inTransaction } from '../integrations/payload/transactions'
 import { randomUUID } from 'node:crypto'
 import { APIError, type PayloadHandler, type PayloadRequest } from 'payload'
 import { getAuthorization } from '../access/authorization'
 import { writeAudit } from '../collections/AuditLogs'
-import { idOf, requireTransaction, requireWritableAsset } from './access'
+import { idOf, requireWritableAsset } from './access'
 import { record, text } from './keys'
 import { inIdentityContext, syncManualEndpoint } from './relationships'
 import type { Asset, NetworkEndpoint } from '../payload-types'
 
-export const atomicIdentity = async <T>(
-  req: PayloadRequest,
-  work: () => Promise<T>,
-): Promise<T> => {
-  const existing = await req.transactionID
-  if (!existing) req.transactionID = (await req.payload.db.beginTransaction()) ?? undefined
-  await requireTransaction(req)
-  try {
-    if (!existing) {
-      await req.payload.find({
-        collection: 'audit-logs',
-        limit: 1,
-        depth: 0,
-        select: { action: true },
-        overrideAccess: true,
-        req,
-      })
-      req.context.startedTransaction = await req.transactionID
-    }
-    const result = await inIdentityContext(req, work)
-    if (!existing) await req.payload.db.commitTransaction((await req.transactionID)!)
-    return result
-  } catch (error) {
-    if (!existing && req.transactionID)
-      await req.payload.db.rollbackTransaction((await req.transactionID)!)
-    throw error
-  } finally {
-    if (!existing) delete req.transactionID
-  }
-}
+export const atomicIdentity = <T>(req: PayloadRequest, work: () => Promise<T>): Promise<T> =>
+  inTransaction(req, () => inIdentityContext(req, work))
 
 const activeEndpoints = (asset: string, req: PayloadRequest) =>
   req.payload.find({

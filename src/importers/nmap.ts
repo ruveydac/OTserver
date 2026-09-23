@@ -1,6 +1,6 @@
 import { SaxesParser, type SaxesTagPlain } from 'saxes'
 
-import { normalizeMAC, validateIPAddress, validateMACAddress } from '../collections/Assets'
+import { normalizeMAC, validateIPAddress, validateMACAddress } from '../domain/network'
 import { MAX_IMPORT_FILE_SIZE } from './proneta'
 import type { ImportedAsset, ImportResult } from './types'
 

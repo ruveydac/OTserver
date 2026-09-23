@@ -7,10 +7,9 @@ RUN corepack enable && pnpm install --frozen-lockfile
 FROM node:22-alpine AS builder
 WORKDIR /app
 ENV DATABASE_URL=mongodb://127.0.0.1/otserver
-ENV OTSERVER_SECRET=build-only-placeholder
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN corepack enable && pnpm build
+RUN corepack enable && OTSERVER_SECRET=build-only-placeholder pnpm build
 
 FROM node:22-alpine AS runner
 WORKDIR /app
@@ -22,6 +21,11 @@ RUN addgroup --system --gid 1001 nodejs \
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+# Workers are explicit image entrypoints. They use the same pinned runtime and configuration as web.
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=nextjs:nodejs /app/package.json /app/tsconfig.json ./
+COPY --from=builder --chown=nextjs:nodejs /app/src ./src
+COPY --from=builder --chown=nextjs:nodejs /app/scripts ./scripts
 USER nextjs
 EXPOSE 3000
 CMD ["node", "server.js"]
