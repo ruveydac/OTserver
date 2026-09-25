@@ -173,9 +173,10 @@ inference; do not interpret a missing/partial observation as proof that a device
 
 Queued imports retain the same 2000-record atomic limit and call the shared `processImport` service.
 Workers must reload the executing user, recheck current site permissions, verify upload digests, and
-run under the database fence. Never put credentials or serialized requests in job inputs. Start
-workers with `pnpm worker:imports` and `pnpm worker:maintenance`; enable queued uploads only with
-`OTSERVER_QUEUED_IMPORTS=on` after both workers are healthy.
+run under the database fence. Never put credentials or serialized requests in job inputs. The web
+process owns both queues by default. Set `OTSERVER_WORKER_MODE=external` only when dedicated workers
+started with `pnpm worker:imports` and `pnpm worker:maintenance` are healthy. Queued uploads also
+require `OTSERVER_QUEUED_IMPORTS=on`.
 
 ## Search
 
@@ -195,8 +196,9 @@ nested queries must continue to fail with a clear HTTP 400 error.
 
 ## Local Setup and Checks
 
-Requirements: Node.js 20.9+, pnpm 9-11, and a MongoDB replica set. Copy `.env.example` to `.env` and use
-a long random `OTSERVER_SECRET`. `docker compose up` can provide OTserver and MongoDB.
+Requirements: Node.js 22, pnpm 10, and a MongoDB 8 replica set. Copy `.env.example` to `.env` and use
+a long random `OTSERVER_SECRET`. `docker compose up` provides the standalone OTserver and MongoDB;
+the optional `workers` profile is only for separate high-throughput workers.
 
 Integration tests need a replica set matching `DATABASE_URL`, or the optional `TEST_DATABASE_URL`
 override. Start a throwaway instance
@@ -217,7 +219,8 @@ transaction before Payload 3.87's parallel relationship validation can race its 
 
 Run `pnpm test:container` after changing the Dockerfile or startup/bootstrap behavior. It detects
 Docker or Podman, builds the production image, starts an isolated MongoDB replica set, verifies the
-fresh-database seeds and first-user registration, and removes its containers and network.
+fresh-database seeds, embedded workers, and first-user registration, and removes its containers and
+network.
 
 `vitest.config.mts` sets a 60s per-test timeout because these tests boot Payload against a real
 MongoDB. A cold container makes the first run slower than later ones.

@@ -1,7 +1,7 @@
 import 'dotenv/config'
 import { getPayload } from 'payload'
 import config from './payload.config'
-import { runWorker } from './jobs/worker'
+import { superviseWorker } from './jobs/worker'
 
 const queue = process.argv[2]
 if (queue !== 'imports' && queue !== 'maintenance')
@@ -11,7 +11,7 @@ process.on('SIGTERM', () => controller.abort())
 process.on('SIGINT', () => controller.abort())
 const payload = await getPayload({ config })
 try {
-  await runWorker(payload, queue, controller.signal)
+  await superviseWorker(payload, queue, controller.signal)
 } finally {
   await payload.destroy()
 }

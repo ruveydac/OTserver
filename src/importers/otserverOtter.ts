@@ -29,6 +29,7 @@ const sources: Record<string, DataQuality> = {
   unknown: 'low',
 }
 const allowedFields = new Set([
+  'catalogNumber',
   'description',
   'firmwareVersion',
   'gatewayAddress',
@@ -131,6 +132,19 @@ const safeFields = (value: unknown, identity: string) => {
   return fields
 }
 
+const addTextField = (
+  fields: Record<string, unknown>,
+  mergeFields: Record<string, unknown>,
+  field: string,
+  ...values: unknown[]
+) => {
+  const value = values.find((item) => typeof item === 'string' && item.trim())
+  if (typeof value !== 'string') return
+  if (fields[field] === undefined) fields[field] = value
+  if (typeof mergeFields[field] !== 'string' || !mergeFields[field].trim())
+    mergeFields[field] = value
+}
+
 export const parseOTserverOtter = (input: string): ImportResult => {
   if (Buffer.byteLength(input, 'utf8') > 50 * 1024 * 1024)
     throw new Error('Otter JSON exceeds the 50 MB import limit.')
@@ -180,12 +194,64 @@ export const parseOTserverOtter = (input: string): ImportResult => {
             `devices[${index}].observations[${observationIndex}].observedAt is invalid.`,
           )
         }
-        const fields = safeFields(observation.fields, identity)
-        const ouiVendor = record(observation.raw).ouiVendor
-        if (source === 'arp' && !fields.vendor && typeof ouiVendor === 'string')
-          fields.vendor = ouiVendor
+        const originalFields = record(observation.fields)
+        const fields = { ...originalFields }
+        const mergeFields = safeFields(originalFields, identity)
+        if (fields.ipAddress === undefined && typeof observation.ipAddress === 'string')
+          fields.ipAddress = observation.ipAddress
+        if (fields.macAddress === undefined && typeof observation.macAddress === 'string')
+          fields.macAddress = observation.macAddress
+        if (fields.macAddress === undefined) fields.macAddress = identity
+
+        const raw = record(observation.raw)
+        const serialClaim = record(raw.serialClaim)
+        const primaryEntity =
+          source === 'snmp'
+            ? array(raw.physicalEntities)
+                .map(record)
+                .find((entity) => !entity.parentRef)
+            : undefined
+        const primarySerialClaim = record(primaryEntity?.serialClaim)
+        addTextField(
+          fields,
+          mergeFields,
+          'vendor',
+          serialClaim.issuer,
+          primarySerialClaim.issuer,
+          primaryEntity?.manufacturer,
+        )
+        addTextField(
+          fields,
+          mergeFields,
+          'serialNumber',
+          serialClaim.original,
+          primarySerialClaim.original,
+        )
+        addTextField(fields, mergeFields, 'name', primaryEntity?.name)
+        addTextField(fields, mergeFields, 'description', primaryEntity?.description)
+        addTextField(fields, mergeFields, 'model', primaryEntity?.name)
+        addTextField(
+          fields,
+          mergeFields,
+          'catalogNumber',
+          source === 's7' ? raw.module : undefined,
+          source === 's7' ? raw.basicHardware : undefined,
+          serialClaim.catalogNumber,
+          primaryEntity?.catalogNumber,
+          source === 'snmp' ? raw['1.3.6.1.4.1.4329.6.3.2.1.1.2.0'] : undefined,
+        )
+        addTextField(
+          fields,
+          mergeFields,
+          'hardwareVersion',
+          primaryEntity?.hardwareRevision,
+          source === 'snmp' ? raw['1.3.6.1.4.1.4329.6.3.2.1.1.4.0'] : undefined,
+        )
+        addTextField(fields, mergeFields, 'firmwareVersion', primaryEntity?.firmwareRevision)
+        if (source === 'arp') addTextField(fields, mergeFields, 'vendor', raw.ouiVendor)
         return {
           fields,
+          mergeFields,
           interfaces: array(device.interfaces),
           observedAt: observation.observedAt,
           ports: array(device.ports),
@@ -200,7 +266,7 @@ export const parseOTserverOtter = (input: string): ImportResult => {
     )
     if (!observations.length) throw new Error(`Device ${identity} has no observations.`)
     const preferred = observations.reduce(
-      (result, observation) => ({ ...result, ...observation.fields }),
+      (result, observation) => ({ ...result, ...(observation.mergeFields || observation.fields) }),
       {} as Record<string, unknown>,
     )
     return expandPhysicalEvidence({

@@ -180,7 +180,7 @@ export const AssetImports: CollectionConfig = {
         { label: 'Queued', value: 'queued' },
       ],
       admin: {
-        description: 'Queued imports require deployed workers and OTSERVER_QUEUED_IMPORTS=on.',
+        description: 'Queued imports require OTSERVER_QUEUED_IMPORTS=on and a healthy worker.',
       },
     },
     {

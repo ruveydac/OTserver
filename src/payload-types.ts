@@ -463,7 +463,7 @@ export interface IdentityCase {
 export interface AssetImport {
   id: string;
   /**
-   * Queued imports require deployed workers and OTSERVER_QUEUED_IMPORTS=on.
+   * Queued imports require OTSERVER_QUEUED_IMPORTS=on and a healthy worker.
    */
   executionMode?: ('sync' | 'queued') | null;
   jobID?: string | null;

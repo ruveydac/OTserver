@@ -30,8 +30,6 @@ fi
 PREFIX="otserver-bootstrap-$$"
 APP="$PREFIX-app"
 IMAGE="$PREFIX"
-IMPORT_WORKER="$PREFIX-import-worker"
-MAINTENANCE_WORKER="$PREFIX-maintenance-worker"
 MONGO="$PREFIX-mongo"
 NETWORK="$PREFIX"
 UPLOADS="$PREFIX-import-files"
@@ -42,10 +40,8 @@ cleanup() {
   if [ "$status" -ne 0 ]; then
     "$RUNTIME" logs "$APP" >&2 || true
     "$RUNTIME" logs "$MONGO" >&2 || true
-    "$RUNTIME" logs "$IMPORT_WORKER" >&2 || true
-    "$RUNTIME" logs "$MAINTENANCE_WORKER" >&2 || true
   fi
-  "$RUNTIME" rm --force "$APP" "$IMPORT_WORKER" "$MAINTENANCE_WORKER" "$MONGO" >/dev/null 2>&1 || true
+  "$RUNTIME" rm --force "$APP" "$MONGO" >/dev/null 2>&1 || true
   "$RUNTIME" volume rm "$UPLOADS" >/dev/null 2>&1 || true
   "$RUNTIME" network rm "$NETWORK" >/dev/null 2>&1 || true
   "$RUNTIME" image rm "$IMAGE" >/dev/null 2>&1 || true
@@ -117,19 +113,6 @@ until "$RUNTIME" exec "$APP" node -e \
     exit 1
   fi
   sleep 1
-done
-
-for worker in "$IMPORT_WORKER:imports" "$MAINTENANCE_WORKER:maintenance"; do
-  name=${worker%%:*}
-  queue=${worker##*:}
-  "$RUNTIME" run --detach \
-    --name "$name" \
-    --network "$NETWORK" \
-    --env DATABASE_URL='mongodb://mongo:27017/otserver?replicaSet=rs0' \
-    --env OTSERVER_SECRET='container-bootstrap-test-secret-change-me' \
-    --env OTSERVER_VULNERABILITY_FEEDS=off \
-    --volume "$UPLOADS:/app/import-files:ro" \
-    "$IMAGE" node_modules/.bin/tsx src/worker.ts "$queue" >/dev/null
 done
 
 "$RUNTIME" exec --interactive "$APP" node --input-type=module <<'NODE'
@@ -208,7 +191,7 @@ assert.deepEqual(
   ],
 )
 
-console.log('Fresh database initialized and both production worker entrypoints are healthy.')
+console.log('Fresh database initialized and both standalone worker queues are healthy.')
 NODE
 
 # Rehearse the MongoDB archive portion of disaster recovery against a separate namespace.
