@@ -32,7 +32,7 @@
     "@payloadcms/db-mongodb": "3.90.1",
     "@payloadcms/next": "3.90.1",
     "@payloadcms/ui": "3.90.1",
-    "@xyflow/react": "^12.11.3",
+    "@xyflow/react": "^12.11.6",
     "cross-env": "^7.0.3",
     "graphql": "^16.8.2",
     "lucene-query-parser": "^1.2.0",
