@@ -129,6 +129,7 @@ const exportFile = (localMAC: string, remoteMAC: string) => ({
           source: 'opc-ua',
           observedAt: '2026-08-10T10:00:25Z',
           fields: {
+            catalogNumber: '6ES7 515-2AM02-0AB0',
             macAddress: localMAC,
             name: 'LAB-ASSET-1',
             model: 'OPC UA Lab Device',
@@ -138,10 +139,19 @@ const exportFile = (localMAC: string, remoteMAC: string) => ({
             description: 'Test Device',
             status: 'online',
             protocols: ['opc-ua'],
+            protocolMetadata: { profile: 'DI' },
           },
           raw: {
             endpointUrl: 'opc.tcp://192.0.2.10:4840',
             applicationUri: 'urn:otserver:lab:opcua:server',
+            listeners: [
+              {
+                address: '192.0.2.10',
+                port: 4840,
+                route: ['backplane', 'slot=1'],
+                transport: 'tcp',
+              },
+            ],
             userTokenPolicies: ['anonymous'],
           },
           warnings: [],
@@ -292,6 +302,74 @@ describe('OTserver Otter importer', () => {
     )
   })
 
+  it('imports v0.6 raw inventory details and every observation field', () => {
+    const localMAC = randomMAC()
+    const alternateMAC = randomMAC()
+    const file = mutableExport(localMAC, randomMAC())
+    file.devices = [
+      {
+        interfaces: [],
+        ipAddresses: ['192.0.2.10'],
+        macAddress: localMAC,
+        macAddresses: [localMAC, alternateMAC],
+        observations: [
+          {
+            fields: {
+              customProtocolData: { profile: 'real-world-v0.6' },
+              ipAddress: '192.0.2.10',
+              status: 'online',
+            },
+            observedAt: '2026-08-10T10:00:00Z',
+            raw: {
+              '1.3.6.1.4.1.4329.6.3.2.1.1.2.0': '6GK5 636-2GS00-2AC2',
+              '1.3.6.1.4.1.4329.6.3.2.1.1.4.0': '1',
+              physicalEntities: [
+                {
+                  description: 'Network Element',
+                  firmwareRevision: 'V03.02.00.00_42.01.00',
+                  manufacturer: 'Siemens',
+                  name: 'SCALANCE SC636-2C',
+                  parentRef: null,
+                  serialClaim: { issuer: 'Siemens', original: 'VPR8144075' },
+                },
+              ],
+            },
+            source: 'snmp',
+            warnings: [],
+          },
+        ],
+        ports: [],
+      },
+    ]
+    file.links = []
+
+    const asset = parseOTserverOtter(JSON.stringify(file)).assets[0]
+    expect(asset).toMatchObject({
+      catalogNumber: '6GK5 636-2GS00-2AC2',
+      description: 'Network Element',
+      firmwareVersion: 'V03.02.00.00_42.01.00',
+      hardwareVersion: '1',
+      model: 'SCALANCE SC636-2C',
+      name: 'SCALANCE SC636-2C',
+      serialNumber: 'VPR8144075',
+      vendor: 'Siemens',
+    })
+    expect(asset.endpoints).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ macAddress: localMAC }),
+        expect.objectContaining({ macAddress: alternateMAC }),
+      ]),
+    )
+    expect(asset.observations?.[0]).toMatchObject({
+      fields: { customProtocolData: { profile: 'real-world-v0.6' } },
+      mergeFields: {
+        catalogNumber: '6GK5 636-2GS00-2AC2',
+        hardwareVersion: '1',
+        serialNumber: 'VPR8144075',
+      },
+    })
+  })
+
   it('validates identities, observations, links, and untrusted field types', () => {
     expect(() => parseOTserverOtter('{')).toThrow('not valid JSON')
     expect(() =>
@@ -317,7 +395,7 @@ describe('OTserver Otter importer', () => {
               osAccuracy: 101,
               protocols: ['s7', 's7', 'invalid', 1],
               status: 'broken',
-              unknown: 'discarded',
+              unknown: 'preserved',
             },
             observedAt: '2026-08-10T10:00:00Z',
             source: 'future-protocol',
@@ -336,8 +414,20 @@ describe('OTserver Otter importer', () => {
       name: localMAC,
       observations: [
         {
-          fields: { macAddress: localMAC, protocols: ['s7'] },
+          fields: {
+            gatewayAddress: 'invalid',
+            ipAddress: '999.1.1.1',
+            lastSeen: 'not-a-date',
+            macAddress: remoteMAC,
+            name: 42,
+            networkMask: false,
+            osAccuracy: 101,
+            protocols: ['s7', 's7', 'invalid', 1],
+            status: 'broken',
+            unknown: 'preserved',
+          },
           interfaces: [],
+          mergeFields: { macAddress: localMAC, protocols: ['s7'] },
           ports: [],
           quality: 'low',
           source: 'unknown',
@@ -436,6 +526,7 @@ describe('OTserver Otter importer', () => {
       const localAsset = assets.docs.find(({ macAddress }) => macAddress === localMAC)
       expect(localAsset).toMatchObject({
         assetClass: plcClass.id,
+        catalogNumber: '6ES7 515-2AM02-0AB0',
         description: 'Test Device',
         fieldProvenance: {
           assetClass: { quality: 'medium', source: 'asset-class-rule' },
@@ -477,6 +568,7 @@ describe('OTserver Otter importer', () => {
         ],
         interfaceKey: 'ifIndex:1',
         macAddress: localMAC,
+        name: 'eth0',
         source: 'snmp',
       })
       const services = await payload.find({
@@ -484,12 +576,20 @@ describe('OTserver Otter importer', () => {
         depth: 0,
         where: { asset: { equals: localAsset!.id } },
       })
-      expect(services.docs[0]).toMatchObject({
+      expect(services.docs.find(({ protocol }) => protocol === 'netbios')).toMatchObject({
         address: '192.0.2.10',
         port: 137,
         protocol: 'netbios',
         source: 'netbios',
         transport: 'udp',
+      })
+      expect(services.docs.find(({ protocol }) => protocol === 'opc-ua')).toMatchObject({
+        address: '192.0.2.10',
+        port: 4840,
+        protocol: 'opc-ua',
+        route: '["backplane","slot=1"]',
+        source: 'opc-ua',
+        transport: 'tcp',
       })
       const observations = await payload.find({
         collection: 'asset-observations',
@@ -529,6 +629,10 @@ describe('OTserver Otter importer', () => {
         ports: [{ key: 'udp:137', source: 'netbios' }],
         quality: 'medium',
         raw: { unitId: '00:00:00:00:00:00', workgroup: 'OTLAB' },
+      })
+      expect(observations.docs.find(({ source }) => source === 'opc-ua')?.fields).toMatchObject({
+        catalogNumber: '6ES7 515-2AM02-0AB0',
+        protocolMetadata: { profile: 'DI' },
       })
       expect(observations.docs.map(({ quality }) => quality)).toEqual(
         expect.arrayContaining(['high', 'medium']),

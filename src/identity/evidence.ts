@@ -6,6 +6,7 @@ import { hardwareKey, normalizeIdentity, record, text, type HardwareIdentity } f
 export type EndpointEvidence = {
   macAddress?: string
   interfaceKey?: string
+  name?: string
   addresses: { address: string; networkMask?: string | null; gatewayAddress?: string | null }[]
   source: string
 }
@@ -14,6 +15,7 @@ export type ServiceEvidence = {
   transport: 'tcp' | 'udp'
   port: number
   protocol: string
+  route?: string
   source: string
 }
 
@@ -22,7 +24,8 @@ export const observationIdentity = (
   observation: ImportedObservation,
 ): HardwareIdentity | undefined => {
   const raw = record(observation.raw)
-  const serial = text(observation.fields.serialNumber)
+  const fields = observation.mergeFields || observation.fields
+  const serial = text(fields.serialNumber)
   let identity: HardwareIdentity | undefined
   if (
     observation.source === 'ethernet-ip' &&
@@ -61,6 +64,7 @@ export const endpointEvidence = (device: Record<string, unknown>): EndpointEvide
     endpoints.push({
       macAddress: macAddress ? normalizeMAC(macAddress) : undefined,
       interfaceKey: text(value.key) || undefined,
+      name: text(value.name) || undefined,
       addresses: addresses.map((address) => ({ address })),
       source: text(value.source) || 'unknown',
     })
@@ -77,13 +81,63 @@ export const endpointEvidence = (device: Record<string, unknown>): EndpointEvide
       source: 'otserver-otter',
     })
   }
+  for (const value of Array.isArray(device.macAddresses) ? device.macAddresses : []) {
+    const macAddress = text(value)
+    if (
+      macAddress &&
+      validateMACAddress(macAddress) === true &&
+      !endpoints.some((endpoint) => endpoint.macAddress === normalizeMAC(macAddress))
+    )
+      endpoints.push({
+        macAddress: normalizeMAC(macAddress),
+        addresses: [],
+        source: 'otserver-otter',
+      })
+  }
   return endpoints
 }
 
 export const serviceEvidence = (device: Record<string, unknown>): ServiceEvidence[] => {
   const observations = (Array.isArray(device.observations) ? device.observations : []).map(record)
   const ports = (Array.isArray(device.ports) ? device.ports : []).map(record)
-  return ports.flatMap((port): ServiceEvidence[] => {
+  const explicit = observations.flatMap((observation): ServiceEvidence[] => {
+    const source = text(observation.source) || 'unknown'
+    return (
+      Array.isArray(record(observation.raw).listeners)
+        ? (record(observation.raw).listeners as unknown[])
+        : []
+    ).flatMap((entry): ServiceEvidence[] => {
+      const listener = record(entry)
+      const address = text(listener.address)
+      const transport = text(listener.transport)
+      const port = listener.port
+      if (
+        !isIP(address) ||
+        !['tcp', 'udp'].includes(transport) ||
+        typeof port !== 'number' ||
+        !Number.isInteger(port) ||
+        port < 0 ||
+        port > 65535
+      )
+        return []
+      const route = Array.isArray(listener.route)
+        ? listener.route.length
+          ? JSON.stringify(listener.route)
+          : undefined
+        : text(listener.route) || undefined
+      return [
+        {
+          address,
+          transport: transport as 'tcp' | 'udp',
+          port,
+          protocol: source,
+          ...(route ? { route } : {}),
+          source,
+        },
+      ]
+    })
+  })
+  const inferred = ports.flatMap((port): ServiceEvidence[] => {
     const match = /^(tcp|udp):(\d+)$/.exec(text(port.key))
     if (!match || Number(match[2]) > 65535) return []
     const addresses = [
@@ -109,6 +163,14 @@ export const serviceEvidence = (device: Record<string, unknown>): ServiceEvidenc
       },
     ]
   })
+  return [
+    ...new Map(
+      [...inferred, ...explicit].map((item) => [
+        JSON.stringify([item.address, item.transport, item.port, item.protocol]),
+        item,
+      ]),
+    ).values(),
+  ]
 }
 
 export const expandPhysicalEvidence = (asset: ImportedAsset): ImportedAsset[] => {
@@ -127,8 +189,8 @@ export const expandPhysicalEvidence = (asset: ImportedAsset): ImportedAsset[] =>
     )
     for (const { identity, observation } of other)
       result.push({
-        ...observation.fields,
-        name: text(observation.fields.name) || identity.serial,
+        ...(observation.mergeFields || observation.fields),
+        name: text((observation.mergeFields || observation.fields).name) || identity.serial,
         identity,
         observations: [observation],
         componentRef: hardwareKey(identity),
@@ -170,6 +232,7 @@ export const expandPhysicalEvidence = (asset: ImportedAsset): ImportedAsset[] =>
             vendor: text(value(12)),
             serialNumber: text(value(11)),
             model: text(value(13)),
+            catalogNumber: text(value(13)),
             hardwareVersion: text(value(8)),
             firmwareVersion: text(value(9)),
           },
@@ -199,7 +262,13 @@ export const expandPhysicalEvidence = (asset: ImportedAsset): ImportedAsset[] =>
         result[0].identity = entity.identity
         result[0].componentRef = componentRef
         result[0].observations = observations.map((item) =>
-          item === observation ? { ...item, fields: { ...item.fields, ...entity.fields } } : item,
+          item === observation
+            ? {
+                ...item,
+                fields: { ...item.fields, ...entity.fields },
+                mergeFields: { ...(item.mergeFields || item.fields), ...entity.fields },
+              }
+            : item,
         )
       } else {
         result.push({
@@ -211,7 +280,7 @@ export const expandPhysicalEvidence = (asset: ImportedAsset): ImportedAsset[] =>
           ...(Number.isInteger(entity.position) && Number(entity.position) >= 0
             ? { slotPath: String(entity.position) }
             : {}),
-          observations: [{ ...observation, fields: entity.fields }],
+          observations: [{ ...observation, fields: entity.fields, mergeFields: entity.fields }],
           observedViaMAC: asset.macAddress,
         })
       }
@@ -221,7 +290,10 @@ export const expandPhysicalEvidence = (asset: ImportedAsset): ImportedAsset[] =>
   if (primary.identity && primary.identity.scope !== 'cpu') {
     primary.observations = primary.observations?.map((observation) =>
       observation.source === 's7'
-        ? { ...observation, mergeFields: networkFields(observation.fields) }
+        ? {
+            ...observation,
+            mergeFields: networkFields(observation.mergeFields || observation.fields),
+          }
         : observation,
     )
   }

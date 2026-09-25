@@ -158,7 +158,9 @@ export const resolveImportedIdentity = async (
   } else if (current) {
     const serials = [
       ...new Set(
-        (input.observations || []).map(({ fields }) => text(fields.serialNumber)).filter(Boolean),
+        (input.observations || [])
+          .map(({ fields, mergeFields }) => text((mergeFields || fields).serialNumber))
+          .filter(Boolean),
       ),
     ]
     if (serials.some((serial) => current!.serialNumber && serial !== current!.serialNumber)) {
@@ -336,13 +338,14 @@ export const bindImportedIdentity = async (
         : {},
       [
         {
-          data: { addresses: fields.addresses },
+          data: { addresses: fields.addresses, name: fields.name },
           quality: quality(endpoint.source),
           source: endpoint.source,
         },
         ...(endpoint.macAddress === input.macAddress
           ? (input.observations || []).flatMap((observation) => {
-              const address = text(observation.fields.ipAddress)
+              const observationFields = observation.mergeFields || observation.fields
+              const address = text(observationFields.ipAddress)
               if (!isIP(address)) return []
               return [
                 {
@@ -350,8 +353,8 @@ export const bindImportedIdentity = async (
                     addresses: [
                       {
                         address,
-                        networkMask: text(observation.fields.networkMask) || undefined,
-                        gatewayAddress: text(observation.fields.gatewayAddress) || undefined,
+                        networkMask: text(observationFields.networkMask) || undefined,
+                        gatewayAddress: text(observationFields.gatewayAddress) || undefined,
                       },
                     ],
                   },
@@ -366,6 +369,7 @@ export const bindImportedIdentity = async (
     fields.addresses = (merged.data.addresses ||
       current?.addresses ||
       fields.addresses) as typeof fields.addresses
+    fields.name = (merged.data.name || current?.name || fields.name) as typeof fields.name
     const endpointData = { ...fields, fieldProvenance: merged.fieldProvenance }
     if (current?.source === 'human') endpointData.source = 'human'
     const result = current

@@ -15,6 +15,7 @@ export type ImportedObservation = {
 }
 
 export type ImportedAsset = {
+  catalogNumber?: string
   description?: string
   gatewayAddress?: string
   ipAddress?: string
