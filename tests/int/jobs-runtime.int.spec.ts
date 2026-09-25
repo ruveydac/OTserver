@@ -3,9 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   acquireWorker: vi.fn(),
   authorization: { isAdmin: true },
+  delay: vi.fn(async () => undefined),
   renewWorker: vi.fn(),
   systemRequest: vi.fn(async () => ({ context: {} })),
 }))
+
+vi.mock('node:timers/promises', () => ({ setTimeout: mocks.delay }))
 
 vi.mock('../../src/access/authorization', () => ({
   getAuthorization: vi.fn(async () => mocks.authorization),
@@ -28,7 +31,12 @@ vi.mock('../../src/integrations/payload/workerContext', () => ({
 
 import { readiness, workerDiagnostics } from '../../src/jobs/diagnostics'
 import { safeFailure, transientFailure } from '../../src/jobs/errors'
-import { recoverQueue, runWorker, scheduleMaintenance } from '../../src/jobs/worker'
+import {
+  recoverQueue,
+  runWorker,
+  scheduleMaintenance,
+  superviseWorker,
+} from '../../src/jobs/worker'
 
 const fence = {
   assert: vi.fn(async () => undefined),
@@ -206,6 +214,19 @@ describe('worker scheduling and execution', () => {
     await expect(
       runWorker(payload as never, 'imports', new AbortController().signal),
     ).rejects.toThrow('Another imports worker owns the queue.')
+  })
+
+  it('keeps retrying worker ownership until stopped', async () => {
+    const controller = new AbortController()
+    const payload = makePayload()
+    payload.jobs.run.mockImplementationOnce(async () => {
+      controller.abort()
+      return undefined
+    })
+    mocks.acquireWorker.mockResolvedValueOnce(null).mockResolvedValueOnce(fence)
+    await superviseWorker(payload as never, 'imports', controller.signal)
+    expect(mocks.acquireWorker).toHaveBeenCalledTimes(2)
+    expect(mocks.delay).toHaveBeenCalledWith(5000, undefined, { signal: controller.signal })
   })
 
   it('runs one owned queue cycle and releases its heartbeat', async () => {

@@ -77,6 +77,8 @@ services:
       DATABASE_URL: mongodb://mongo:27017/otserver?replicaSet=rs0
       OTSERVER_SECRET: ${OTSERVER_SECRET:?Set OTSERVER_SECRET in .env}
       OTSERVER_QUEUED_IMPORTS: ${OTSERVER_QUEUED_IMPORTS:-off}
+      OTSERVER_VULNERABILITY_FEEDS: ${OTSERVER_VULNERABILITY_FEEDS:-on}
+      OTSERVER_WORKER_MODE: ${OTSERVER_WORKER_MODE:-standalone}
     volumes:
       - import-files:/app/import-files
     depends_on:
@@ -84,19 +86,22 @@ services:
         condition: service_healthy
 
   import-worker:
+    profiles: [workers]
     image: ghcr.io/ruveydac/otserver:latest
     restart: unless-stopped
     command: ['node_modules/.bin/tsx', 'src/worker.ts', 'imports']
     environment:
       DATABASE_URL: mongodb://mongo:27017/otserver?replicaSet=rs0
       OTSERVER_SECRET: ${OTSERVER_SECRET:?Set OTSERVER_SECRET in .env}
+      OTSERVER_WORKER_MODE: external
     volumes:
-      - import-files:/app/import-files
+      - import-files:/app/import-files:ro
     depends_on:
-      mongo:
+      otserver:
         condition: service_healthy
 
   maintenance-worker:
+    profiles: [workers]
     image: ghcr.io/ruveydac/otserver:latest
     restart: unless-stopped
     command: ['node_modules/.bin/tsx', 'src/worker.ts', 'maintenance']
@@ -104,8 +109,9 @@ services:
       DATABASE_URL: mongodb://mongo:27017/otserver?replicaSet=rs0
       OTSERVER_SECRET: ${OTSERVER_SECRET:?Set OTSERVER_SECRET in .env}
       OTSERVER_VULNERABILITY_FEEDS: ${OTSERVER_VULNERABILITY_FEEDS:-on}
+      OTSERVER_WORKER_MODE: external
     depends_on:
-      mongo:
+      otserver:
         condition: service_healthy
 
   mongo:
@@ -148,9 +154,22 @@ docker compose up -d
 Open <http://localhost:3000/admin> and create the first administrator account.
 The named volumes persist database data and uploaded import files.
 
-Keep `OTSERVER_QUEUED_IMPORTS=off` until both workers are running and their heartbeats appear in the
-administrator operations endpoint. See [deployment and recovery](docs/operations.md), the
-[application boundaries](docs/architecture.md), and the [capacity benchmark](docs/capacity-benchmark.md).
+The default standalone process serves the application and runs both fenced worker queues. For a
+larger installation, move the queues into dedicated containers by setting these values in `.env`:
+
+```dotenv
+OTSERVER_WORKER_MODE=external
+OTSERVER_QUEUED_IMPORTS=on
+```
+
+Then start the optional worker profile:
+
+```bash
+docker compose --profile workers up -d
+```
+
+Confirm both worker heartbeats in the administrator operations endpoint. Do not enable external
+mode without running both worker services.
 
 For an upgrade from MAC-only inventory, follow the [identity migration](docs/device-identity.md#upgrade-from-mac-only-inventory)
 before starting this version. It requires a replica set and removal of the legacy unique MAC index.
@@ -170,11 +189,9 @@ pnpm dev
 
 Then open <http://localhost:3000/admin>. The first account receives the protected Admin role.
 
-For container-based development, the repository's `docker-compose.yml` runs the source with
-`pnpm dev`: prepare `.env` as above and run `docker compose up` from the repository root.
-The source bind mount uses `:z` to allow container access on SELinux hosts (ignored on hosts
-without SELinux). If an existing container reports `EACCES` opening `/home/node/app/package.json`,
-apply the current Compose file with `docker compose up -d --force-recreate otserver`.
+The repository's `docker-compose.yml` is the production-style standalone deployment. Run
+`docker compose up -d mongo` when only a local development database is needed, or
+`docker compose up -d --build` to test the complete containerized application.
 
 ## First inventory
 

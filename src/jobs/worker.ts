@@ -92,3 +92,13 @@ export const runWorker = async (payload: Payload, queue: Queue, signal: AbortSig
     if (!lost) await renewWorker(payload, fence, true).catch(() => {})
   }
 }
+
+export const superviseWorker = async (payload: Payload, queue: Queue, signal: AbortSignal) => {
+  while (!signal.aborted) {
+    try {
+      await runWorker(payload, queue, signal)
+    } catch {
+      if (!signal.aborted) await delay(5000, undefined, { signal }).catch(() => {})
+    }
+  }
+}

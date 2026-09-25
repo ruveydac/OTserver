@@ -18,6 +18,7 @@ import { MAX_IMPORT_FILE_SIZE } from './importers/proneta'
 import { jobs } from './jobs/config'
 import { WorkerLeases, WorkerHeartbeats } from './collections/WorkerState'
 import { readiness, workerDiagnostics } from './jobs/diagnostics'
+import { superviseWorker } from './jobs/worker'
 import { migrations } from './migrations'
 import {
   NetworkEndpoints,
@@ -32,6 +33,15 @@ const dirname = path.dirname(fileURLToPath(import.meta.url))
 const initializeApplication = async (payload: Payload) => {
   await initializeAssetClasses(payload)
   await initializeAuthorization(payload)
+
+  const workerMode = process.env.OTSERVER_WORKER_MODE || 'standalone'
+  if (workerMode !== 'standalone' && workerMode !== 'external')
+    throw new Error('OTSERVER_WORKER_MODE must be standalone or external.')
+  if (workerMode === 'external' || process.env.NODE_ENV === 'test') return
+
+  const signal = new AbortController().signal
+  for (const queue of ['imports', 'maintenance'] as const)
+    void superviseWorker(payload, queue, signal)
 }
 
 export default buildConfig({
