@@ -323,7 +323,7 @@ const TopologyView = async (props: AdminViewServerProps) => {
 
   const siteOptions = sites.docs.map((site) => ({
     id: String(site.id),
-    name: site.name,
+    name: site.path || site.name,
   }))
 
   if (!selectedSiteId) {

@@ -169,6 +169,7 @@ export interface UserAuthOperations {
 export interface Site {
   id: string;
   name: string;
+  path?: string | null;
   type: string;
   /**
    * Optional parent site; nesting can be as deep as needed.
@@ -1093,6 +1094,7 @@ export interface PayloadMigration {
  */
 export interface SitesSelect<T extends boolean = true> {
   name?: T;
+  path?: T;
   type?: T;
   parent?: T;
   description?: T;
