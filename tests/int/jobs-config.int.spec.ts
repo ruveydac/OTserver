@@ -4,6 +4,7 @@ import { JobCancelledError } from 'payload'
 const mocks = vi.hoisted(() => ({
   executeImport: vi.fn(),
   maintenance: vi.fn(),
+  reapplyAssetClasses: vi.fn(),
   worker: undefined as undefined | { queue: string },
 }))
 
@@ -13,6 +14,10 @@ vi.mock('../../src/application/queuedImports', () => ({
 
 vi.mock('../../src/jobs/maintenance', () => ({
   runMaintenance: mocks.maintenance,
+}))
+
+vi.mock('../../src/collections/AssetClasses', () => ({
+  reapplyAssetClassRules: mocks.reapplyAssetClasses,
 }))
 
 vi.mock('../../src/integrations/payload/workerContext', () => ({
@@ -38,6 +43,7 @@ beforeEach(() => {
   mocks.worker = undefined
   mocks.executeImport.mockResolvedValue(undefined)
   mocks.maintenance.mockResolvedValue(undefined)
+  mocks.reapplyAssetClasses.mockResolvedValue({ scanned: 4, updated: 2 })
 })
 
 describe('Payload job configuration', () => {
@@ -148,6 +154,71 @@ describe('Payload job configuration', () => {
     ).rejects.toThrow('temporary database or network failure')
     expect(req.payload.logger.warn).toHaveBeenLastCalledWith(
       expect.objectContaining({ jobID: 'j3', attempt: 3 }),
+    )
+  })
+
+  it('reapplies asset classes only on the maintenance worker', async () => {
+    const req = request()
+    await expect(
+      handler(2)({
+        input: { assetClassID: 'class-1', version: 1 },
+        job: { id: 'j4' },
+        req,
+      }),
+    ).rejects.toBeInstanceOf(JobCancelledError)
+    mocks.worker = { queue: 'maintenance' }
+    await expect(
+      handler(2)({
+        input: { assetClassID: 'class-1', version: 2 },
+        job: { id: 'j4' },
+        req,
+      }),
+    ).rejects.toBeInstanceOf(JobCancelledError)
+
+    expect(
+      await handler(2)({
+        input: { assetClassID: 'class-1', version: 1 },
+        job: { id: 'j4' },
+        req,
+      }),
+    ).toEqual({ output: {} })
+    expect(mocks.reapplyAssetClasses).toHaveBeenCalledWith(req)
+    expect(req.payload.logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'asset-classes.reapplied',
+        assetClassID: 'class-1',
+        scanned: 4,
+        updated: 2,
+      }),
+    )
+  })
+
+  it('sanitizes permanent and transient asset-class failures', async () => {
+    mocks.worker = { queue: 'maintenance' }
+    const req = request()
+    mocks.reapplyAssetClasses.mockRejectedValueOnce(
+      Object.assign(new Error('forbidden secret'), { status: 403 }),
+    )
+    await expect(
+      handler(2)({
+        input: { assetClassID: 'class-1', version: 1 },
+        job: { id: 'j5' },
+        req,
+      }),
+    ).rejects.toBeInstanceOf(JobCancelledError)
+
+    mocks.reapplyAssetClasses.mockRejectedValueOnce(
+      Object.assign(new Error('database host'), { code: 91 }),
+    )
+    await expect(
+      handler(2)({
+        input: { assetClassID: 'class-1', version: 1 },
+        job: { id: 'j6' },
+        req,
+      }),
+    ).rejects.toThrow('temporary database or network failure')
+    expect(req.payload.logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'asset-classes.reapply-failed', jobID: 'j6' }),
     )
   })
 })

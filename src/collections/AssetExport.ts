@@ -18,7 +18,7 @@ export const exportAssetsCSV: PayloadHandler = async (req) => {
   const { where } = parseParams(req.query)
   const cutoff = new Date().toISOString()
 
-  const rows = async function* (withEndpoints: boolean) {
+  const rows = async function* (withRelations: boolean) {
     let after: string | undefined
     for (;;) {
       const assets = await req.payload.find({
@@ -38,9 +38,30 @@ export const exportAssetsCSV: PayloadHandler = async (req) => {
         },
       })
 
+      const siteNames = new Map<string, string>()
+      if (withRelations && assets.docs.length) {
+        const sites = await req.payload.find({
+          collection: 'sites',
+          depth: 0,
+          pagination: false,
+          overrideAccess: false,
+          req,
+          select: { name: true },
+          where: {
+            id: {
+              in: assets.docs.map((asset) =>
+                typeof asset.site === 'object' ? asset.site.id : asset.site,
+              ),
+            },
+          },
+        })
+        for (const site of sites.docs) siteNames.set(site.id, site.name)
+      }
+
       for (const asset of assets.docs) {
+        const siteID = typeof asset.site === 'object' ? asset.site.id : asset.site
         const endpoints = []
-        if (withEndpoints) {
+        if (withRelations) {
           let endpointAfter: string | undefined
           for (;;) {
             const page = await req.payload.find({
@@ -64,7 +85,10 @@ export const exportAssetsCSV: PayloadHandler = async (req) => {
             endpointAfter = page.docs.at(-1)!.id
           }
         }
-        yield { ...asset, endpoints } as Record<string, unknown>
+        yield { ...asset, site: siteNames.get(siteID) ?? siteID, endpoints } as Record<
+          string,
+          unknown
+        >
       }
 
       if (assets.docs.length < 100) break

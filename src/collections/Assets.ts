@@ -27,6 +27,7 @@ const recordHumanChanges: CollectionBeforeChangeHook = ({ context, data, origina
   if (
     context.assetImport ||
     context.assetClassMigration ||
+    context.assetClassReclassification ||
     context.vulnerabilityCountSync ||
     context.networkProjection ||
     context.identityAction

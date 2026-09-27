@@ -134,6 +134,7 @@ export interface Config {
     tasks: {
       'import-v1': TaskImportV1;
       'maintenance-v1': TaskMaintenanceV1;
+      'reapply-asset-classes-v1': TaskReapplyAssetClassesV1;
       inline: {
         input: unknown;
         output: unknown;
@@ -943,7 +944,7 @@ export interface PayloadJob {
     | {
         executedAt: string;
         completedAt: string;
-        taskSlug: 'inline' | 'import-v1' | 'maintenance-v1';
+        taskSlug: 'inline' | 'import-v1' | 'maintenance-v1' | 'reapply-asset-classes-v1';
         taskID: string;
         input?:
           | {
@@ -976,7 +977,7 @@ export interface PayloadJob {
         id?: string | null;
       }[]
     | null;
-  taskSlug?: ('inline' | 'import-v1' | 'maintenance-v1') | null;
+  taskSlug?: ('inline' | 'import-v1' | 'maintenance-v1' | 'reapply-asset-classes-v1') | null;
   queue?: string | null;
   waitUntil?: string | null;
   processing?: boolean | null;
@@ -1625,6 +1626,17 @@ export interface TaskImportV1 {
 export interface TaskMaintenanceV1 {
   input: {
     version: number;
+  };
+  output?: unknown;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskReapply-asset-classes-v1".
+ */
+export interface TaskReapplyAssetClassesV1 {
+  input: {
+    version: number;
+    assetClassID: string;
   };
   output?: unknown;
 }

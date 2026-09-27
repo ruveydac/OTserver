@@ -746,7 +746,8 @@ describe('asset CRUD', () => {
       expect(columns).toEqual(expect.arrayContaining(['macAddress', 'vendor', 'notes']))
       expect(rows).toHaveLength(1)
       expect(csv).toContain(allowedAsset.macAddress)
-      expect(csv).toContain('"Exported PLC, with ""quotes"""')
+      expect(csv).toContain(`"Exported PLC, with ""quotes""",${allowedSite.name},`)
+      expect(csv).not.toContain(`"Exported PLC, with ""quotes""",${allowedSite.id},`)
       expect(csv).toContain('"line one\nline two"')
       expect(csv).not.toContain(otherAsset.macAddress)
 
