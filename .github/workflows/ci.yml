@@ -17,7 +17,7 @@ jobs:
       DATABASE_URL: mongodb://127.0.0.1:27017/otserver-ci?replicaSet=rs0&directConnection=true
       OTSERVER_SECRET: ci-only-secret
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - run: docker compose up --detach --wait mongo
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6
