@@ -1,7 +1,8 @@
-import 'dotenv/config'
-import { getPayload } from 'payload'
-import config from './payload.config'
-import { superviseWorker } from './jobs/worker'
+process.loadEnvFile?.()
+
+const { getPayload } = await import('payload')
+const { default: config } = await import('./payload.config')
+const { superviseWorker } = await import('./jobs/worker')
 
 const queue = process.argv[2]
 if (queue !== 'imports' && queue !== 'maintenance')
@@ -15,3 +16,5 @@ try {
 } finally {
   await payload.destroy()
 }
+
+export {}

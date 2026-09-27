@@ -13,7 +13,7 @@ import {
 import { hideFromNonAdmins } from '../../src/access/authorization'
 import { ensureAssetClass } from '../../src/collections/AssetClasses'
 import { exportAssetsCSV } from '../../src/collections/AssetExport'
-import { filterSiteParents } from '../../src/collections/Sites'
+import { filterSiteParents, Sites } from '../../src/collections/Sites'
 import { ensureAdminRole } from '../../src/collections/UserRoles'
 import { buildSiteTree } from '../../src/components/SiteTreeView'
 
@@ -354,6 +354,18 @@ describe('asset CRUD', () => {
         data: { name: 'Aachen', parent: region.id, type: 'Production campus' },
       })
       siteIDs.push(aachen.id)
+
+      expect(aachen.path).toBe('EU / Germany / Aachen')
+      expect(Sites.admin?.useAsTitle).toBe('path')
+
+      await payload.update({
+        collection: 'sites',
+        data: { name: 'Deutschland' },
+        id: region.id,
+      })
+      expect((await payload.findByID({ collection: 'sites', id: aachen.id })).path).toBe(
+        'EU / Deutschland / Aachen',
+      )
 
       const tree = buildSiteTree([berlin, continent, aachen, region])
       expect(tree.map(({ site }) => site.id)).toEqual([
@@ -734,7 +746,8 @@ describe('asset CRUD', () => {
       expect(columns).toEqual(expect.arrayContaining(['macAddress', 'vendor', 'notes']))
       expect(rows).toHaveLength(1)
       expect(csv).toContain(allowedAsset.macAddress)
-      expect(csv).toContain('"Exported PLC, with ""quotes"""')
+      expect(csv).toContain(`"Exported PLC, with ""quotes""",${allowedSite.name},`)
+      expect(csv).not.toContain(`"Exported PLC, with ""quotes""",${allowedSite.id},`)
       expect(csv).toContain('"line one\nline two"')
       expect(csv).not.toContain(otherAsset.macAddress)
 

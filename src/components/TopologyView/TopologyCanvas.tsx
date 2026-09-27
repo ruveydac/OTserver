@@ -31,7 +31,6 @@ export type GraphEdge = {
   label?: string
   redundant?: boolean
   source: string
-  sourceProtocol?: string
   target: string
   type: 'explicit' | 'layer2'
 }

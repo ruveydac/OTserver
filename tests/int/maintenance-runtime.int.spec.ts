@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  recount: vi.fn(),
   sync: vi.fn(),
   systemRequest: vi.fn(async () => ({ context: {} })),
 }))
@@ -9,10 +8,6 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../src/vulnerabilities/feeds', () => ({
   SYNC_INTERVAL_MS: 604_800_000,
   syncVulnerabilityFeeds: mocks.sync,
-}))
-
-vi.mock('../../src/vulnerabilities/match', () => ({
-  recountAssetVulnerabilities: mocks.recount,
 }))
 
 vi.mock('../../src/integrations/payload/requests', () => ({
@@ -61,7 +56,7 @@ describe('maintenance task', () => {
     expect(mocks.sync).not.toHaveBeenCalled()
   })
 
-  it('refreshes the catalog and recounts assets when feeds are enabled', async () => {
+  it('refreshes the catalog when feeds are enabled', async () => {
     process.env.OTSERVER_VULNERABILITY_FEEDS = 'on'
     const payload = makePayload([[]])
     await runMaintenance(payload as never)
@@ -70,6 +65,5 @@ describe('maintenance task', () => {
       failOnSourceError: true,
       force: true,
     })
-    expect(mocks.recount).toHaveBeenCalledWith(payload)
   })
 })

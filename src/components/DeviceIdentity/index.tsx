@@ -223,7 +223,7 @@ export default async function DeviceIdentity({
             targets={targets.docs.map((target) => ({ id: target.id, label: target.name }))}
             sites={sites.docs
               .filter(({ id }) => id !== site)
-              .map((site) => ({ id: site.id, label: site.name }))}
+              .map((site) => ({ id: site.id, label: site.path || site.name }))}
           />
         </>
       ) : null}

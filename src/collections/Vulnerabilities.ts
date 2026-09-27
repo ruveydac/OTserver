@@ -4,7 +4,6 @@ import { adminOnly, hideFromNonAdmins } from '../access/authorization'
 
 export const Vulnerabilities: CollectionConfig = {
   slug: 'vulnerabilities',
-  labels: { plural: 'Vulnerabilities', singular: 'Vulnerability' },
   access: {
     create: () => false,
     delete: () => false,
@@ -33,7 +32,6 @@ export const Vulnerabilities: CollectionConfig = {
     { name: 'modified', type: 'date', index: true },
     { name: 'references', type: 'json' },
     { name: 'affected', type: 'json', label: 'Affected CPE matches' },
-    { name: 'vendors', type: 'text', admin: { hidden: true }, hasMany: true, index: true },
     { name: 'products', type: 'text', admin: { hidden: true }, hasMany: true, index: true },
     {
       name: 'productTokens',
@@ -68,12 +66,10 @@ export const Vulnerabilities: CollectionConfig = {
     { name: 'icsHeadquarters', type: 'text', label: 'ICS vendor headquarters' },
   ],
   lockDocuments: false,
-  timestamps: true,
 }
 
 export const VulnerabilityFeeds: CollectionConfig = {
   slug: 'vulnerability-feeds',
-  labels: { plural: 'Vulnerability Feeds', singular: 'Vulnerability Feed' },
   access: {
     create: () => false,
     delete: () => false,
@@ -108,5 +104,4 @@ export const VulnerabilityFeeds: CollectionConfig = {
     { name: 'state', type: 'json', admin: { hidden: true } },
   ],
   lockDocuments: false,
-  timestamps: true,
 }

@@ -45,5 +45,4 @@ export const TopologyLinks: CollectionConfig = {
     { fields: ['site', 'localAsset', 'remoteAsset', 'observedAt'] },
   ],
   lockDocuments: false,
-  timestamps: true,
 }

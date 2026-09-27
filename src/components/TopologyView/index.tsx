@@ -67,7 +67,6 @@ type LinkRecord = {
   localAsset?: null | string
   remote: unknown
   remoteAsset?: null | string
-  source: string
 }
 
 type ArpRecord = {
@@ -80,7 +79,6 @@ type ExplicitConnection = {
   pair: string
   source: string
   sourcePort?: string
-  sourceProtocol: string
   target: string
   targetPort?: string
 }
@@ -113,7 +111,6 @@ export const buildTopologyGraph = (
       pair,
       source,
       sourcePort,
-      sourceProtocol: link.source,
       target,
       targetPort,
     }
@@ -132,7 +129,7 @@ export const buildTopologyGraph = (
   const explicitNeighbors = new Map<string, Set<string>>()
   for (const connections of connectionsByPair.values()) {
     connections.sort((left, right) => left.id.localeCompare(right.id))
-    const [{ source, sourceProtocol, target }] = connections
+    const [{ source, target }] = connections
     const labels = connections.map(({ sourcePort, targetPort }) =>
       sourcePort && targetPort
         ? `${sourcePort} - ${targetPort}`
@@ -155,7 +152,6 @@ export const buildTopologyGraph = (
       id: `link-${connections[0].id}`,
       label,
       source,
-      sourceProtocol,
       target,
       type: 'explicit',
     })
@@ -323,7 +319,7 @@ const TopologyView = async (props: AdminViewServerProps) => {
 
   const siteOptions = sites.docs.map((site) => ({
     id: String(site.id),
-    name: site.name,
+    name: site.path || site.name,
   }))
 
   if (!selectedSiteId) {
@@ -455,7 +451,6 @@ const TopologyView = async (props: AdminViewServerProps) => {
     localAsset: link.localAsset ? String(link.localAsset) : null,
     remote: link.remote,
     remoteAsset: link.remoteAsset ? String(link.remoteAsset) : null,
-    source: link.source,
   }))
 
   const arpDocs = arpObservations.docs.slice(0, 10000).map((observation) => ({

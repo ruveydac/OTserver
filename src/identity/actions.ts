@@ -6,6 +6,7 @@ import { writeAudit } from '../collections/AuditLogs'
 import { idOf, requireWritableAsset } from './access'
 import { record, text } from './keys'
 import { inIdentityContext, syncManualEndpoint } from './relationships'
+import { withRequestContext } from '../integrations/payload/context'
 import type { Asset, NetworkEndpoint } from '../payload-types'
 
 export const atomicIdentity = <T>(req: PayloadRequest, work: () => Promise<T>): Promise<T> =>
@@ -444,15 +445,11 @@ export const migrateIdentity: PayloadHandler = async (req) => {
         req,
       })
       if ((await activeEndpoints(asset.id, req)).docs.length) continue
-      const previous = req.context.identityMigration
-      req.context.identityMigration = true
-      try {
-        await syncManualEndpoint({ doc: updated, previousDoc: {}, req } as Parameters<
+      await withRequestContext(req, { identityMigration: true }, () =>
+        syncManualEndpoint({ doc: updated, previousDoc: {}, req } as Parameters<
           typeof syncManualEndpoint
-        >[0])
-      } finally {
-        req.context.identityMigration = previous
-      }
+        >[0]),
+      )
     }
     await writeAudit({
       action: 'custom',

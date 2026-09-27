@@ -1,11 +1,13 @@
 import {
   APIError,
+  type CollectionAfterChangeHook,
   type CollectionBeforeDeleteHook,
   type CollectionBeforeValidateHook,
   type CollectionConfig,
   type Payload,
   type PayloadRequest,
 } from 'payload'
+import { isDeepStrictEqual } from 'node:util'
 
 import { adminOnly, relationshipID } from '../access/authorization'
 import defaultRuleSeed from '../data/default-asset-class-rules.json'
@@ -119,6 +121,7 @@ export const ensureAssetClass = async (payload: Payload, key: string, req?: Payl
 
   return payload.create({
     collection: 'asset-classes',
+    context: { assetClassRuleSeed: true },
     data: {
       assignmentPriority: seed?.priority ?? 100,
       assignmentRules: seed?.rules,
@@ -257,6 +260,93 @@ export const assignDefaultAssetClass: CollectionBeforeValidateHook = async ({
   }
 }
 
+export const reapplyAssetClassRules = async (req: PayloadRequest) => {
+  const fallback = await ensureAssetClass(req.payload, 'other', req)
+  delete req.context.assetClassRuleMatchers
+  let page = 1
+  let scanned = 0
+  let updated = 0
+
+  for (;;) {
+    const assets = await req.payload.find({
+      collection: 'assets',
+      depth: 0,
+      limit: 100,
+      overrideAccess: true,
+      page,
+      req,
+      select: { assetClass: true, fieldProvenance: true, model: true, vendor: true },
+      sort: 'id',
+    })
+    scanned += assets.docs.length
+
+    for (const asset of assets.docs) {
+      const fieldProvenance =
+        asset.fieldProvenance &&
+        typeof asset.fieldProvenance === 'object' &&
+        !Array.isArray(asset.fieldProvenance)
+          ? { ...(asset.fieldProvenance as Record<string, unknown>) }
+          : {}
+      const currentOrigin = fieldProvenance.assetClass as
+        { quality?: unknown; source?: unknown } | undefined
+      if (currentOrigin?.quality === 'human') continue
+
+      const matched = await findMatchingAssetClass(req.payload, asset.vendor, asset.model, req)
+      const target = matched || fallback
+      const origin = matched
+        ? { quality: 'medium' as const, source: 'asset-class-rule' as const }
+        : { quality: 'low' as const, source: 'default' as const }
+      if (
+        String(relationshipID(asset.assetClass)) === String(target.id) &&
+        currentOrigin?.quality === origin.quality &&
+        currentOrigin.source === origin.source
+      )
+        continue
+
+      fieldProvenance.assetClass = origin
+      await req.payload.update({
+        collection: 'assets',
+        context: { assetClassReclassification: true },
+        data: { assetClass: target.id, fieldProvenance },
+        id: asset.id,
+        overrideAccess: true,
+        req,
+      })
+      updated++
+    }
+
+    if (!assets.hasNextPage) break
+    page++
+  }
+
+  return { scanned, updated }
+}
+
+const queueAssetClassReapply: CollectionAfterChangeHook = async ({
+  context,
+  doc,
+  operation,
+  previousDoc,
+  req,
+}) => {
+  if (context.assetClassRuleSeed) return doc
+  const rulesChanged = !isDeepStrictEqual(doc.assignmentRules, previousDoc?.assignmentRules)
+  const priorityChanged = doc.assignmentPriority !== previousDoc?.assignmentPriority
+  if (
+    (operation === 'create' && !doc.assignmentRules?.length) ||
+    (!rulesChanged && !priorityChanged)
+  )
+    return doc
+
+  await req.payload.jobs.queue({
+    task: 'reapply-asset-classes-v1',
+    queue: 'maintenance',
+    input: { version: 1, assetClassID: String(doc.id) },
+    req,
+  })
+  return doc
+}
+
 const preventDeletingUsedClass: CollectionBeforeDeleteHook = async ({ id, req }) => {
   const assets = await req.payload.count({
     collection: 'assets',
@@ -271,7 +361,6 @@ const preventDeletingUsedClass: CollectionBeforeDeleteHook = async ({ id, req })
 
 export const AssetClasses: CollectionConfig = {
   slug: 'asset-classes',
-  labels: { plural: 'Asset Classes', singular: 'Asset Class' },
   access: {
     create: adminOnly,
     delete: adminOnly,
@@ -338,6 +427,8 @@ export const AssetClasses: CollectionConfig = {
     { name: 'legacyKey', type: 'text', admin: { hidden: true }, unique: true },
     { name: 'ruleSeedVersion', type: 'number', admin: { hidden: true } },
   ],
-  hooks: { beforeDelete: [preventDeletingUsedClass] },
-  timestamps: true,
+  hooks: {
+    afterChange: [queueAssetClassReapply],
+    beforeDelete: [preventDeletingUsedClass],
+  },
 }

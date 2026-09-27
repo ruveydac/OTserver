@@ -27,6 +27,7 @@ const recordHumanChanges: CollectionBeforeChangeHook = ({ context, data, origina
   if (
     context.assetImport ||
     context.assetClassMigration ||
+    context.assetClassReclassification ||
     context.vulnerabilityCountSync ||
     context.networkProjection ||
     context.identityAction
@@ -54,10 +55,6 @@ const recordHumanChanges: CollectionBeforeChangeHook = ({ context, data, origina
 
 export const Assets: CollectionConfig = {
   slug: 'assets',
-  labels: {
-    plural: 'Assets',
-    singular: 'Asset',
-  },
   trash: true,
   access: {
     create: canCreateSiteDocument,
@@ -412,5 +409,4 @@ export const Assets: CollectionConfig = {
     afterChange: [syncManualEndpoint],
   },
   indexes: [{ fields: ['site', 'status'] }, { fields: ['site', 'assetClass'] }],
-  timestamps: true,
 }

@@ -47,7 +47,6 @@ const internal: { create: FieldAccess; update: FieldAccess } = {
 const base = (slug: CollectionConfig['slug'], fields: Field[]): CollectionConfig => ({
   slug,
   fields: [site, ...fields],
-  timestamps: true,
   admin: { group: 'Device identity', useAsTitle: 'id' },
   access: {
     create: canCreateSiteDocument,

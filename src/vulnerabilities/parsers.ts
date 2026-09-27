@@ -1,7 +1,6 @@
 import {
   type AffectedProduct,
   array,
-  normalizeKey,
   productSearchKey,
   record,
   searchTokens,
@@ -28,21 +27,18 @@ export type FeedDocument = {
   setOnInsert?: Record<string, unknown>
 }
 
-export const parseNvdMeta = (
-  meta: string,
-): { lastModifiedDate?: string; sha256?: string; size?: number } => {
-  const values: Record<string, string> = {}
+export const parseNvdMeta = (meta: string): { sha256?: string } => {
   for (const line of meta.split(/\r?\n/)) {
     const separator = line.indexOf(':')
     if (separator < 0) continue
-    values[line.slice(0, separator).trim().toLowerCase()] = line.slice(separator + 1).trim()
+    if (line.slice(0, separator).trim().toLowerCase() !== 'sha256') continue
+    const sha256 = line
+      .slice(separator + 1)
+      .trim()
+      .toLowerCase()
+    return sha256 ? { sha256 } : {}
   }
-  const sha256 = values.sha256?.toLowerCase()
-  return {
-    ...(values.lastmodifieddate ? { lastModifiedDate: values.lastmodifieddate } : {}),
-    ...(sha256 ? { sha256 } : {}),
-    ...(Number(values.size) > 0 ? { size: Number(values.size) } : {}),
-  }
+  return {}
 }
 
 export const parseCpe = (
@@ -93,19 +89,14 @@ export const affectedProducts = (configurations: unknown): AffectedProduct[] => 
 export const searchKeys = (affected: AffectedProduct[]) => {
   const products = new Set<string>()
   const productTokens = new Set<string>()
-  const vendors = new Set<string>()
 
   for (const entry of affected) {
-    const vendorKey = normalizeKey(entry.vendor)
-    if (vendorKey) vendors.add(vendorKey)
-    for (const token of searchTokens(entry.vendor)) vendors.add(token)
-
     const productKey = productSearchKey(entry.product)
     if (productKey) products.add(productKey)
     for (const token of searchTokens(entry.product.replaceAll('_', ' '))) productTokens.add(token)
   }
 
-  return { products: [...products], productTokens: [...productTokens], vendors: [...vendors] }
+  return { products: [...products], productTokens: [...productTokens] }
 }
 
 const dateValue = (value: unknown): Date | undefined => {
@@ -218,15 +209,10 @@ export const parseCisaCatalog = (
         updatedAt: new Date(),
       },
       // Only KEV-only records need these; NVD supplies richer CPE data when it exists.
-      ...(vendor && product
-        ? {
-            setOnInsert: {
-              createdAt: new Date(),
-              description: text(entry.shortDescription).slice(0, MAX_DESCRIPTION),
-              ...searchKeys([{ part: 'a', product, vendor, version: '*' }]),
-            },
-          }
-        : {}),
+      setOnInsert: {
+        description: text(entry.shortDescription).slice(0, MAX_DESCRIPTION),
+        ...searchKeys([{ part: 'a', product, vendor, version: '*' }]),
+      },
     })
   }
 
@@ -243,14 +229,13 @@ export const parseCisaCatalog = (
 
 const trustedCsafURL = (value: unknown): string | undefined => {
   const candidate = text(value)
-  try {
-    const url = new URL(candidate)
-    if (
-      url.protocol === 'https:' &&
-      ['aggregator.certvde.com', 'raw.githubusercontent.com'].includes(url.hostname)
-    )
-      return url.href
-  } catch {}
+  if (!URL.canParse(candidate)) return undefined
+  const url = new URL(candidate)
+  if (
+    url.protocol === 'https:' &&
+    ['aggregator.certvde.com', 'raw.githubusercontent.com'].includes(url.hostname)
+  )
+    return url.href
   return undefined
 }
 
@@ -579,7 +564,6 @@ export const parseIcsAdvisories = (
       // Only the advisory context is authoritative here; NVD and CSAF keep their own fields.
       set,
       setOnInsert: {
-        createdAt: new Date(),
         ...(entry.score === undefined ? {} : { cvssScore: entry.score }),
         ...(entry.severity ? { cvssSeverity: entry.severity } : {}),
         description: `CISA ICS advisory ${advisories[0]}: ${entry.title}`.slice(0, MAX_DESCRIPTION),

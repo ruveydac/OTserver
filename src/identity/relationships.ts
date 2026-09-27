@@ -83,10 +83,8 @@ export const syncEndpointProjection: CollectionAfterChangeHook = async ({
     const firstAddress =
       primary?.addresses?.find(({ address }) => address === asset.ipAddress) ||
       primary?.addresses?.[0]
-    const previous = req.context.networkProjection
-    req.context.networkProjection = true
-    try {
-      await req.payload.update({
+    await withRequestContext(req, { networkProjection: true }, () =>
+      req.payload.update({
         collection: 'assets',
         id,
         overrideAccess: !req.user,
@@ -99,10 +97,8 @@ export const syncEndpointProjection: CollectionAfterChangeHook = async ({
           networkAddresses: addresses.map((address) => ({ address })),
           networkMACs: macs.map((address) => ({ address })),
         },
-      })
-    } finally {
-      req.context.networkProjection = previous
-    }
+      }),
+    )
   }
   return doc
 }

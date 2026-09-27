@@ -237,5 +237,4 @@ export const AuditLogs: CollectionConfig = {
     { fields: ['site', 'createdAt'] },
   ],
   lockDocuments: false,
-  timestamps: true,
 }

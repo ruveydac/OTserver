@@ -1,3 +1,5 @@
+@use '../../styles/shared';
+
 .asset-view {
   pre {
     margin: 0.75rem 0 0;
@@ -80,21 +82,6 @@
     border-radius: 999px;
     font-size: 0.78rem;
     padding: 0.3rem 0.65rem;
-
-    &--online {
-      background: var(--theme-success-100);
-      color: var(--theme-success-700);
-    }
-
-    &--offline {
-      background: var(--theme-error-100);
-      color: var(--theme-error-700);
-    }
-
-    &--maintenance {
-      background: var(--theme-warning-100);
-      color: var(--theme-warning-700);
-    }
   }
 
   &__grid {

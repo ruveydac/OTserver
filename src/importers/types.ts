@@ -36,25 +36,29 @@ export type ImportedAsset = {
   osAccuracy?: number
   firmwareVersion?: string
   hardwareVersion?: string
-  protocols?: (
-    | 'bacnet'
-    | 'dnp3'
-    | 'ethernet-ip'
-    | 'iec61850'
-    | 'modbus-tcp'
-    | 'netbios'
-    | 'niagara-fox'
-    | 'omron-fins'
-    | 'opc-ua'
-    | 'other'
-    | 'profinet'
-    | 's7'
-  )[]
+  protocols?: ImportedProtocol[]
   serialNumber?: string
   status?: 'maintenance' | 'offline' | 'online' | 'unknown'
   vendor?: string
   observations?: ImportedObservation[]
 }
+
+export const importedProtocols = [
+  'bacnet',
+  'dnp3',
+  'ethernet-ip',
+  'iec61850',
+  'modbus-tcp',
+  'netbios',
+  'niagara-fox',
+  'omron-fins',
+  'opc-ua',
+  'other',
+  'profinet',
+  's7',
+] as const
+
+export type ImportedProtocol = (typeof importedProtocols)[number]
 
 export type ImportedTopologyLink = {
   local: Record<string, unknown>

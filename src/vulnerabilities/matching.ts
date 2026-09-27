@@ -234,7 +234,7 @@ export const versionEvidence = (
 }
 
 export const assetFingerprint = (asset: AssetMatchInput): string =>
-  MATCH_FIELDS.map((field) => text(asset[field])).join('|')
+  JSON.stringify(MATCH_FIELDS.map((field) => text(asset[field])))
 
 /** CPE products carry the target as a suffix ("simatic_s7-1500_firmware"); it is not part of the name. */
 export const productSearchKey = (product: string): string =>

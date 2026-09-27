@@ -5,6 +5,7 @@ import { executeQueuedImport } from '../application/queuedImports'
 import { runMaintenance } from './maintenance'
 import { safeFailure, transientFailure } from './errors'
 import { currentWorker } from '../integrations/payload/workerContext'
+import { reapplyAssetClassRules } from '../collections/AssetClasses'
 
 export const jobs: JobsConfig = {
   access: { run: () => false, queue: () => false, cancel: () => false },
@@ -79,6 +80,41 @@ export const jobs: JobsConfig = {
           attempt: (job.totalTried || 0) + 1,
           durationMs: Date.now() - started,
         })
+        return { output: {} }
+      },
+    },
+    {
+      slug: 'reapply-asset-classes-v1',
+      retries: { attempts: 2, backoff: { type: 'exponential', delay: 5000 } },
+      inputSchema: [
+        { name: 'version', type: 'number', required: true },
+        { name: 'assetClassID', type: 'text', required: true },
+      ],
+      handler: async ({ input, req, job }) => {
+        if (input.version !== 1 || currentWorker()?.queue !== 'maintenance')
+          throw new JobCancelledError('Unsupported worker input or execution context.')
+        const started = Date.now()
+        try {
+          const result = await reapplyAssetClassRules(req)
+          req.payload.logger.info({
+            event: 'asset-classes.reapplied',
+            assetClassID: input.assetClassID,
+            jobID: job.id,
+            durationMs: Date.now() - started,
+            ...result,
+          })
+        } catch (error) {
+          const sanitized = safeFailure(error)
+          req.payload.logger.warn({
+            event: 'asset-classes.reapply-failed',
+            assetClassID: input.assetClassID,
+            jobID: job.id,
+            durationMs: Date.now() - started,
+            error: sanitized,
+          })
+          if (!transientFailure(error)) throw new JobCancelledError(sanitized)
+          throw new Error(sanitized)
+        }
         return { output: {} }
       },
     },

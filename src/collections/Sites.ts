@@ -1,7 +1,9 @@
 import {
   APIError,
+  type CollectionAfterChangeHook,
   type CollectionBeforeChangeHook,
   type CollectionBeforeDeleteHook,
+  type CollectionBeforeValidateHook,
   type CollectionConfig,
   type FilterOptionsProps,
   type Where,
@@ -58,6 +60,58 @@ const preventHierarchyCycles: CollectionBeforeChangeHook = async ({ data, origin
   return data
 }
 
+const setSitePath: CollectionBeforeValidateHook = async ({ data, originalDoc, req }) => {
+  if (!data) return data
+  const site = { ...originalDoc, ...data }
+  if (typeof site.name !== 'string') return data
+
+  const parentID = relationshipID(site.parent)
+  if (!parentID) {
+    data.path = site.name
+    return data
+  }
+
+  const parent = await req.payload.findByID({
+    collection: 'sites',
+    depth: 0,
+    id: parentID,
+    overrideAccess: true,
+    req,
+    select: { name: true, path: true },
+  })
+  data.path = `${parent.path || parent.name} / ${site.name}`
+  return data
+}
+
+const updateDescendantPaths: CollectionAfterChangeHook = async ({
+  doc,
+  operation,
+  previousDoc,
+  req,
+}) => {
+  if (operation !== 'update' || doc.path === previousDoc.path) return doc
+
+  const children = await req.payload.find({
+    collection: 'sites',
+    depth: 0,
+    overrideAccess: true,
+    pagination: false,
+    req,
+    where: { parent: { equals: doc.id } },
+  })
+  for (const child of children.docs) {
+    await req.payload.update({
+      collection: 'sites',
+      data: {},
+      id: child.id,
+      overrideAccess: true,
+      req,
+    })
+  }
+
+  return doc
+}
+
 const preventDeletingUsedSites: CollectionBeforeDeleteHook = async ({ id, req }) => {
   // MongoDB sessions cannot run parallel operations inside one transaction.
   const children = await req.payload.count({
@@ -109,15 +163,21 @@ export const Sites: CollectionConfig = {
     description: 'Organize assets with your own site types and hierarchy.',
     group: 'OT Inventory',
     listSearchableFields: ['name', 'type', 'description'],
-    useAsTitle: 'name',
+    useAsTitle: 'path',
   },
-  defaultSort: 'name',
+  defaultSort: 'path',
   fields: [
     {
       name: 'name',
       type: 'text',
       index: true,
       required: true,
+    },
+    {
+      name: 'path',
+      type: 'text',
+      admin: { hidden: true },
+      index: true,
     },
     {
       name: 'siteIDDisplay',
@@ -146,8 +206,9 @@ export const Sites: CollectionConfig = {
     },
   ],
   hooks: {
+    afterChange: [updateDescendantPaths],
+    beforeValidate: [setSitePath],
     beforeChange: [enforceWritableParent, preventHierarchyCycles],
     beforeDelete: [preventDeletingUsedSites],
   },
-  timestamps: true,
 }

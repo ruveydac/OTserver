@@ -91,7 +91,6 @@ export const initializeAuthorization = async (payload: Payload) => {
 
 export const UserRoles: CollectionConfig = {
   slug: 'user-roles',
-  labels: { plural: 'User Roles', singular: 'User Role' },
   access: {
     create: adminOnly,
     delete: adminOnly,
@@ -156,5 +155,4 @@ export const UserRoles: CollectionConfig = {
     beforeChange: [protectAdminRole],
     beforeDelete: [preventDeletingAdminOrUsedRole],
   },
-  timestamps: true,
 }

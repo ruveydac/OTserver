@@ -1,6 +1,5 @@
 import { mongooseAdapter } from '@payloadcms/db-mongodb'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { buildConfig, type Payload } from 'payload'
 
 import { Assets } from './collections/Assets'
@@ -28,7 +27,7 @@ import {
   IdentityCases,
 } from './collections/Identity'
 
-const dirname = path.dirname(fileURLToPath(import.meta.url))
+const dirname = import.meta.dirname || path.resolve('src')
 
 const initializeApplication = async (payload: Payload) => {
   await initializeAssetClasses(payload)

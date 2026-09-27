@@ -1,5 +1,5 @@
 import type { PayloadRequest, RequiredDataFromCollectionSlug } from 'payload'
-import type { AssetImport } from '../payload-types'
+import type { Asset, AssetImport } from '../payload-types'
 
 import { userSuppliedAssetFields } from '../domain/assetFields'
 import { parseNmap } from '../importers/nmap'
@@ -186,10 +186,10 @@ export const processImport = async ({
               : 'device'
         merged.data.serialNumber = asset.identity.serial
       }
-      let assetID: string
+      let resolved: Asset
 
       if (current && merged.changed) {
-        await req.payload.update({
+        resolved = await req.payload.update({
           collection: 'assets',
           context: { assetImport: true },
           data: {
@@ -203,7 +203,6 @@ export const processImport = async ({
           overrideAccess: false,
           req,
         })
-        assetID = String(current.id)
         updated++
       } else if (!current) {
         const defaultProvenance: FieldProvenance = {
@@ -211,7 +210,7 @@ export const processImport = async ({
           criticality: { quality: 'low', source: 'default' },
           status: { quality: 'low', source: 'default' },
         }
-        const createdAsset = await req.payload.create({
+        resolved = await req.payload.create({
           collection: 'assets',
           context: { assetImport: true },
           // Payload applies field defaults, but its generated create type still marks them required.
@@ -225,18 +224,11 @@ export const processImport = async ({
           overrideAccess: false,
           req,
         })
-        assetID = String(createdAsset.id)
         created++
       } else {
-        assetID = String(current.id)
+        resolved = current
       }
-      const resolved = await req.payload.findByID({
-        collection: 'assets',
-        id: assetID,
-        depth: 0,
-        overrideAccess: false,
-        req,
-      })
+      const assetID = String(resolved.id)
       const endpoints = await bindImportedIdentity(
         asset,
         resolved,

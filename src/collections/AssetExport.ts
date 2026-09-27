@@ -1,3 +1,4 @@
+import { ReadableStream, TextEncoderStream } from 'node:stream/web'
 import { parseParams, type PayloadHandler } from 'payload'
 
 const csvCell = (value: unknown): string => {
@@ -18,7 +19,7 @@ export const exportAssetsCSV: PayloadHandler = async (req) => {
   const { where } = parseParams(req.query)
   const cutoff = new Date().toISOString()
 
-  const rows = async function* (withEndpoints: boolean) {
+  const rows = async function* (withRelations: boolean) {
     let after: string | undefined
     for (;;) {
       const assets = await req.payload.find({
@@ -38,9 +39,30 @@ export const exportAssetsCSV: PayloadHandler = async (req) => {
         },
       })
 
+      const siteNames = new Map<string, string>()
+      if (withRelations && assets.docs.length) {
+        const sites = await req.payload.find({
+          collection: 'sites',
+          depth: 0,
+          pagination: false,
+          overrideAccess: false,
+          req,
+          select: { name: true },
+          where: {
+            id: {
+              in: assets.docs.map((asset) =>
+                typeof asset.site === 'object' ? asset.site.id : asset.site,
+              ),
+            },
+          },
+        })
+        for (const site of sites.docs) siteNames.set(site.id, site.name)
+      }
+
       for (const asset of assets.docs) {
+        const siteID = typeof asset.site === 'object' ? asset.site.id : asset.site
         const endpoints = []
-        if (withEndpoints) {
+        if (withRelations) {
           let endpointAfter: string | undefined
           for (;;) {
             const page = await req.payload.find({
@@ -64,7 +86,10 @@ export const exportAssetsCSV: PayloadHandler = async (req) => {
             endpointAfter = page.docs.at(-1)!.id
           }
         }
-        yield { ...asset, endpoints } as Record<string, unknown>
+        yield { ...asset, site: siteNames.get(siteID) ?? siteID, endpoints } as Record<
+          string,
+          unknown
+        >
       }
 
       if (assets.docs.length < 100) break
@@ -77,39 +102,19 @@ export const exportAssetsCSV: PayloadHandler = async (req) => {
   for await (const doc of rows(false)) for (const key of Object.keys(doc)) columns.add(key)
   if (!columns.size) columns.add('id')
   const keys = [...columns]
-  const encoder = new TextEncoder()
-  const iterator = rows(true)
-  let header = true
+  const stream = ReadableStream.from(
+    (async function* () {
+      yield `\uFEFF${keys.map(csvCell).join(',')}\r\n`
+      for await (const row of rows(true))
+        yield `${keys.map((column) => csvCell(row[column])).join(',')}\r\n`
+    })(),
+  ).pipeThrough(new TextEncoderStream())
 
-  return new Response(
-    new ReadableStream<Uint8Array>({
-      async pull(controller) {
-        try {
-          if (header) {
-            header = false
-            controller.enqueue(encoder.encode(`\uFEFF${keys.map(csvCell).join(',')}\r\n`))
-            return
-          }
-          const row = await iterator.next()
-          if (row.done) controller.close()
-          else
-            controller.enqueue(
-              encoder.encode(`${keys.map((column) => csvCell(row.value[column])).join(',')}\r\n`),
-            )
-        } catch (error) {
-          controller.error(error)
-        }
-      },
-      async cancel() {
-        await iterator.return()
-      },
-    }),
-    {
-      headers: {
-        'Cache-Control': 'no-store',
-        'Content-Disposition': `attachment; filename="assets-${cutoff.slice(0, 10)}.csv"`,
-        'Content-Type': 'text/csv; charset=utf-8',
-      },
+  return new Response(stream as unknown as BodyInit, {
+    headers: {
+      'Cache-Control': 'no-store',
+      'Content-Disposition': `attachment; filename="assets-${cutoff.slice(0, 10)}.csv"`,
+      'Content-Type': 'text/csv; charset=utf-8',
     },
-  )
+  })
 }

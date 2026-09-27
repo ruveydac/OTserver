@@ -1,13 +1,9 @@
 **/payload-types.ts
 .tmp
-**/.git
-**/.hg
 **/.pnp.*
-**/.svn
 **/.yarn/**
 **/build
 **/dist/**
-**/node_modules
 **/.agents
 pnpm-lock.yaml
 **/temp

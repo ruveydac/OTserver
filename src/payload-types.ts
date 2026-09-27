@@ -134,6 +134,7 @@ export interface Config {
     tasks: {
       'import-v1': TaskImportV1;
       'maintenance-v1': TaskMaintenanceV1;
+      'reapply-asset-classes-v1': TaskReapplyAssetClassesV1;
       inline: {
         input: unknown;
         output: unknown;
@@ -169,6 +170,7 @@ export interface UserAuthOperations {
 export interface Site {
   id: string;
   name: string;
+  path?: string | null;
   type: string;
   /**
    * Optional parent site; nesting can be as deep as needed.
@@ -766,7 +768,6 @@ export interface Vulnerability {
     | number
     | boolean
     | null;
-  vendors?: string[] | null;
   products?: string[] | null;
   productTokens?: string[] | null;
   knownExploited?: boolean | null;
@@ -942,7 +943,7 @@ export interface PayloadJob {
     | {
         executedAt: string;
         completedAt: string;
-        taskSlug: 'inline' | 'import-v1' | 'maintenance-v1';
+        taskSlug: 'inline' | 'import-v1' | 'maintenance-v1' | 'reapply-asset-classes-v1';
         taskID: string;
         input?:
           | {
@@ -975,7 +976,7 @@ export interface PayloadJob {
         id?: string | null;
       }[]
     | null;
-  taskSlug?: ('inline' | 'import-v1' | 'maintenance-v1') | null;
+  taskSlug?: ('inline' | 'import-v1' | 'maintenance-v1' | 'reapply-asset-classes-v1') | null;
   queue?: string | null;
   waitUntil?: string | null;
   processing?: boolean | null;
@@ -1093,6 +1094,7 @@ export interface PayloadMigration {
  */
 export interface SitesSelect<T extends boolean = true> {
   name?: T;
+  path?: T;
   type?: T;
   parent?: T;
   description?: T;
@@ -1441,7 +1443,6 @@ export interface VulnerabilitiesSelect<T extends boolean = true> {
   modified?: T;
   references?: T;
   affected?: T;
-  vendors?: T;
   products?: T;
   productTokens?: T;
   knownExploited?: T;
@@ -1623,6 +1624,17 @@ export interface TaskImportV1 {
 export interface TaskMaintenanceV1 {
   input: {
     version: number;
+  };
+  output?: unknown;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskReapply-asset-classes-v1".
+ */
+export interface TaskReapplyAssetClassesV1 {
+  input: {
+    version: number;
+    assetClassID: string;
   };
   output?: unknown;
 }
