@@ -5,7 +5,7 @@ import { createServer } from 'node:http'
 import { gzipSync } from 'node:zlib'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { getPayload, type Payload, type TypedUser } from 'payload'
+import { createLocalReq, getPayload, type Payload, type TypedUser } from 'payload'
 
 import { ensureAssetClass } from '../../src/collections/AssetClasses'
 import { ensureAdminRole } from '../../src/collections/UserRoles'
@@ -99,7 +99,7 @@ describe('vocabulary normalization', () => {
     expect(similarity('', 'siemens')).toBe(0)
     expect(similarity('a', 'b')).toBe(0)
     expect(assetFingerprint(feedDocument)).toBe(
-      'Siemens AG|SIMATIC S7-1500 CPU 1516-3 PN/DP|||V2.5|1.0',
+      assetFingerprint({ ...feedDocument, vendor: ' Siemens AG ', operatingSystem: null }),
     )
   })
 })
@@ -572,6 +572,87 @@ describe('feed parsing', () => {
 })
 
 describe('asset matching', () => {
+  it.each([
+    ['versionStartIncluding', '1.2.8', false],
+    ['versionStartIncluding', 'V1.2.9', true],
+    ['versionStartIncluding', '1.2.10', true],
+    ['versionStartExcluding', '1.2.8', false],
+    ['versionStartExcluding', 'V1.2.9', false],
+    ['versionStartExcluding', '1.2.10', true],
+    ['versionEndIncluding', '1.2.8', true],
+    ['versionEndIncluding', 'V1.2.9', true],
+    ['versionEndIncluding', '1.2.10', false],
+    ['versionEndExcluding', '1.2.8', true],
+    ['versionEndExcluding', 'V1.2.9', false],
+    ['versionEndExcluding', '1.2.10', false],
+  ] as const)(
+    'evaluates %s at reported firmware %s (affected: %s)',
+    (bound, firmwareVersion, affected) => {
+      const matches = matchAssetVulnerabilities({ ...feedDocument, firmwareVersion }, [
+        {
+          cve: 'CVE-2099-0300',
+          affected: [
+            {
+              part: 'a',
+              vendor: 'siemens',
+              product: 'simatic_s7-1500_firmware',
+              version: '*',
+              [bound]: '1.2.9',
+            },
+          ],
+        },
+      ])
+      expect(matches.map(({ cve }) => cve)).toEqual(affected ? ['CVE-2099-0300'] : [])
+      if (affected) expect(matches[0].version).toBe(firmwareVersion)
+    },
+  )
+
+  it('retains the most specific affected product regardless of catalog ordering', () => {
+    const broad = {
+      part: 'a',
+      vendor: 'siemens',
+      product: 'simatic_s7-1500_cpu',
+      version: '*',
+    }
+    const specific = { ...broad, product: 'simatic_s7-1500_firmware', version: '2.5' }
+    for (const affected of [
+      [broad, specific],
+      [specific, broad],
+    ]) {
+      expect(
+        matchAssetVulnerabilities({ ...feedDocument, model: 'SIMATIC S7-1500' }, [
+          { cve: 'CVE-2099-0301', affected },
+        ]),
+      ).toMatchObject([
+        {
+          cve: 'CVE-2099-0301',
+          matchedProduct: specific.product,
+          constraint: '2.5',
+          version: 'V2.5',
+          versionEvidence: 'firmware version',
+        },
+      ])
+    }
+  })
+
+  it('does not infer affected versions from enrichment-only or incomplete catalog entries', () => {
+    const entry = {
+      part: 'a',
+      vendor: 'siemens',
+      product: 'simatic_s7-1500_firmware',
+      version: '*',
+    }
+    expect(
+      matchAssetVulnerabilities(feedDocument, [
+        { cve: 'CVE-2099-0302', knownExploited: true },
+        { cve: 'CVE-2099-0303', affected: null },
+        { cve: 'CVE-2099-0304', affected: [{ ...entry, vendor: '' }] },
+        { cve: 'CVE-2099-0305', affected: [{ ...entry, product: '' }] },
+        { cve: 'CVE-2099-0306', affected: [{ ...entry, version: '-' }] },
+      ]),
+    ).toEqual([])
+  })
+
   it('counts only entries whose version constraints match', async () => {
     const candidates = parseNvdFeed(await nvdFeed()).map(({ cve, set }) => ({
       affected: set.affected as never,
@@ -1018,6 +1099,25 @@ describe('vulnerability catalog', () => {
     ).docs
     expect(asset.vulnerabilityCount).toBe(1)
     expect(await recountAssetVulnerabilities(payload)).toBe(0)
+  })
+
+  it('keeps cached counts separate when version metadata contains field delimiters', async () => {
+    const unaffected = { ...feedDocument, firmwareVersion: '3.0|9', hardwareVersion: '1.0' }
+    const affected = { ...feedDocument, firmwareVersion: '3.0', hardwareVersion: '9|1.0' }
+    // Establish the actual catalog answers before exercising a shared import request cache.
+    expect(await countAssetVulnerabilities(payload, unaffected)).toBe(0)
+    expect(await countAssetVulnerabilities(payload, affected)).toBe(1)
+    for (const assets of [
+      [unaffected, affected],
+      [affected, unaffected],
+    ]) {
+      const req = await createLocalReq({ user: adminUser }, payload)
+      for (const asset of assets) {
+        expect(await countAssetVulnerabilities(payload, asset, { req })).toBe(
+          asset === affected ? 1 : 0,
+        )
+      }
+    }
   })
 
   it('skips a fresh catalog and keeps the previous one on failure', async () => {
