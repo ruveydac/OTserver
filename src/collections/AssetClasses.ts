@@ -361,7 +361,6 @@ const preventDeletingUsedClass: CollectionBeforeDeleteHook = async ({ id, req })
 
 export const AssetClasses: CollectionConfig = {
   slug: 'asset-classes',
-  labels: { plural: 'Asset Classes', singular: 'Asset Class' },
   access: {
     create: adminOnly,
     delete: adminOnly,
@@ -432,5 +431,4 @@ export const AssetClasses: CollectionConfig = {
     afterChange: [queueAssetClassReapply],
     beforeDelete: [preventDeletingUsedClass],
   },
-  timestamps: true,
 }

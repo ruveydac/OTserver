@@ -768,7 +768,6 @@ export interface Vulnerability {
     | number
     | boolean
     | null;
-  vendors?: string[] | null;
   products?: string[] | null;
   productTokens?: string[] | null;
   knownExploited?: boolean | null;
@@ -1444,7 +1443,6 @@ export interface VulnerabilitiesSelect<T extends boolean = true> {
   modified?: T;
   references?: T;
   affected?: T;
-  vendors?: T;
   products?: T;
   productTokens?: T;
   knownExploited?: T;

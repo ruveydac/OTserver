@@ -73,5 +73,4 @@ export const Users: CollectionConfig = {
     },
   ],
   hooks: { beforeValidate: [assignFirstUserToAdmin] },
-  timestamps: true,
 }

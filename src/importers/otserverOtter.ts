@@ -1,11 +1,12 @@
 import { isIP } from 'node:net'
 
 import type { DataQuality } from './assetQuality'
-import type {
-  ImportedAsset,
-  ImportedObservation,
-  ImportedTopologyLink,
-  ImportResult,
+import {
+  importedProtocols,
+  type ImportedAsset,
+  type ImportedObservation,
+  type ImportedTopologyLink,
+  type ImportResult,
 } from './types'
 import { normalizeMAC } from '../domain/network'
 import { endpointEvidence, expandPhysicalEvidence, serviceEvidence } from '../identity/evidence'
@@ -48,20 +49,7 @@ const allowedFields = new Set([
   'status',
   'vendor',
 ])
-const allowedProtocols = new Set([
-  'bacnet',
-  'dnp3',
-  'ethernet-ip',
-  'iec61850',
-  'modbus-tcp',
-  'netbios',
-  'niagara-fox',
-  'omron-fins',
-  'opc-ua',
-  'other',
-  'profinet',
-  's7',
-])
+const allowedProtocols = new Set<string>(importedProtocols)
 const textFields = new Set(
   [...allowedFields].filter((field) => !['osAccuracy', 'protocols'].includes(field)),
 )

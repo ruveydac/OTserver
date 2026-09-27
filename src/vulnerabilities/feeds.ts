@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto'
-import { Readable } from 'node:stream'
 import { createGunzip } from 'node:zlib'
 
 import { type Payload, type PayloadRequest, type RequiredDataFromCollectionSlug } from 'payload'
@@ -74,10 +73,8 @@ export const downloadFeed: DownloadFeed = async (url, { gzip, sha256 } = {}) => 
 
   const compressed: Buffer[] = []
   let compressedSize = 0
-  for await (const chunk of Readable.fromWeb(
-    response.body as Parameters<typeof Readable.fromWeb>[0],
-  )) {
-    const buffer = chunk as Buffer
+  for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+    const buffer = Buffer.from(chunk)
     compressedSize += buffer.length
     if (compressedSize > MAX_DOWNLOAD_BYTES) {
       throw new Error(`${url} exceeded the ${MAX_DOWNLOAD_BYTES} byte download limit.`)
@@ -388,7 +385,7 @@ const runSync = async (
     string,
     { sha256?: string }
   >
-  const state: Record<string, { lastModifiedDate?: string; sha256?: string }> = { ...nvdState }
+  const state: Record<string, { sha256?: string }> = { ...nvdState }
   const nvdFailures: string[] = []
   for (let year = FIRST_NVD_YEAR; year <= new Date().getUTCFullYear(); year += 1) {
     try {
@@ -408,7 +405,7 @@ const runSync = async (
       const documents = parseNvdFeed(feed)
       await upsertVulnerabilities(payload, documents)
       loaded += documents.length
-      state[year] = { lastModifiedDate: meta.lastModifiedDate, sha256: meta.sha256 }
+      state[year] = { sha256: meta.sha256 }
       // Persist each year as it lands. The initial 2002-onward import takes many minutes, and
       // without this an interrupted run would restart from the first year on the next boot.
       await saveFeedState(payload, 'nvd', { state })
@@ -440,7 +437,7 @@ const runSync = async (
   )
 
   // Asset counts are derived from the catalog, so they are refreshed whenever it moved.
-  const updatedAssets = loaded ? await recountAssetVulnerabilities(payload) : 0
+  const updatedAssets = await recountAssetVulnerabilities(payload)
 
   await writeAudit({
     action: 'custom',

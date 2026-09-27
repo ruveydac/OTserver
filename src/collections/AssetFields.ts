@@ -65,7 +65,6 @@ const keepTypeStable: CollectionBeforeChangeHook = ({ data, originalDoc }) => {
 
 export const AssetFields: CollectionConfig = {
   slug: 'asset-fields',
-  labels: { plural: 'Asset Fields', singular: 'Asset Field' },
   access: {
     create: adminOnly,
     delete: adminOnly,
@@ -106,5 +105,4 @@ export const AssetFields: CollectionConfig = {
     },
   ],
   hooks: { beforeChange: [keepTypeStable] },
-  timestamps: true,
 }

@@ -1,3 +1,5 @@
+@use '../../styles/shared';
+
 .dashboard .before-dashboard {
   margin-bottom: 3rem;
 
@@ -12,21 +14,6 @@
     justify-content: space-between;
     overflow: hidden;
     padding: 2.25rem;
-
-    h1 {
-      font-size: clamp(2rem, 4vw, 3.25rem);
-      letter-spacing: -0.04em;
-      margin: 0 0 0.5rem;
-    }
-
-    /* ponytail: otserver.svg logo styling */
-    &__logo {
-      display: block;
-      height: 48px;
-      margin: 0 0 0.5rem;
-      max-width: 100%;
-      width: auto;
-    }
 
     p:last-child {
       color: rgb(255 255 255 / 72%);
@@ -159,21 +146,6 @@
     display: inline-block;
     font-size: 0.75rem;
     padding: 0.2rem 0.55rem;
-
-    &--online {
-      background: var(--theme-success-100);
-      color: var(--theme-success-700);
-    }
-
-    &--offline {
-      background: var(--theme-error-100);
-      color: var(--theme-error-700);
-    }
-
-    &--maintenance {
-      background: var(--theme-warning-100);
-      color: var(--theme-warning-700);
-    }
   }
 
   &__empty {

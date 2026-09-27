@@ -1,3 +1,4 @@
+import { ReadableStream, TextEncoderStream } from 'node:stream/web'
 import { parseParams, type PayloadHandler } from 'payload'
 
 const csvCell = (value: unknown): string => {
@@ -101,39 +102,19 @@ export const exportAssetsCSV: PayloadHandler = async (req) => {
   for await (const doc of rows(false)) for (const key of Object.keys(doc)) columns.add(key)
   if (!columns.size) columns.add('id')
   const keys = [...columns]
-  const encoder = new TextEncoder()
-  const iterator = rows(true)
-  let header = true
+  const stream = ReadableStream.from(
+    (async function* () {
+      yield `\uFEFF${keys.map(csvCell).join(',')}\r\n`
+      for await (const row of rows(true))
+        yield `${keys.map((column) => csvCell(row[column])).join(',')}\r\n`
+    })(),
+  ).pipeThrough(new TextEncoderStream())
 
-  return new Response(
-    new ReadableStream<Uint8Array>({
-      async pull(controller) {
-        try {
-          if (header) {
-            header = false
-            controller.enqueue(encoder.encode(`\uFEFF${keys.map(csvCell).join(',')}\r\n`))
-            return
-          }
-          const row = await iterator.next()
-          if (row.done) controller.close()
-          else
-            controller.enqueue(
-              encoder.encode(`${keys.map((column) => csvCell(row.value[column])).join(',')}\r\n`),
-            )
-        } catch (error) {
-          controller.error(error)
-        }
-      },
-      async cancel() {
-        await iterator.return()
-      },
-    }),
-    {
-      headers: {
-        'Cache-Control': 'no-store',
-        'Content-Disposition': `attachment; filename="assets-${cutoff.slice(0, 10)}.csv"`,
-        'Content-Type': 'text/csv; charset=utf-8',
-      },
+  return new Response(stream as unknown as BodyInit, {
+    headers: {
+      'Cache-Control': 'no-store',
+      'Content-Disposition': `attachment; filename="assets-${cutoff.slice(0, 10)}.csv"`,
+      'Content-Type': 'text/csv; charset=utf-8',
     },
-  )
+  })
 }

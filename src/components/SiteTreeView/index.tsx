@@ -66,21 +66,21 @@ const SiteTreeView = async (props: ListViewServerProps) => {
   const adminRoute = props.payload.config.routes.admin
 
   return (
-    <main className="site-tree-view">
-      <header className="site-tree-view__header">
+    <main className="table-view site-tree-view">
+      <header className="table-view__header">
         <div>
           <h1>Sites</h1>
           <p>Sites are sorted by hierarchy and alphabetically within each parent.</p>
         </div>
         {props.hasCreatePermission ? (
-          <Link className="site-tree-view__create" href={props.newDocumentURL}>
+          <Link className="table-view__create" href={props.newDocumentURL}>
             Add site
           </Link>
         ) : null}
       </header>
 
       {rows.length ? (
-        <div className="site-tree-view__table-wrap">
+        <div className="table-view__table-wrap">
           <table>
             <thead>
               <tr>
@@ -120,7 +120,7 @@ const SiteTreeView = async (props: ListViewServerProps) => {
           </table>
         </div>
       ) : (
-        <div className="site-tree-view__empty">
+        <div className="table-view__empty">
           <h2>No sites yet</h2>
           <p>Add the first site before creating or importing assets.</p>
         </div>

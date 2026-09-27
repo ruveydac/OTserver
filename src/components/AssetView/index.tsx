@@ -196,7 +196,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
           <p>{asset.description || 'No description provided.'}</p>
         </div>
         <div className="asset-view__actions">
-          <span className={`asset-view__status asset-view__status--${asset.status}`}>
+          <span className={`asset-view__status status-tone status-tone--${asset.status}`}>
             {statusLabels[asset.status]}
           </span>
           <Link className="asset-view__edit" href={`${assetURL}/edit`}>

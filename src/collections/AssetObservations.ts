@@ -61,5 +61,4 @@ export const AssetObservations: CollectionConfig = {
     { fields: ['site', 'source', 'asset', 'observedAt'] },
   ],
   lockDocuments: false,
-  timestamps: true,
 }

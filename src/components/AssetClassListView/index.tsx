@@ -23,21 +23,21 @@ const AssetClassListView = async (props: ListViewServerProps) => {
   const adminRoute = props.payload.config.routes.admin
 
   return (
-    <main className="asset-class-list-view">
-      <header className="asset-class-list-view__header">
+    <main className="table-view">
+      <header className="table-view__header">
         <div>
           <h1>Asset Classes</h1>
           <p>Classes are reusable asset categories. Select one to edit it or view its assets.</p>
         </div>
         {props.hasCreatePermission ? (
-          <Link className="asset-class-list-view__create" href={props.newDocumentURL}>
+          <Link className="table-view__create" href={props.newDocumentURL}>
             Add asset class
           </Link>
         ) : null}
       </header>
 
       {classes.docs.length ? (
-        <div className="asset-class-list-view__table-wrap">
+        <div className="table-view__table-wrap">
           <table>
             <thead>
               <tr>
@@ -72,7 +72,7 @@ const AssetClassListView = async (props: ListViewServerProps) => {
           </table>
         </div>
       ) : (
-        <div className="asset-class-list-view__empty">
+        <div className="table-view__empty">
           <h2>No asset classes yet</h2>
           <p>Add a class before creating assets.</p>
         </div>

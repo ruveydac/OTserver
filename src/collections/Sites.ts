@@ -211,5 +211,4 @@ export const Sites: CollectionConfig = {
     beforeChange: [enforceWritableParent, preventHierarchyCycles],
     beforeDelete: [preventDeletingUsedSites],
   },
-  timestamps: true,
 }

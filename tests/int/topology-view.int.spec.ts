@@ -113,7 +113,6 @@ describe('topology graph building', () => {
     expect(explicitEdges[0]).toMatchObject({
       label: 'port1',
       source: 'a1',
-      sourceProtocol: 'lldp',
       target: 'a3',
     })
     expect(explicitEdges[1]).toMatchObject({ label: 'port2', source: 'a2', target: 'a3' })

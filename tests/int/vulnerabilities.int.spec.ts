@@ -30,7 +30,6 @@ import {
   parseNvdFeed,
   parseNvdMeta,
   parseRolieFeed,
-  searchKeys,
   syncVulnerabilityFeeds,
   upsertVulnerabilities,
 } from '../../src/vulnerabilities/feeds'
@@ -206,9 +205,7 @@ describe('feed parsing', () => {
         'lastModifiedDate:2026-09-10T03:00:00-04:00\nsize:247350327\nzipSize:20165415\ngzSize:20165279\nsha256:A2695F3AE4C4F6F89125C8C135176CA997642248C4F1FA6BD590D03BC7D80435\n',
       ),
     ).toEqual({
-      lastModifiedDate: '2026-09-10T03:00:00-04:00',
       sha256: 'a2695f3ae4c4f6f89125c8c135176ca997642248c4f1fa6bd590d03bc7d80435',
-      size: 247350327,
     })
     expect(parseNvdMeta('garbage')).toEqual({})
   })
@@ -245,7 +242,6 @@ describe('feed parsing', () => {
         versionStartIncluding: '1.0',
       },
     ])
-    expect(first.set.vendors).toEqual(['siemens'])
     expect(first.set.products).toEqual(['simatics71500'])
     expect(first.set.productTokens).toEqual(['simatic', 's7', '1500'])
 
@@ -284,12 +280,6 @@ describe('feed parsing', () => {
       })[0].set,
     ).toMatchObject({ affected: [], description: '', products: [], references: [] })
     expect(affectedProducts(undefined)).toEqual([])
-    expect(searchKeys([])).toEqual({ products: [], productTokens: [], vendors: [] })
-    expect(searchKeys([{ part: 'a', product: 'p', vendor: '*', version: '*' }])).toEqual({
-      products: ['p'],
-      productTokens: [],
-      vendors: [],
-    })
   })
 
   it('parses the CISA KEV catalog', async () => {
@@ -308,11 +298,9 @@ describe('feed parsing', () => {
     expect(exploited.set.kevDateAdded).toBeInstanceOf(Date)
     expect(exploited.setOnInsert).toMatchObject({
       products: ['simatics71500'],
-      vendors: ['siemens'],
     })
     expect(catalog.documents[1].setOnInsert).toMatchObject({
       products: ['exampleproduct'],
-      vendors: ['example'],
     })
 
     expect(() => parseCisaCatalog(undefined)).toThrow('expected catalog schema')
@@ -548,7 +536,6 @@ describe('feed parsing', () => {
         'https://www.cisa.gov/news-events/ics-advisories/icsa-26-001-01',
         'https://www.cisa.gov/news-events/ics-advisories/icsma-26-002-01',
       ],
-      vendors: ['examplevendor', 'example', 'vendor'],
     })
     expect(result.documents[1].setOnInsert).toMatchObject({ cvssScore: 7.5, cvssSeverity: 'HIGH' })
     expect(result.documents[2].set).toMatchObject({ icsAdvisory: ['ICSA-26-005-01'] })
@@ -947,7 +934,6 @@ describe('vulnerability catalog', () => {
       knownExploited: true,
       kevProduct: 'SIMATIC S7-1500',
       productTokens: ['simatic', 's7', '1500'],
-      vendors: ['siemens'],
     })
     expect(merged.docs[0].kevDateAdded).toBe('2026-01-15T00:00:00.000Z')
 

@@ -1,7 +1,7 @@
-import Image from 'next/image'
 import Link from 'next/link'
 import type { Payload, SanitizedPermissions } from 'payload'
 
+import { Brand } from '@/components/Brand'
 import { statusLabels } from '@/components/labels'
 import type { User } from '@/payload-types'
 
@@ -62,15 +62,7 @@ const BeforeDashboard = async ({
       <header className="before-dashboard__hero">
         <div>
           <p className="before-dashboard__eyebrow">OT inventory</p>
-          {/* ponytail: render otserver.svg logo */}
-          <Image
-            src="/otserver.svg"
-            alt="OTserver"
-            width={200}
-            height={40}
-            className="before-dashboard__logo"
-            unoptimized
-          />
+          <Brand height="48px" />
           <p>
             Track industrial devices, network identities, ownership data, and operational state.
           </p>
@@ -144,7 +136,7 @@ const BeforeDashboard = async ({
                       </td>
                       <td>
                         <span
-                          className={`before-dashboard__status before-dashboard__status--${status}`}
+                          className={`before-dashboard__status status-tone status-tone--${status}`}
                         >
                           {statusLabels[status]}
                         </span>
