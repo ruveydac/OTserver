@@ -142,6 +142,7 @@ describe('audit log', () => {
       'create',
       'update',
       'delete',
+      'delete',
     ])
     expect(assetLogs.docs.every(({ asset: relatedAsset }) => relatedAsset === asset.id)).toBe(true)
     expect(assetLogs.docs.every(({ actorID }) => actorID === user.id)).toBe(true)
