@@ -19,6 +19,7 @@ import { assignVulnerabilityCount } from '../vulnerabilities/match'
 import { randomUUID } from 'node:crypto'
 import { protectAssetIdentity, syncManualEndpoint } from '../identity/relationships'
 import { identityAction, migrateIdentity } from '../identity/actions'
+import { releaseDeletedAssetBindings } from '../identity/deletion'
 
 import { userSuppliedAssetFields } from '../domain/assetFields'
 export { userSuppliedAssetFields } from '../domain/assetFields'
@@ -407,6 +408,7 @@ export const Assets: CollectionConfig = {
     ],
     beforeOperation: [applyAssetSearch],
     afterChange: [syncManualEndpoint],
+    afterDelete: [releaseDeletedAssetBindings],
   },
   indexes: [{ fields: ['site', 'status'] }, { fields: ['site', 'assetClass'] }],
 }

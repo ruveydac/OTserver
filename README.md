@@ -207,6 +207,13 @@ endpoints store their interfaces and addresses. Qualified manufacturer/component
 can correlate multiple interfaces to one device. Ambiguous identities create review cases, and
 cross-site matches require explicit reconciliation. MAC-free chassis/modules can be inventoried.
 
+Moving assets to **Trash** keeps their hardware identities reserved for restoration. Permanently
+deleting an asset releases its serial identifiers, network endpoints, and service bindings; deleting
+an import alone does not. Imports automatically clear leftover bindings from older permanent
+deletions, while preserving observations and audit history. To retry a previously applied upload
+after cleanup, delete that import record and upload the file again; otherwise exact-file replay
+protection skips processing it.
+
 See [device identity and migration](docs/device-identity.md) for the model, supported evidence,
 operator actions, transaction requirements, and compatibility behavior. Scanner changes are tracked
 in the [future Otter identity roadmap](docs/otter-identity-roadmap.md).

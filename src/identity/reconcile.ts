@@ -1,12 +1,13 @@
 import { isIP } from 'node:net'
 import type { PayloadRequest } from 'payload'
-import type { Asset, NetworkEndpoint } from '../payload-types'
+import type { Asset, AssetIdentifier, NetworkEndpoint } from '../payload-types'
 import type { ImportedAsset } from '../importers/types'
 import { hardwareKey, scopedKey, text, endpointBindingKey } from './keys'
 import { idOf, requireWritableAsset } from './access'
 import { writeAudit } from '../collections/AuditLogs'
 import { mergeAssetData, type DataQuality } from '../importers/assetQuality'
 import { importSources } from '../importers/sources'
+import { removeOrphanedBindings } from './deletion'
 
 export const openIdentityCase = async (
   input: {
@@ -71,6 +72,8 @@ export const resolveImportedIdentity = async (
       },
     })
     endpoint = endpoints.docs[0]
+    if (endpoint?.asset && (await removeOrphanedBindings(idOf(endpoint.asset), req)))
+      endpoint = undefined
     if (endpoint?.asset) current = await requireWritableAsset(idOf(endpoint.asset), req)
     if (!endpoint) {
       // Only unmigrated legacy records participate in this compatibility lookup.
@@ -111,7 +114,9 @@ export const resolveImportedIdentity = async (
       overrideAccess: true,
       req,
     })
-    const identifier = identifiers.docs[0]
+    let identifier: AssetIdentifier | undefined = identifiers.docs[0]
+    if (identifier && (await removeOrphanedBindings(idOf(identifier.asset), req)))
+      identifier = undefined
     if (identifier && idOf(identifier.site) !== site) {
       await openIdentityCase(
         {
@@ -290,7 +295,9 @@ export const bindImportedIdentity = async (
       req,
       where: { bindingKey: { equals: bindingKey } },
     })
-    const current = existing.docs[0]
+    let current: NetworkEndpoint | undefined = existing.docs[0]
+    if (current?.asset && (await removeOrphanedBindings(idOf(current.asset), req)))
+      current = undefined
     if (current?.asset && idOf(current.asset) !== asset.id) {
       await openIdentityCase(
         {

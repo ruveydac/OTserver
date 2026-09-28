@@ -55,6 +55,10 @@ Main locations:
   to routed targets. Qualified existing v2 evidence can identify MAC-free components.
 - Endpoint/service assignments and module installations retain historical records. Use lifecycle
   states for retirement/replacement/merging; Payload trash is a separate deletion policy.
+- Trash retains hardware identity reservations. Permanent asset deletion releases its identifiers,
+  network endpoints, and service bindings through audited, transactional deletes. Imports repair
+  legacy orphaned bindings only after a global owner-existence check including Trash; inaccessible
+  or trashed assets are never orphans. Preserve observations, topology, and audit history.
 - Every asset and every import belongs to a mandatory site.
 - Asset classes are first-class, admin-managed documents. Assets reference an asset class; do not
   replace the relationship with hard-coded class options.

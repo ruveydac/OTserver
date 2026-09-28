@@ -289,6 +289,98 @@ describe('device identity', () => {
     })
   }
 
+  it('imports a unique Siemens CPU from an Otter v0.6 partial scan with ARP and S7 evidence', async () => {
+    const siteID = await site()
+    const macAddress = mac()
+    const ipAddress = '192.0.2.50'
+    const hardwareSerial = `S C-${serial()}`
+    const base = scan(hardwareSerial, [[macAddress, ipAddress]])
+    const input = {
+      ...base,
+      scanner: { name: 'OTserver Otter', version: 'v0.6' },
+      scan: { ...base.scan, partial: true },
+      devices: [
+        {
+          macAddress,
+          macAddresses: [macAddress],
+          ipAddresses: [ipAddress],
+          interfaces: [],
+          ports: [{ key: 'tcp:102', source: 's7' }],
+          observations: [
+            {
+              source: 'arp',
+              observedAt: '2026-09-24T13:54:42.9497215Z',
+              ipAddress,
+              macAddress,
+              fields: {
+                ipAddress,
+                macAddress,
+                name: ipAddress,
+                status: 'online',
+                vendor: 'Siemens AG',
+              },
+              raw: { ouiVendor: 'Siemens AG' },
+            },
+            {
+              source: 's7',
+              observedAt: '2026-09-24T13:54:57.614037Z',
+              ipAddress,
+              macAddress,
+              fields: {
+                ipAddress,
+                macAddress,
+                name: 'test-plc',
+                model: 'test-plc',
+                serialNumber: hardwareSerial,
+                firmwareVersion: '4.0.4',
+                protocols: ['s7'],
+                status: 'online',
+                vendor: 'Siemens',
+              },
+              raw: {
+                module: '6ES7 515-2FN03-0AB0',
+                basicHardware: '6ES7 515-2FN03-0AB0',
+                serialClaim: {
+                  catalogNumber: 'test-plc',
+                  encoding: 's7-szl-text',
+                  issuer: 'Siemens',
+                  normalizationVersion: 1,
+                  original: hardwareSerial,
+                  scope: 'cpu',
+                },
+                subject: { kind: 'device', macAddress },
+                listeners: [{ address: ipAddress, port: 102, route: [], transport: 'tcp' }],
+              },
+            },
+          ],
+        },
+      ],
+      errors: [`SNMP ${ipAddress}: timeout waiting for ${ipAddress}:161`],
+    }
+    const imported = await upload(siteID, input)
+    expect(imported).toMatchObject({ status: 'completed', createdAssets: 1 })
+    const inventory = await payload.find({
+      collection: 'assets',
+      depth: 0,
+      where: { site: { equals: siteID } },
+    })
+    expect(inventory.docs).toHaveLength(1)
+    expect(inventory.docs[0]).toMatchObject({
+      ipAddress,
+      macAddress,
+      serialNumber: hardwareSerial,
+      name: 'test-plc',
+      catalogNumber: '6ES7 515-2FN03-0AB0',
+      firmwareVersion: '4.0.4',
+    })
+    expect(idOf((await upload(siteID, input)).duplicateOf)).toBe(imported.id)
+    const observations = await payload.count({
+      collection: 'asset-observations',
+      where: { asset: { equals: inventory.docs[0].id } },
+    })
+    expect(observations.totalDocs).toBe(2)
+  })
+
   it('converges dual-homed hardware, replays safely, preserves human fields and old observations, and records replacement', async () => {
     const siteID = await site()
     const hardwareSerial = serial()
@@ -540,6 +632,169 @@ describe('device identity', () => {
     await expect(migrateIdentity(await createLocalReq({ user: writer }, payload))).rejects.toThrow(
       'Administrator',
     )
+  })
+
+  it('releases permanently deleted hardware bindings and repairs legacy orphans without releasing Trash', async () => {
+    const first = await site()
+    const second = await site()
+    const role = await payload.create({
+      collection: 'user-roles',
+      data: {
+        name: `Deletion writer ${randomUUID()}`,
+        permissions: [{ site: second, access: 'read-write' }],
+      },
+    })
+    roleIDs.push(role.id)
+    const writer = await payload.create({
+      collection: 'users',
+      data: {
+        name: 'Scoped deletion writer',
+        email: `${randomUUID()}@example.test`,
+        password: randomUUID(),
+        role: role.id,
+      },
+    })
+    userIDs.push(writer.id)
+
+    for (const legacyOrphan of [false, true]) {
+      const hardwareSerial = serial()
+      const address = mac()
+      const imported = await upload(first, scan(hardwareSerial, [[address, '192.0.2.50']]))
+      const original = (
+        await payload.find({
+          collection: 'assets',
+          where: {
+            and: [{ site: { equals: first } }, { serialNumber: { equals: hardwareSerial } }],
+          },
+          depth: 0,
+        })
+      ).docs[0]
+      const identifiers = await payload.find({
+        collection: 'asset-identifiers',
+        where: { asset: { equals: original.id } },
+      })
+
+      // Removing the upload alone must not release a living device's identity.
+      await payload.delete({
+        collection: 'asset-imports',
+        id: imported.id,
+        user,
+        overrideAccess: false,
+      })
+      expect(
+        (await upload(second, scan(hardwareSerial, [[address, '192.0.2.50']]), writer))
+          .createdAssets,
+      ).toBe(0)
+      await payload.update({
+        collection: 'assets',
+        id: original.id,
+        data: { deletedAt: new Date().toISOString() },
+        user,
+        overrideAccess: false,
+      })
+      expect(
+        (await upload(second, scan(hardwareSerial, [[address, '192.0.2.50']]), writer))
+          .createdAssets,
+      ).toBe(0)
+      await expect(
+        payload.delete({
+          collection: 'assets',
+          id: original.id,
+          trash: true,
+          user: writer,
+          overrideAccess: false,
+        }),
+      ).rejects.toThrow()
+      expect(
+        (
+          await payload.count({
+            collection: 'asset-identifiers',
+            where: { asset: { equals: original.id } },
+          })
+        ).totalDocs,
+      ).toBe(1)
+
+      if (legacyOrphan) {
+        // Reproduce a pre-fix permanent deletion that bypassed binding cleanup.
+        await payload.db.deleteOne({ collection: 'assets', where: { id: { equals: original.id } } })
+      } else {
+        await payload.delete({
+          collection: 'assets',
+          id: original.id,
+          trash: true,
+          user,
+          overrideAccess: false,
+        })
+        for (const collection of [
+          'asset-identifiers',
+          'network-endpoints',
+          'service-bindings',
+        ] as const)
+          expect(
+            (await payload.count({ collection, where: { asset: { equals: original.id } } }))
+              .totalDocs,
+          ).toBe(0)
+      }
+
+      expect(
+        (await upload(second, scan(hardwareSerial, [[address, '192.0.2.50']]), writer))
+          .createdAssets,
+      ).toBe(1)
+      for (const collection of [
+        'asset-identifiers',
+        'network-endpoints',
+        'service-bindings',
+      ] as const)
+        expect(
+          (await payload.count({ collection, where: { asset: { equals: original.id } } }))
+            .totalDocs,
+        ).toBe(0)
+      expect(
+        (
+          await payload.count({
+            collection: 'asset-observations',
+            where: { asset: { equals: original.id } },
+          })
+        ).totalDocs,
+      ).toBe(1)
+      expect(
+        (
+          await payload.count({
+            collection: 'audit-logs',
+            where: {
+              and: [
+                { action: { equals: 'delete' } },
+                { targetCollection: { equals: 'asset-identifiers' } },
+                { documentID: { equals: identifiers.docs[0].id } },
+              ],
+            },
+          })
+        ).totalDocs,
+      ).toBe(1)
+    }
+  })
+
+  it('repairs an orphaned primary MAC binding when re-importing into the same site', async () => {
+    const siteID = await site()
+    const address = mac()
+    const hardwareSerial = serial()
+    await upload(siteID, scan(hardwareSerial, [[address, '192.0.2.50']]))
+    const original = (
+      await payload.find({
+        collection: 'assets',
+        where: { site: { equals: siteID } },
+      })
+    ).docs[0]
+    await payload.db.deleteOne({ collection: 'assets', where: { id: { equals: original.id } } })
+    const imported = await upload(siteID, scan(hardwareSerial, [[address, '192.0.2.50']]))
+    expect(imported).toMatchObject({ status: 'completed', createdAssets: 1 })
+    const inventory = await payload.find({
+      collection: 'assets',
+      where: { site: { equals: siteID } },
+    })
+    expect(inventory.docs).toHaveLength(1)
+    expect(inventory.docs[0]).toMatchObject({ macAddress: address, ipAddress: '192.0.2.50' })
+    expect(inventory.docs[0].id).not.toBe(original.id)
   })
 
   it('keeps conflicting and revoked claims out of descriptive merging and validates lifecycle actions', async () => {
