@@ -14,6 +14,7 @@ import { Users } from './collections/Users'
 import { TopologyLinks } from './collections/TopologyLinks'
 import { Vulnerabilities, VulnerabilityFeeds } from './collections/Vulnerabilities'
 import { MAX_IMPORT_FILE_SIZE } from './importers/proneta'
+import { MAX_OTTER_IMPORT_FILE_SIZE } from './importers/otserverOtter'
 import { jobs } from './jobs/config'
 import { WorkerLeases, WorkerHeartbeats } from './collections/WorkerState'
 import { readiness, workerDiagnostics } from './jobs/diagnostics'
@@ -108,9 +109,9 @@ export default buildConfig({
   secret: process.env.OTSERVER_SECRET,
   onInit: initializeApplication,
   upload: {
-    requestSizeLimit: 52 * 1024 * 1024,
+    requestSizeLimit: 520 * 1024 * 1024,
     abortOnLimit: true,
-    limits: { fileSize: Math.max(MAX_IMPORT_FILE_SIZE, 50 * 1024 * 1024) },
+    limits: { fileSize: Math.max(MAX_IMPORT_FILE_SIZE, MAX_OTTER_IMPORT_FILE_SIZE) },
     preserveExtension: true,
     safeFileNames: true,
   },
