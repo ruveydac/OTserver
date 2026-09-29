@@ -55,6 +55,8 @@ const textFields = new Set(
 )
 const secretKey = /community|password|secret/i
 
+export const MAX_OTTER_IMPORT_FILE_SIZE = 500 * 1024 * 1024
+
 const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -134,8 +136,8 @@ const addTextField = (
 }
 
 export const parseOTserverOtter = (input: string): ImportResult => {
-  if (Buffer.byteLength(input, 'utf8') > 50 * 1024 * 1024)
-    throw new Error('Otter JSON exceeds the 50 MB import limit.')
+  if (Buffer.byteLength(input, 'utf8') > MAX_OTTER_IMPORT_FILE_SIZE)
+    throw new Error('Otter JSON exceeds the 500 MB import limit.')
   let parsed: unknown
   try {
     parsed = JSON.parse(input)
