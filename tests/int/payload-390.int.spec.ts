@@ -18,6 +18,7 @@ describe('Payload 3.90 compatibility', () => {
       ),
     )
     expect(new Set(versions)).toEqual(new Set(['3.90.1']))
+    expect(resolved.defaultMaxTextLength).toBe(0)
     expect(resolved.upload.requestSizeLimit).toBe(520 * 1024 * 1024)
     const imports = resolved.collections.find(({ slug }) => slug === 'asset-imports')
     expect(imports?.upload).toMatchObject({
