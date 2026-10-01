@@ -370,6 +370,98 @@ describe('OTserver Otter importer', () => {
     })
   })
 
+  it('imports PROFINET DCP and I&M record details from PNIO scans', () => {
+    const localMAC = randomMAC()
+    const file = mutableExport(localMAC, randomMAC())
+    file.devices[0].observations = [
+      {
+        source: 'profinet-dcp',
+        observedAt: '2026-10-01T16:11:25Z',
+        ipAddress: '172.30.0.10',
+        fields: {
+          macAddress: localMAC,
+          manufacturer: 'Chengdu Zongheng Intelligence Control Technology Co., Ltd.',
+          protocols: ['profinet', 'profinet-pnio'],
+          softwareRevision: 'V1.2.3',
+          status: 'online',
+        },
+        raw: {
+          pnioRecords: [
+            {
+              api: 0,
+              index: '0xAFF0',
+              slot: 0,
+              subslot: 1,
+              parsed: {
+                blockType: 32,
+                hardwareRevision: '3',
+                manufacturerId: '1234',
+                manufacturerName: 'Chengdu Zongheng Intelligence Control Technology Co., Ltd.',
+                orderId: 'ORD-1',
+                profileId: '0102',
+                serialNumber: 'SERIAL',
+                softwareRevision: 'V1.2.3',
+              },
+            },
+            {
+              api: 0,
+              index: '0xAFF5',
+              slot: 0,
+              subslot: 1,
+              parsed: {
+                blockType: 37,
+                im5Data: [
+                  {
+                    blockType: 52,
+                    imHardwareRevision: '3',
+                    imOrderId: 'BBBB',
+                    imSerialNumber: 'CCCCCCCCCCCCCCCC',
+                    imSoftwareRevision: 'V1.2.3',
+                    vendorId: '1234',
+                    vendorName: 'Chengdu Zongheng Intelligence Control Technology Co., Ltd.',
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        warnings: [],
+      },
+    ]
+
+    const [asset] = parseOTserverOtter(JSON.stringify(file)).assets
+    expect(asset).toMatchObject({
+      catalogNumber: 'ORD-1',
+      firmwareVersion: 'V1.2.3',
+      hardwareVersion: '3',
+      identity: {
+        authority: 'profinet',
+        manufacturer: '4660',
+        scope: 'device',
+        serial: 'SERIAL',
+      },
+      serialNumber: 'SERIAL',
+      vendor: 'Chengdu Zongheng Intelligence Control Technology Co., Ltd.',
+    })
+    expect(asset.observations?.[0]).toMatchObject({
+      fields: {
+        manufacturer: 'Chengdu Zongheng Intelligence Control Technology Co., Ltd.',
+        softwareRevision: 'V1.2.3',
+      },
+      mergeFields: {
+        catalogNumber: 'ORD-1',
+        firmwareVersion: 'V1.2.3',
+        hardwareVersion: '3',
+        protocols: ['profinet'],
+        serialNumber: 'SERIAL',
+        vendor: 'Chengdu Zongheng Intelligence Control Technology Co., Ltd.',
+      },
+      quality: 'high',
+      raw: { pnioRecords: expect.any(Array) },
+      source: 'profinet-dcp',
+    })
+  })
+
   it('validates identities, observations, links, and untrusted field types', () => {
     expect(() => parseOTserverOtter('{')).toThrow('not valid JSON')
     expect(() =>
