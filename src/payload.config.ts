@@ -78,8 +78,6 @@ export default buildConfig({
     },
     user: Users.slug,
   },
-  // Import diagnostics can exceed Payload's default 40,000-character text limit.
-  defaultMaxTextLength: 0,
   collections: [
     Sites,
     AssetClasses,
