@@ -28,6 +28,8 @@ import {
 import { withRequestContext } from '../integrations/payload/context'
 export { getAssetOverrides } from '../application/processImport'
 
+const MAX_DIAGNOSTICS_LENGTH = 4_000_000
+
 const normalizeLegacyOtterSource: CollectionBeforeValidateHook = ({ data }) => {
   if (data?.source === 'otserver-scanner') data.source = 'otserver-otter'
   return data
@@ -328,6 +330,8 @@ export const AssetImports: CollectionConfig = {
       name: 'warnings',
       type: 'textarea',
       admin: { readOnly: true },
+      // Import diagnostics can exceed Payload's default 40,000-character text limit.
+      maxLength: MAX_DIAGNOSTICS_LENGTH,
     },
     {
       name: 'scanMetadata',
@@ -345,6 +349,7 @@ export const AssetImports: CollectionConfig = {
       name: 'error',
       type: 'textarea',
       admin: { readOnly: true },
+      maxLength: MAX_DIAGNOSTICS_LENGTH,
     },
   ],
   hooks: {

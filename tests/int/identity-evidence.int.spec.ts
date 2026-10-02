@@ -122,6 +122,95 @@ describe('identity evidence boundaries', () => {
     ).toEqual({ serialNumber: 'X' })
   })
 
+  it('derives PROFINET identity from source-qualified I&M serial claims', () => {
+    const base = {
+      source: 'profinet-dcp',
+      observedAt: '2026-09-01T00:00:00Z',
+      quality: 'high' as const,
+      fields: { serialNumber: 'S C-V1X40202' },
+      raw: {
+        pnioRecords: [
+          {
+            index: '0xAFF0',
+            parsed: {
+              blockType: 32,
+              manufacturerId: '002A',
+              manufacturerName: 'Siemens AG',
+              serialNumber: 'S C-V1X40202',
+            },
+          },
+        ],
+      },
+    }
+    expect(observationIdentity(base)).toEqual({
+      authority: 'profinet',
+      manufacturer: '42',
+      scope: 'device',
+      serial: 'S C-V1X40202',
+    })
+    const im5 = {
+      ...base,
+      fields: { serialNumber: 'A1B2C3' },
+      raw: {
+        pnioRecords: [
+          {
+            index: '0xAFF5',
+            parsed: {
+              blockType: 37,
+              im5Data: [{ vendorId: '0102', vendorName: 'Acme', imSerialNumber: 'A1B2C3' }],
+            },
+          },
+        ],
+      },
+    }
+    expect(observationIdentity(im5)).toEqual({
+      authority: 'profinet',
+      manufacturer: '258',
+      scope: 'device',
+      serial: 'A1B2C3',
+    })
+    expect(observationIdentity({ ...base, fields: { serialNumber: 'S C-OTHER' } })).toBeUndefined()
+    expect(
+      observationIdentity({
+        ...base,
+        raw: {
+          pnioRecords: [{ parsed: { manufacturerName: 'Siemens AG', serialNumber: 'S C-OTHER' } }],
+        },
+      }),
+    ).toBeUndefined()
+    expect(
+      observationIdentity({
+        ...base,
+        raw: {
+          pnioRecords: [{ parsed: { manufacturerId: '0', serialNumber: 'S C-V1X40202' } }],
+        },
+      }),
+    ).toBeUndefined()
+    expect(observationIdentity({ ...base, raw: {} })).toBeUndefined()
+    const split = expandPhysicalEvidence({
+      name: 'PLC',
+      macAddress: '00:11:22:33:44:55',
+      observations: [base, { ...base, source: 's7', raw: { module: '6ES7' } }],
+    })
+    expect(split).toHaveLength(2)
+    expect(split[0].identity).toEqual({
+      authority: 'profinet',
+      manufacturer: '42',
+      scope: 'device',
+      serial: 'S C-V1X40202',
+    })
+    expect(split[1]).toMatchObject({
+      identity: { authority: 'siemens', manufacturer: 'siemens', scope: 'cpu' },
+      componentRef: hardwareKey({
+        authority: 'siemens',
+        manufacturer: 'siemens',
+        scope: 'cpu',
+        serial: 'S C-V1X40202',
+      }),
+      observedViaMAC: '00:11:22:33:44:55',
+    })
+  })
+
   it('retains interface address evidence without inventing listener associations', () => {
     const mac = '00:11:22:33:44:55'
     const endpoints = endpointEvidence({
