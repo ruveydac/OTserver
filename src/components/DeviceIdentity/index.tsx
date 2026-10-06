@@ -7,14 +7,18 @@ import { formatDateTime } from '@/components/labels'
 import IdentityActions from './Actions'
 import './index.scss'
 
+type IdentityView = 'all' | 'hardware' | 'network'
+
 export default async function DeviceIdentity({
   asset,
   payload,
   user,
+  view = 'all',
 }: {
   asset: Asset
   payload: Payload
   user: TypedUser
+  view?: IdentityView
 }) {
   const admin = payload.config.routes.admin
   const site = idOf(asset.site)
@@ -92,9 +96,15 @@ export default async function DeviceIdentity({
   const recordLink = (collection: string, id: string, label: string) => (
     <Link href={`${admin}/collections/${collection}/${id}`}>{label}</Link>
   )
+  const showNetwork = view === 'all' || view === 'network'
+  const showHardware = view === 'all' || view === 'hardware'
+
   return (
     <section className="asset-view__section asset-view__section--wide device-identity">
-      <h2>Physical identity</h2>
+      <div className="asset-view__section-heading">
+        <h2>{view === 'network' ? 'Network identity' : 'Physical identity'}</h2>
+        <span>{view === 'network' ? 'Scoped bindings' : 'Hardware relationships'}</span>
+      </div>
       <p>
         <code>{asset.uuid || 'Legacy record — migration required'}</code> ·{' '}
         {asset.physicalKind || 'unknown'} · {asset.lifecycle || 'active'} ·{' '}
@@ -109,94 +119,104 @@ export default async function DeviceIdentity({
       {asset.replacedBy ? (
         <p>Replaced by {recordLink('assets', idOf(asset.replacedBy), idOf(asset.replacedBy))}.</p>
       ) : null}
-      <h3>Hardware identifiers</h3>
-      {identifiers.docs.length ? (
-        <ul>
-          {identifiers.docs.map((identifier) => (
-            <li key={identifier.id}>
-              {recordLink(
-                'asset-identifiers',
-                identifier.id,
-                `${identifier.authority} / ${identifier.manufacturer} / ${identifier.scope} / ${identifier.serial}`,
-              )}{' '}
-              — {identifier.state}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p>Provisional identity. No accepted hardware key has been recorded.</p>
-      )}
-      <h3>Network endpoints</h3>
-      <ul>
-        {endpoints.docs.map((endpoint) => (
-          <li key={endpoint.id}>
-            {recordLink(
-              'network-endpoints',
-              endpoint.id,
-              endpoint.macAddress || endpoint.interfaceKey || endpoint.id,
-            )}{' '}
-            · {endpoint.addresses?.map(({ address }) => address).join(', ') || 'No recorded IP'}
-            {' · '}
-            {endpoint.endedAt
-              ? `Ended ${formatDateTime(endpoint.endedAt)}`
-              : `${endpoint.reachability} · last seen ${formatDateTime(endpoint.lastSeen)}`}
-          </li>
-        ))}
-      </ul>
-      <h3>Service bindings</h3>
-      <ul>
-        {services.docs.map((service) => (
-          <li key={service.id}>
-            {recordLink(
-              'service-bindings',
-              service.id,
-              `${service.protocol} · ${service.address || 'address unknown'} · ${service.transport}/${service.port ?? '—'}`,
-            )}
-            {service.endedAt ? ' (historical)' : ''}
-          </li>
-        ))}
-      </ul>
-      <h3>Chassis and modules</h3>
-      <ul>
-        {installations.docs.map((installation) => {
-          const peer =
-            idOf(installation.parent) === asset.id ? installation.module : installation.parent
-          return (
-            <li key={installation.id}>
-              {idOf(peer)
-                ? recordLink(
-                    'assets',
-                    idOf(peer),
-                    peer && typeof peer === 'object' ? peer.name : idOf(peer),
-                  )
-                : 'Unavailable component'}
-              {' · '}
-              {recordLink(
-                'asset-installations',
-                installation.id,
-                installation.slotPath ? `Slot ${installation.slotPath}` : 'Position not reported',
-              )}
-              {installation.removedAt
-                ? ` · removed ${formatDateTime(installation.removedAt)}`
-                : ' · installed'}
-            </li>
-          )
-        })}
-      </ul>
-      {cases.docs.length ? (
+      {showHardware ? (
         <>
-          <h3>Identity review</h3>
+          <h3>Hardware identifiers</h3>
+          {identifiers.docs.length ? (
+            <ul>
+              {identifiers.docs.map((identifier) => (
+                <li key={identifier.id}>
+                  {recordLink(
+                    'asset-identifiers',
+                    identifier.id,
+                    `${identifier.authority} / ${identifier.manufacturer} / ${identifier.scope} / ${identifier.serial}`,
+                  )}{' '}
+                  — {identifier.state}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>Provisional identity. No accepted hardware key has been recorded.</p>
+          )}
+          <h3>Chassis and modules</h3>
           <ul>
-            {cases.docs.map((item) => (
-              <li key={item.id}>
-                {recordLink('identity-cases', item.id, `${item.kind} — ${item.reason}`)} (
-                {item.status})
+            {installations.docs.map((installation) => {
+              const peer =
+                idOf(installation.parent) === asset.id ? installation.module : installation.parent
+              return (
+                <li key={installation.id}>
+                  {idOf(peer)
+                    ? recordLink(
+                        'assets',
+                        idOf(peer),
+                        peer && typeof peer === 'object' ? peer.name : idOf(peer),
+                      )
+                    : 'Unavailable component'}
+                  {' · '}
+                  {recordLink(
+                    'asset-installations',
+                    installation.id,
+                    installation.slotPath
+                      ? `Slot ${installation.slotPath}`
+                      : 'Position not reported',
+                  )}
+                  {installation.removedAt
+                    ? ` · removed ${formatDateTime(installation.removedAt)}`
+                    : ' · installed'}
+                </li>
+              )
+            })}
+          </ul>
+          {cases.docs.length ? (
+            <>
+              <h3>Identity review</h3>
+              <ul>
+                {cases.docs.map((item) => (
+                  <li key={item.id}>
+                    {recordLink('identity-cases', item.id, `${item.kind} — ${item.reason}`)} (
+                    {item.status})
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </>
+      ) : null}
+      {showNetwork ? (
+        <>
+          <h3>Network endpoints</h3>
+          <ul>
+            {endpoints.docs.map((endpoint) => (
+              <li key={endpoint.id}>
+                {recordLink(
+                  'network-endpoints',
+                  endpoint.id,
+                  endpoint.macAddress || endpoint.interfaceKey || endpoint.id,
+                )}{' '}
+                · {endpoint.addresses?.map(({ address }) => address).join(', ') || 'No recorded IP'}
+                {' · '}
+                {endpoint.endedAt
+                  ? `Ended ${formatDateTime(endpoint.endedAt)}`
+                  : `${endpoint.reachability} · last seen ${formatDateTime(endpoint.lastSeen)}`}
+              </li>
+            ))}
+          </ul>
+          <h3>Service bindings</h3>
+          <ul>
+            {services.docs.map((service) => (
+              <li key={service.id}>
+                {recordLink(
+                  'service-bindings',
+                  service.id,
+                  `${service.protocol} · ${service.address || 'address unknown'} · ${service.transport}/${service.port ?? '—'}`,
+                )}
+                {service.endedAt ? ' (historical)' : ''}
               </li>
             ))}
           </ul>
         </>
       ) : null}
-      {writable ? (
+      {showHardware && writable ? (
         <>
           <p>
             <Link href={`${admin}/collections/asset-identifiers/create`}>

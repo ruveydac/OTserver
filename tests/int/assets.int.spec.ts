@@ -118,7 +118,7 @@ describe('asset network fields', () => {
   })
 
   it('renders every asset section with an explicit edit link', async () => {
-    const view = await AssetView({
+    const props = {
       doc: {
         assetClass: {
           createdAt: '2026-08-08T09:00:00.000Z',
@@ -151,6 +151,17 @@ describe('asset network fields', () => {
       },
       payload: {
         config: { routes: { admin: '/admin' } },
+        findByID: vi.fn().mockImplementation(({ collection }: { collection: string }) =>
+          Promise.resolve(
+            collection === 'sites'
+              ? {
+                  id: 'site-1',
+                  name: 'Plant Berlin',
+                  path: 'World / Germany / Plant Berlin',
+                }
+              : undefined,
+          ),
+        ),
         find: vi.fn().mockImplementation(({ collection }: { collection: string }) => {
           if (collection === 'asset-installations') return Promise.resolve({ docs: [] })
           if (collection === 'vulnerabilities') {
@@ -196,14 +207,15 @@ describe('asset network fields', () => {
         }),
       },
       routeSegments: ['collections', 'assets', 'asset-1'],
-    } as unknown as DocumentViewServerProps)
+    } as unknown as DocumentViewServerProps
+    const view = await AssetView(props)
     const html = renderToStaticMarkup(createElement(() => view))
 
     expect(html).toContain('Main line controller')
     expect(html).toContain('Maintenance window Sunday')
     expect(html).toContain('href="/admin/collections/asset-classes/class-1"')
     expect(html).toContain('PLC')
-    expect(html).toContain('Plant Berlin')
+    expect(html).toContain('World / Germany / Plant Berlin')
     expect(html).toContain('href="/admin/collections/sites/site-1"')
     expect(html).toContain('S-123')
     expect(html).toContain('Remote access enabled')
@@ -212,8 +224,14 @@ describe('asset network fields', () => {
     expect(html).toContain('<dd>0</dd>')
     expect(html).toContain('href="/admin/collections/assets/asset-1/edit"')
     expect(html).toContain('Edit asset')
-    // The detail view lists only the five worst matches, most severe first, and defers the rest
-    // to the vulnerability subview.
+    expect(html).toContain('aria-label="Asset sections"')
+    expect(html).toContain('href="/admin/collections/assets/asset-1?tab=network"')
+    expect(html).toContain('href="/admin/collections/assets/asset-1?tab=security"')
+    expect(html).toContain('href="/admin/collections/assets/asset-1?tab=discovery"')
+    expect(html).toContain('href="/admin/collections/assets/asset-1?tab=history"')
+    expect(html).toContain('Current endpoints')
+    expect(html).toContain('Comfortable')
+    // The overview lists only the five worst matches, most severe first.
     const positions = [
       'CVE-2099-0003',
       'CVE-2099-0002',
@@ -227,9 +245,31 @@ describe('asset network fields', () => {
     expect(html).not.toContain('CVE-2099-0001')
     expect(html).not.toContain('CVE-2099-0006')
     expect(html).toContain('View all 7 matches')
-    expect(html).toContain('Change history')
+    expect(html).not.toContain('<h2>Discovery evidence</h2>')
+    expect(html).not.toContain('<h2>Change history</h2>')
     expect(html).toContain('operator@example.test')
     expect(html).toContain('offline → online')
+
+    const discoveryView = await AssetView({ ...props, searchParams: { tab: 'discovery' } })
+    const discoveryHTML = renderToStaticMarkup(createElement(() => discoveryView))
+    expect(discoveryHTML).toContain('<h2>Discovery evidence</h2>')
+    expect(discoveryHTML).not.toContain('<h2>Change history</h2>')
+
+    const historyView = await AssetView({ ...props, searchParams: { tab: 'history' } })
+    const historyHTML = renderToStaticMarkup(createElement(() => historyView))
+    expect(historyHTML).toContain('<h2>Change history</h2>')
+    expect(historyHTML).not.toContain('<h2>Discovery evidence</h2>')
+
+    const securityView = await AssetView({ ...props, searchParams: { tab: 'security' } })
+    const securityHTML = renderToStaticMarkup(createElement(() => securityView))
+    expect(securityHTML).toContain('7 total')
+    expect(securityHTML).toContain(
+      'asset-view__severity-count--critical"><dt>critical</dt><dd>2</dd>',
+    )
+    expect(securityHTML).toContain('asset-view__severity-count--high"><dt>high</dt><dd>2</dd>')
+    expect(securityHTML).toContain('asset-view__severity-count--medium"><dt>medium</dt><dd>3</dd>')
+    expect(securityHTML).toContain('CVE-2099-0001')
+    expect(securityHTML).toContain('CVE-2099-0006')
   })
 
   it('keeps server-only values out of the edit form', async () => {
@@ -246,7 +286,7 @@ describe('asset network fields', () => {
   })
 
   it('renders empty values, raw relationships, and audit change variants', async () => {
-    const view = await AssetView({
+    const props = {
       doc: {
         assetClass: 'class-other',
         createdAt: '2026-08-08T10:00:00.000Z',
@@ -263,6 +303,15 @@ describe('asset network fields', () => {
       },
       payload: {
         config: { routes: { admin: '/admin' } },
+        findByID: vi
+          .fn()
+          .mockImplementation(({ collection }: { collection: string }) =>
+            Promise.resolve(
+              collection === 'sites'
+                ? { id: 'site-raw', name: 'Cell 1', path: 'World / Plant Berlin / Cell 1' }
+                : { id: 'class-other', name: 'Other equipment' },
+            ),
+          ),
         find: vi.fn().mockImplementation(({ collection }: { collection: string }) => {
           if (collection === 'audit-logs') {
             return Promise.resolve({
@@ -291,21 +340,30 @@ describe('asset network fields', () => {
         }),
       },
       routeSegments: ['collections', 'assets', 'asset-2'],
-    } as unknown as DocumentViewServerProps)
+    } as unknown as DocumentViewServerProps
+    const view = await AssetView(props)
     const html = renderToStaticMarkup(createElement(() => view))
 
     expect(html).toContain('No description provided')
-    expect(html).toContain('site-raw')
-    expect(html).toContain('No scanner evidence recorded yet')
+    expect(html).toContain('World / Plant Berlin / Cell 1')
+    expect(html).toContain('Other equipment')
     expect(html).toContain('No topology links recorded yet')
-    expect(html).toContain('No field changes recorded')
-    expect(html).toContain('old → removed')
     expect(html).toContain('{&quot;nested&quot;:true}')
     expect(html).toContain('System')
+
+    const discoveryView = await AssetView({ ...props, searchParams: { tab: 'discovery' } })
+    expect(renderToStaticMarkup(createElement(() => discoveryView))).toContain(
+      'No scanner evidence recorded yet',
+    )
+
+    const historyView = await AssetView({ ...props, searchParams: { tab: 'history' } })
+    const historyHTML = renderToStaticMarkup(createElement(() => historyView))
+    expect(historyHTML).toContain('No field changes recorded')
+    expect(historyHTML).toContain('old → removed')
   })
 
   it('renders scanner evidence, topology peers, custom dates, and empty history', async () => {
-    const view = await AssetView({
+    const props = {
       doc: {
         assetClass: 'class-1',
         createdAt: '2026-08-08T10:00:00.000Z',
@@ -324,6 +382,15 @@ describe('asset network fields', () => {
       },
       payload: {
         config: { routes: { admin: '/admin' } },
+        findByID: vi
+          .fn()
+          .mockImplementation(({ collection }: { collection: string }) =>
+            Promise.resolve(
+              collection === 'sites'
+                ? { id: 3, name: 'Cell 3', path: 'World / Plant Berlin / Cell 3' }
+                : { id: 'class-1', name: 'PLC' },
+            ),
+          ),
         find: vi.fn().mockImplementation(({ collection }: { collection: string }) => {
           if (collection === 'vulnerabilities') {
             return Promise.resolve({
@@ -391,15 +458,21 @@ describe('asset network fields', () => {
         }),
       },
       routeSegments: ['collections', 'assets', 'asset-3'],
-    } as unknown as DocumentViewServerProps)
+    } as unknown as DocumentViewServerProps
+    const view = await AssetView(props)
     const html = renderToStaticMarkup(createElement(() => view))
 
     expect(html).toContain('Yes')
     expect(html).toContain('8 Aug 2026')
-    expect(html).toContain('high quality evidence')
+    expect(html).not.toContain('high quality evidence')
     expect(html).toContain('Peer')
     expect(html).toContain('Other peer')
     expect(html).toContain('No changes recorded yet')
+
+    const discoveryView = await AssetView({ ...props, searchParams: { tab: 'discovery' } })
+    expect(renderToStaticMarkup(createElement(() => discoveryView))).toContain(
+      'high quality evidence',
+    )
     // At or below the cap every match is listed and the link offers details rather than a count.
     expect(html).toContain(
       '<li>CVE-2099-0012<span class="asset-view__severity--high" title="HIGH">8.8</span></li>',
