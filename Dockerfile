@@ -2,6 +2,7 @@ FROM node:22-alpine AS deps
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches ./patches
 RUN corepack enable && pnpm install --frozen-lockfile
 
 FROM node:22-alpine AS builder
