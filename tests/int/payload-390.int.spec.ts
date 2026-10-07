@@ -18,8 +18,19 @@ describe('Payload 3.90 compatibility', () => {
       ),
     )
     expect(new Set(versions)).toEqual(new Set(['3.90.1']))
+    expect(resolved.defaultMaxTextLength).toBe(40000)
     expect(resolved.upload.requestSizeLimit).toBe(520 * 1024 * 1024)
     const imports = resolved.collections.find(({ slug }) => slug === 'asset-imports')
+    const diagnosticLengths = (imports?.fields || [])
+      .filter(
+        (field): field is typeof field & { name: string; maxLength?: number } =>
+          'name' in field && ['warnings', 'error'].includes(field.name),
+      )
+      .map((field) => [field.name, field.maxLength])
+    expect(Object.fromEntries(diagnosticLengths)).toEqual({
+      warnings: 4_000_000,
+      error: 4_000_000,
+    })
     expect(imports?.upload).toMatchObject({
       allowRestrictedFileTypes: true,
       mimeTypes: expect.arrayContaining(['application/xml', 'text/xml']),

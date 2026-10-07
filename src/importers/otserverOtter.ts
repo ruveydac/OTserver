@@ -239,6 +239,47 @@ export const parseOTserverOtter = (input: string): ImportResult => {
         )
         addTextField(fields, mergeFields, 'firmwareVersion', primaryEntity?.firmwareRevision)
         if (source === 'arp') addTextField(fields, mergeFields, 'vendor', raw.ouiVendor)
+        if (source === 'profinet-dcp') {
+          const pnio = array(raw.pnioRecords).map((item) => record(record(item).parsed))
+          const imRecords = pnio.flatMap((parsed) => array(parsed.im5Data).map(record))
+          addTextField(
+            fields,
+            mergeFields,
+            'vendor',
+            originalFields.manufacturer,
+            ...pnio.map((item) => item.manufacturerName),
+            ...imRecords.map((item) => item.vendorName),
+          )
+          addTextField(
+            fields,
+            mergeFields,
+            'serialNumber',
+            ...pnio.map((item) => item.serialNumber),
+            ...imRecords.map((item) => item.imSerialNumber),
+          )
+          addTextField(
+            fields,
+            mergeFields,
+            'catalogNumber',
+            ...pnio.map((item) => item.orderId),
+            ...imRecords.map((item) => item.imOrderId),
+          )
+          addTextField(
+            fields,
+            mergeFields,
+            'hardwareVersion',
+            ...pnio.map((item) => item.hardwareRevision),
+            ...imRecords.map((item) => item.imHardwareRevision),
+          )
+          addTextField(
+            fields,
+            mergeFields,
+            'firmwareVersion',
+            originalFields.softwareRevision,
+            ...pnio.map((item) => item.softwareRevision),
+            ...imRecords.map((item) => item.imSoftwareRevision),
+          )
+        }
         return {
           fields,
           mergeFields,

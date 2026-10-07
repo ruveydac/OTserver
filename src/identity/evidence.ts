@@ -19,6 +19,8 @@ export type ServiceEvidence = {
   source: string
 }
 
+const array = (value: unknown): unknown[] => (Array.isArray(value) ? value : [])
+
 /** Only source-specific identity layouts that the pinned v2 scanner actually emits. */
 export const observationIdentity = (
   observation: ImportedObservation,
@@ -41,6 +43,38 @@ export const observationIdentity = (
     }
   } else if (observation.source === 's7' && text(raw.module) && serial) {
     identity = { authority: 'siemens', manufacturer: 'siemens', scope: 'cpu', serial }
+  } else if (observation.source === 'profinet-dcp') {
+    const pnio = array(raw.pnioRecords)
+      .map(record)
+      .map((item) => record(item.parsed))
+    const claims = pnio.flatMap((parsed) => [
+      ...(text(parsed.manufacturerId) && text(parsed.serialNumber)
+        ? [{ vendor: parsed.manufacturerId, serial: text(parsed.serialNumber) }]
+        : []),
+      ...array(parsed.im5Data)
+        .map(record)
+        .flatMap((im) =>
+          text(im.vendorId) && text(im.imSerialNumber)
+            ? [{ vendor: im.vendorId, serial: text(im.imSerialNumber) }]
+            : [],
+        ),
+    ])
+    const match = claims.find(({ serial: value }) => value === serial)
+    const manufacturer = match ? Number.parseInt(text(match.vendor), 16) : NaN
+    if (
+      match &&
+      serial &&
+      Number.isInteger(manufacturer) &&
+      manufacturer >= 1 &&
+      manufacturer <= 65535
+    ) {
+      identity = {
+        authority: 'profinet',
+        manufacturer: String(manufacturer),
+        scope: 'device',
+        serial,
+      }
+    }
   }
   if (!identity) return undefined
   try {

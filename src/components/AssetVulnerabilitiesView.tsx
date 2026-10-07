@@ -51,19 +51,21 @@ const AssetVulnerabilitiesView = async (props: DocumentViewServerProps) => {
       </div>
 
       <header className="asset-view__header">
-        <div>
-          <p className="asset-view__eyebrow">Vulnerability lookup</p>
-          <h1>{matches.length} potential vulnerabilities</h1>
-          <p>
-            Matched against downloaded CSAF and NVD advisories, enriched with CISA KEV and ICS
-            Advisory Project context, using the vendor, model, operating system, and version data
-            recorded for this asset.
-          </p>
-        </div>
-        <div className="asset-view__actions">
-          <Link className="asset-view__edit" href={assetURL}>
-            Asset details
-          </Link>
+        <div className="asset-view__header-main">
+          <div>
+            <p className="asset-view__eyebrow">Vulnerability lookup</p>
+            <h1>{matches.length} potential vulnerabilities</h1>
+            <p>
+              Matched against downloaded CSAF and NVD advisories, enriched with CISA KEV and ICS
+              Advisory Project context, using the vendor, model, operating system, and version data
+              recorded for this asset.
+            </p>
+          </div>
+          <div className="asset-view__actions">
+            <Link className="asset-view__edit" href={assetURL}>
+              Asset details
+            </Link>
+          </div>
         </div>
       </header>
 

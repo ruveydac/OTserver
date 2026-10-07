@@ -30,6 +30,7 @@ import {
   parseNvdFeed,
   parseNvdMeta,
   parseRolieFeed,
+  mergeCsafDocuments,
   syncVulnerabilityFeeds,
   upsertVulnerabilities,
 } from '../../src/vulnerabilities/feeds'
@@ -111,6 +112,8 @@ describe('version evaluation', () => {
     expect(compareVersions('2.5', '2.5.0')).toBe(0)
     expect(compareVersions('2.9', '3.0')).toBe(-1)
     expect(compareVersions('1.0a', '1.0b')).toBe(-1)
+    expect(compareVersions('1.0b', '1.0a')).toBe(1)
+    expect(compareVersions('1.0a', '1.0a')).toBe(0)
     expect(compareVersions('', '')).toBe(0)
   })
 
@@ -312,6 +315,14 @@ describe('feed parsing', () => {
         vulnerabilities: [{ cveID: 'bad' }],
       }),
     ).toThrow('invalid entry')
+    expect(() =>
+      parseCisaCatalog({
+        catalogVersion: '1',
+        count: 1,
+        dateReleased: '2026-09-10T14:00:00.000Z',
+        vulnerabilities: [],
+      }),
+    ).toThrow('count does not match')
   })
 
   it('discovers and parses CSAF 2.0 provider advisories', async () => {
@@ -505,6 +516,43 @@ describe('feed parsing', () => {
     ])
     expect(parseCsv('"say ""hi""","line\nbreak"')).toEqual([['say "hi"', 'line\nbreak']])
     expect(parseCsv('')).toEqual([])
+  })
+
+  it('merges duplicate CSAF documents without duplicating affected products', () => {
+    const affected = {
+      part: 'a',
+      product: 'controller',
+      vendor: 'vendor',
+      version: '*',
+    }
+    const merged = mergeCsafDocuments([
+      {
+        cve: 'CVE-2099-0400',
+        set: { affected: [affected], description: 'first' },
+      },
+      {
+        cve: 'CVE-2099-0400',
+        set: {
+          affected: [affected, { ...affected, versionEndExcluding: '2.0' }],
+          description: 'second',
+        },
+      },
+      {
+        cve: 'CVE-2099-0401',
+        set: { affected: [] },
+      },
+    ])
+
+    expect(merged).toHaveLength(2)
+    expect(merged[0]).toMatchObject({
+      cve: 'CVE-2099-0400',
+      set: {
+        affected: [affected, { ...affected, versionEndExcluding: '2.0' }],
+        description: 'second',
+        products: ['controller'],
+        productTokens: ['controller'],
+      },
+    })
   })
 
   it('merges ICS Advisory Project rows per CVE and rejects malformed values', async () => {
@@ -781,6 +829,29 @@ describe('asset matching', () => {
         .sort(bySeverity)
         .map(({ cve }) => cve),
     ).toEqual(['CVE-2099-0004', 'CVE-2099-0002', 'CVE-2099-0003', 'CVE-2099-0001'])
+    expect(
+      [match('CVE-2099-0002', 7.0), match('CVE-2099-0001', 7.0)]
+        .sort(bySeverity)
+        .map(({ cve }) => cve),
+    ).toEqual(['CVE-2099-0001', 'CVE-2099-0002'])
+    expect(
+      matchAssetVulnerabilities(
+        { firmwareVersion: '2.5', model: 'SIMATIC S7-1500', vendor: 'Siemens' },
+        [
+          {
+            affected: [
+              {
+                part: 'a',
+                product: 'simaticx_s7x_1500x',
+                vendor: 'siemens',
+                version: '*',
+              },
+            ],
+            cve: 'CVE-2099-0007',
+          },
+        ],
+      ),
+    ).toEqual([])
   })
 
   it('builds bounded candidate queries from product evidence', () => {
@@ -1191,6 +1262,28 @@ describe('vulnerability catalog', () => {
       syncVulnerabilityFeeds(payload, { download: downloadFixtures, force: true }),
     ])
     expect(first).toBe(second)
+  })
+
+  it('can make a source failure fatal after recording the failed source state', async () => {
+    await expect(
+      syncVulnerabilityFeeds(payload, {
+        download: async (url) => {
+          if (url === CISA_KEV_URL) throw new Error('KEV mirror unavailable')
+          return downloadFixtures(url)
+        },
+        failOnSourceError: true,
+        force: true,
+      }),
+    ).rejects.toMatchObject({ code: 'ECONNRESET' })
+
+    const kev = await payload.find({
+      collection: 'vulnerability-feeds',
+      depth: 0,
+      overrideAccess: true,
+      where: { source: { equals: 'cisa-kev' } },
+    })
+    expect(kev.docs[0].status).toBe('failed')
+    expect(kev.docs[0].error).toContain('KEV mirror unavailable')
   })
 
   it('resumes an interrupted NVD import instead of re-downloading every year', async () => {

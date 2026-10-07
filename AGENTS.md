@@ -195,6 +195,8 @@ nested queries must continue to fail with a clear HTTP 400 error.
 - Regenerate the Payload admin import map with `pnpm generate:importmap` when component registrations
   change.
 - Commit `pnpm-lock.yaml` when `package.json` changes.
+- Keep `brace-expansion` at 5.0.12 or newer; `patches/minimatch@3.1.5.patch` adapts the legacy
+  CommonJS import to its named export. Include dependency patches in container installs.
 - Never commit `.env`, `otter.json`, legacy `otscanner.json`, discovery output, uploads, build output,
   or caches. The root `.gitignore` contains the expected patterns.
 

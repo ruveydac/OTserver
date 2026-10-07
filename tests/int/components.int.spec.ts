@@ -46,6 +46,8 @@ vi.mock('@payloadcms/ui', async () => {
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: mocks.push }) }))
 
 import AssetListInteractions from '../../src/components/AssetListInteractions'
+import CopyButton from '../../src/components/AssetView/CopyButton'
+import DensityToggle from '../../src/components/AssetView/DensityToggle'
 import CustomAssetFields from '../../src/components/CustomAssetFields'
 import ImportInstructions from '../../src/components/ImportInstructions'
 import SiteIDField from '../../src/components/SiteIDField'
@@ -69,6 +71,7 @@ beforeEach(() => {
   mocks.fieldValue = {}
   mocks.query = {}
   mocks.selection = { count: 0, getQueryParams: vi.fn(() => ''), selectAll: 'none' }
+  window.localStorage.clear()
   container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
@@ -168,6 +171,50 @@ describe('custom asset fields', () => {
     await act(async () => root.unmount())
     root = createRoot(container)
     expect(signal?.aborted).toBe(true)
+  })
+})
+
+describe('asset view controls', () => {
+  it('reports successful and failed clipboard writes', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    await render(createElement(CopyButton, { value: '192.0.2.1' }))
+
+    const button = container.querySelector<HTMLButtonElement>('button')!
+    vi.useFakeTimers()
+    await act(async () => button.click())
+    expect(writeText).toHaveBeenCalledWith('192.0.2.1')
+    expect(button.textContent).toBe('Copied')
+    expect(button.ariaLabel).toBe('Copied 192.0.2.1')
+
+    await act(async () => vi.advanceTimersByTimeAsync(1400))
+    expect(button.textContent).toBe('Copy')
+
+    writeText.mockRejectedValueOnce(new Error('clipboard unavailable'))
+    await act(async () => button.click())
+    expect(button.textContent).toBe('Copy')
+    expect(button.ariaLabel).toBe('Copy 192.0.2.1')
+    vi.useRealTimers()
+  })
+
+  it('restores saved density, persists changes, and tolerates a missing view root', async () => {
+    window.localStorage.setItem('otserver-asset-density', 'compact')
+    const view = document.createElement('div')
+    view.className = 'asset-view'
+    document.body.append(view)
+    await render(createElement(DensityToggle))
+
+    const button = container.querySelector<HTMLButtonElement>('button')!
+    expect(button.textContent).toBe('Compact')
+    expect(button.ariaPressed).toBe('true')
+    expect(view.dataset.density).toBe('compact')
+    expect(window.localStorage.getItem('otserver-asset-density')).toBe('compact')
+
+    view.remove()
+    await act(async () => button.click())
+    expect(button.textContent).toBe('Comfortable')
+    expect(button.ariaPressed).toBe('false')
+    expect(window.localStorage.getItem('otserver-asset-density')).toBe('comfortable')
   })
 })
 
