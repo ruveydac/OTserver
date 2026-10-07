@@ -228,6 +228,46 @@ describe('collection safety hooks', () => {
       await invoke(Sites.hooks?.beforeChange?.[1], { data: {}, originalDoc: {}, req: cycleReq }),
     ).toEqual({})
 
+    const pathReq = {
+      payload: {
+        find: vi.fn().mockResolvedValue({ docs: [{ id: 'child' }] }),
+        findByID: vi.fn().mockResolvedValue({ name: 'Plant', path: 'Plant' }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+    }
+    expect(
+      await invoke(Sites.hooks?.beforeValidate?.[0], {
+        data: { name: 'Plant' },
+        req: pathReq,
+      }),
+    ).toMatchObject({ path: 'Plant' })
+    expect(
+      await invoke(Sites.hooks?.beforeValidate?.[0], {
+        data: { name: 'Line 1', parent: 'plant' },
+        req: pathReq,
+      }),
+    ).toMatchObject({ path: 'Plant / Line 1' })
+    const changed = { id: 'plant', path: 'New Plant' }
+    expect(
+      await invoke(Sites.hooks?.afterChange?.[0], {
+        doc: changed,
+        operation: 'update',
+        previousDoc: { path: 'Old Plant' },
+        req: pathReq,
+      }),
+    ).toBe(changed)
+    expect(pathReq.payload.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: {}, id: 'child' }),
+    )
+    expect(
+      await invoke(Sites.hooks?.afterChange?.[0], {
+        doc: changed,
+        operation: 'update',
+        previousDoc: { path: 'New Plant' },
+        req: pathReq,
+      }),
+    ).toBe(changed)
+
     const deleteReq = { payload: { count: vi.fn().mockResolvedValue({ totalDocs: 0 }) } }
     await expect(
       invoke(Sites.hooks?.beforeDelete?.[0], { id: 'site-1', req: deleteReq }),
@@ -243,6 +283,12 @@ describe('collection safety hooks', () => {
     expect(() => cleanCustomFieldValues([], [])).toThrow('must be an object')
     expect(() =>
       cleanCustomFieldValues({ number: Number.NaN }, [{ id: 'number', type: 'number' }]),
+    ).toThrow('Invalid value')
+    expect(cleanCustomFieldValues({ date: '2024-02-29' }, [{ id: 'date', type: 'date' }])).toEqual({
+      date: '2024-02-29',
+    })
+    expect(() =>
+      cleanCustomFieldValues({ date: '2024-02-30' }, [{ id: 'date', type: 'date' }]),
     ).toThrow('Invalid value')
     await expect(
       invoke(AssetFields.hooks?.beforeChange?.[0], {
@@ -271,6 +317,9 @@ describe('collection safety hooks', () => {
       name: 'Admin',
       permissions: [],
     })
+    expect(
+      await invoke(protect, { context: { ensureAdminRole: true }, data: { name: 'Editor' } }),
+    ).toEqual({ isAdmin: true, name: 'Admin', permissions: [] })
 
     const payload = {
       create: vi.fn().mockResolvedValue({ id: 'admin-role' }),
@@ -337,6 +386,23 @@ describe('collection safety hooks', () => {
     }
     await ensureAdminRole(repairPayload as never)
     expect(repairPayload.update).toHaveBeenCalled()
+
+    const deleteRole = UserRoles.hooks?.beforeDelete?.[0]
+    const roleReq = {
+      payload: {
+        count: vi.fn().mockResolvedValue({ totalDocs: 1 }),
+        findByID: vi.fn().mockResolvedValue({ isAdmin: true }),
+      },
+    }
+    await expect(invoke(deleteRole, { id: 'admin-role', req: roleReq })).rejects.toThrow(
+      'Admin role cannot be deleted',
+    )
+    roleReq.payload.findByID.mockResolvedValue({ isAdmin: false })
+    await expect(invoke(deleteRole, { id: 'role-1', req: roleReq })).rejects.toThrow(
+      'Assign affected users',
+    )
+    roleReq.payload.count.mockResolvedValue({ totalDocs: 0 })
+    await expect(invoke(deleteRole, { id: 'role-1', req: roleReq })).resolves.toBeUndefined()
   })
 
   it('seeds asset-class rules and migrates legacy asset fields', async () => {
