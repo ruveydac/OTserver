@@ -59,6 +59,12 @@ import {
 } from '../../src/collections/AssetClasses'
 import { AssetImports } from '../../src/collections/AssetImports'
 import { AssetObservations } from '../../src/collections/AssetObservations'
+import {
+  AssetIdentifiers,
+  AssetInstallations,
+  NetworkEndpoints,
+  ServiceBindings,
+} from '../../src/collections/Identity'
 import { Sites, filterSiteParents } from '../../src/collections/Sites'
 import { TopologyLinks } from '../../src/collections/TopologyLinks'
 import {
@@ -67,6 +73,8 @@ import {
   initializeAuthorization,
 } from '../../src/collections/UserRoles'
 import { Users } from '../../src/collections/Users'
+import { Vulnerabilities, VulnerabilityFeeds } from '../../src/collections/Vulnerabilities'
+import { WorkerHeartbeats, WorkerLeases } from '../../src/collections/WorkerState'
 import { Icon, Logo } from '../../src/components/Brand'
 import BeforeDashboard from '../../src/components/BeforeDashboard'
 import ImportInstructions from '../../src/components/ImportInstructions'
@@ -606,6 +614,180 @@ describe('collection safety hooks', () => {
       expect(await invoke(collection.access?.update, {})).toBe(false)
     }
     expect(Users.access?.admin?.({ req: { user: { id: '1' } } } as never)).toBe(true)
+  })
+
+  it('keeps identity bindings historical and prevents conflicting accepted keys', async () => {
+    const endpointRequest: {
+      context: Record<string, unknown>
+      payload: {
+        find: ReturnType<typeof vi.fn>
+        findByID: ReturnType<typeof vi.fn>
+        update: ReturnType<typeof vi.fn>
+      }
+    } = {
+      context: {},
+      payload: { find: vi.fn(), findByID: vi.fn(), update: vi.fn() },
+    }
+    const endpointHook = NetworkEndpoints.hooks?.beforeChange?.[2]
+    expect(
+      await invoke(endpointHook, {
+        data: {
+          asset: 'asset-1',
+          macAddress: 'AA:BB:CC:DD:EE:01',
+          site: 'site-1',
+        },
+        originalDoc: { id: 'endpoint-1' },
+        req: endpointRequest,
+      }),
+    ).toMatchObject({ bindingKey: expect.any(String) })
+    await expect(
+      invoke(endpointHook, {
+        data: {},
+        originalDoc: { endedAt: '2026-01-01T00:00:00.000Z', id: 'endpoint-1' },
+        req: endpointRequest,
+      }),
+    ).rejects.toThrow('Historical endpoints')
+    await expect(
+      invoke(endpointHook, {
+        data: { endedAt: '2026-01-02T00:00:00.000Z' },
+        originalDoc: { id: 'endpoint-1' },
+        req: endpointRequest,
+      }),
+    ).rejects.toThrow('Close endpoints')
+    await expect(
+      invoke(endpointHook, {
+        data: { asset: 'asset-1', site: 'site-1' },
+        originalDoc: { id: 'endpoint-1' },
+        req: endpointRequest,
+      }),
+    ).rejects.toThrow('interface identifier')
+
+    endpointRequest.context.identityAction = true
+    expect(
+      await invoke(endpointHook, {
+        data: { endedAt: '2026-01-02T00:00:00.000Z', interfaceKey: 'ifIndex:1' },
+        originalDoc: { id: 'endpoint-1' },
+        req: endpointRequest,
+      }),
+    ).toMatchObject({ bindingKey: expect.any(String) })
+
+    const serviceHook = ServiceBindings.hooks?.beforeChange?.[3]
+    await expect(
+      invoke(serviceHook, {
+        data: { endpoint: 'endpoint-1', port: 1.5 },
+        originalDoc: {},
+        req: { context: {} },
+      }),
+    ).rejects.toThrow('integers')
+    expect(
+      await invoke(serviceHook, {
+        data: {
+          address: '192.0.2.1',
+          endpoint: 'endpoint-1',
+          port: 102,
+          protocol: 's7',
+          transport: 'tcp',
+        },
+        originalDoc: {},
+        req: { context: {} },
+      }),
+    ).toMatchObject({ bindingKey: expect.any(String) })
+
+    const identifierRequest = {
+      context: {},
+      payload: {
+        find: vi.fn().mockResolvedValue({ docs: [] }),
+        findByID: vi.fn().mockResolvedValue({ id: 'asset-1', identityRevision: 2 }),
+        update: vi.fn(),
+      },
+    }
+    const identifierHook = AssetIdentifiers.hooks?.beforeChange?.[2]
+    const identifier = await invoke(identifierHook, {
+      data: {
+        asset: 'asset-1',
+        authority: 'cip',
+        manufacturer: '1',
+        scope: 'cpu',
+        serial: '000000AB',
+        site: 'site-1',
+        state: 'accepted',
+      },
+      req: identifierRequest,
+    })
+    expect(identifier).toMatchObject({ key: expect.any(String), serial: '000000AB' })
+    identifierRequest.payload.find.mockResolvedValue({ docs: [{ id: 'other-key' }] })
+    await expect(
+      invoke(identifierHook, {
+        data: {
+          asset: 'asset-1',
+          authority: 'cip',
+          manufacturer: '1',
+          scope: 'cpu',
+          serial: '000000AC',
+          site: 'site-1',
+          state: 'accepted',
+        },
+        req: identifierRequest,
+      }),
+    ).rejects.toThrow('Conflicting accepted hardware serials')
+  })
+
+  it('computes installation identity fields for unknown slots and removals', async () => {
+    const hook = AssetInstallations.hooks?.beforeChange?.[3]
+    const req = {
+      payload: {
+        findByID: vi.fn().mockResolvedValue({ uuid: '6ba7b810-9dad-11d1-80b4-00c04fd430c8' }),
+      },
+    }
+    expect(
+      await invoke(hook, {
+        data: { module: 'module-1', parent: 'parent-1' },
+        req,
+      }),
+    ).toMatchObject({ activeModule: 'module-1', activeSlot: 'unknown:module-1', slotUUID: null })
+    expect(
+      await invoke(hook, {
+        data: { module: 'module-1', parent: 'parent-1', slotPath: '0/1' },
+        req,
+      }),
+    ).toMatchObject({ activeModule: 'module-1', slotUUID: expect.any(String) })
+    expect(
+      await invoke(hook, {
+        data: { module: 'module-1', parent: 'parent-1', removedAt: '2026-01-02T00:00:00.000Z' },
+        originalDoc: { id: 'installation-1' },
+        req,
+      }),
+    ).toMatchObject({
+      activeModule: 'removed:installation-1',
+      activeSlot: 'removed:installation-1',
+    })
+  })
+
+  it('keeps vulnerability and worker state collections read-only and admin-scoped', async () => {
+    for (const collection of [
+      Vulnerabilities,
+      VulnerabilityFeeds,
+      WorkerLeases,
+      WorkerHeartbeats,
+    ]) {
+      expect(await invoke(collection.access?.create, {})).toBe(false)
+      expect(await invoke(collection.access?.update, {})).toBe(false)
+      expect(await invoke(collection.access?.delete, {})).toBe(false)
+    }
+    expect(await invoke(Vulnerabilities.access?.read, { req: { user: undefined } })).toBe(false)
+    expect(await invoke(Vulnerabilities.access?.read, { req: { user: { id: 'user-1' } } })).toBe(
+      true,
+    )
+    expect(await invoke(VulnerabilityFeeds.access?.read, { req: request({ isAdmin: true }) })).toBe(
+      true,
+    )
+    expect(await invoke(VulnerabilityFeeds.access?.read, { req: request() })).toBe(false)
+    expect(
+      await invoke(VulnerabilityFeeds.admin?.hidden, { user: { role: { isAdmin: true } } }),
+    ).toBe(false)
+    expect(
+      await invoke(VulnerabilityFeeds.admin?.hidden, { user: { role: { isAdmin: false } } }),
+    ).toBe(true)
   })
 })
 
