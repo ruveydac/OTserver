@@ -5,6 +5,9 @@ import { withWorkerFence, type WorkerFence } from '../integrations/payload/worke
 import { SYNC_INTERVAL_MS } from './maintenance'
 import { safeFailure } from './errors'
 import { systemRequest } from '../integrations/payload/requests'
+import { expireOtterLeases } from '../otter/controller'
+
+const OTTER_LEASE_SWEEP_MS = 15_000
 
 export const recoverQueue = async (payload: Payload, fence: WorkerFence) =>
   withWorkerFence(fence, async () => {
@@ -60,15 +63,24 @@ export const runWorker = async (payload: Payload, queue: Queue, signal: AbortSig
   if (!fence) throw new Error(`Another ${queue} worker owns the queue.`)
   let lost = false
   let heartbeat: Promise<void> = Promise.resolve()
-  const timer = setInterval(() => {
-    heartbeat = heartbeat
-      .then(() => renewWorker(payload, fence))
-      .catch(() => {
-        lost = true
-      })
-  }, 20_000)
+  let timer: ReturnType<typeof setInterval> | undefined
   try {
     await recoverQueue(payload, fence)
+    if (queue === 'maintenance') await withWorkerFence(fence, () => expireOtterLeases(payload))
+    timer = setInterval(
+      () => {
+        heartbeat = heartbeat
+          .then(async () => {
+            await renewWorker(payload, fence)
+            if (queue === 'maintenance')
+              await withWorkerFence(fence, () => expireOtterLeases(payload))
+          })
+          .catch(() => {
+            lost = true
+          })
+      },
+      queue === 'maintenance' ? OTTER_LEASE_SWEEP_MS : 20_000,
+    )
     while (!signal.aborted && !lost) {
       if (queue === 'maintenance') await scheduleMaintenance(payload, fence)
       await withWorkerFence(fence, () =>
@@ -87,7 +99,7 @@ export const runWorker = async (payload: Payload, queue: Queue, signal: AbortSig
     payload.logger.error({ event: 'worker.stopped', queue, error: safeFailure(error) })
     throw error
   } finally {
-    clearInterval(timer)
+    if (timer) clearInterval(timer)
     await heartbeat
     if (!lost) await renewWorker(payload, fence, true).catch(() => {})
   }

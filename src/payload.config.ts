@@ -20,6 +20,7 @@ import { WorkerLeases, WorkerHeartbeats } from './collections/WorkerState'
 import { readiness, workerDiagnostics } from './jobs/diagnostics'
 import { superviseWorker } from './jobs/worker'
 import { migrations } from './migrations'
+import { otterEndpoints } from './otter/controller'
 import {
   NetworkEndpoints,
   ServiceBindings,
@@ -27,6 +28,7 @@ import {
   AssetInstallations,
   IdentityCases,
 } from './collections/Identity'
+import { OtterProfiles, OtterRuns, OtterScanners, OtterSchedules } from './collections/Otter'
 
 const dirname = import.meta.dirname || path.resolve('src')
 
@@ -49,6 +51,7 @@ export default buildConfig({
   endpoints: [
     { path: '/health/ready', method: 'get', handler: readiness },
     { path: '/operations', method: 'get', handler: workerDiagnostics },
+    ...otterEndpoints,
   ],
   admin: {
     components: {
@@ -65,6 +68,10 @@ export default buildConfig({
         custom: {
           Component: '@/components/TopologyView',
           path: '/topology',
+        },
+        otters: {
+          Component: '@/components/OtterManagementView',
+          path: '/otters',
         },
       },
     },
@@ -88,6 +95,10 @@ export default buildConfig({
     AssetInstallations,
     IdentityCases,
     AssetImports,
+    OtterScanners,
+    OtterProfiles,
+    OtterSchedules,
+    OtterRuns,
     AssetFields,
     UserRoles,
     Users,

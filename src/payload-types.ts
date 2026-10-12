@@ -76,6 +76,10 @@ export interface Config {
     'asset-installations': AssetInstallation;
     'identity-cases': IdentityCase;
     'asset-imports': AssetImport;
+    'otter-scanners': OtterScanner;
+    'otter-profiles': OtterProfile;
+    'otter-schedules': OtterSchedule;
+    'otter-runs': OtterRun;
     'asset-fields': AssetField;
     'user-roles': UserRole;
     users: User;
@@ -103,6 +107,10 @@ export interface Config {
     'asset-installations': AssetInstallationsSelect<false> | AssetInstallationsSelect<true>;
     'identity-cases': IdentityCasesSelect<false> | IdentityCasesSelect<true>;
     'asset-imports': AssetImportsSelect<false> | AssetImportsSelect<true>;
+    'otter-scanners': OtterScannersSelect<false> | OtterScannersSelect<true>;
+    'otter-profiles': OtterProfilesSelect<false> | OtterProfilesSelect<true>;
+    'otter-schedules': OtterSchedulesSelect<false> | OtterSchedulesSelect<true>;
+    'otter-runs': OtterRunsSelect<false> | OtterRunsSelect<true>;
     'asset-fields': AssetFieldsSelect<false> | AssetFieldsSelect<true>;
     'user-roles': UserRolesSelect<false> | UserRolesSelect<true>;
     users: UsersSelect<false> | UsersSelect<true>;
@@ -464,12 +472,14 @@ export interface IdentityCase {
  */
 export interface AssetImport {
   id: string;
+  name?: string | null;
   /**
    * Queued imports require OTSERVER_QUEUED_IMPORTS=on and a healthy worker.
    */
   executionMode?: ('sync' | 'queued') | null;
   jobID?: string | null;
   submittedBy?: string | null;
+  executorType?: string | null;
   executorID?: string | null;
   retriedBy?: string | null;
   fileDigest?: string | null;
@@ -492,6 +502,8 @@ export interface AssetImport {
    * Every asset in this file will be assigned to this site.
    */
   site: string | Site;
+  scanner?: string | null;
+  otterRun?: string | null;
   source: 'otserver-otter' | 'proneta' | 'nmap';
   /**
    * Optional values overwrite these fields on every new or existing asset in this import.
@@ -549,6 +561,214 @@ export interface AssetImport {
   focalY?: number | null;
 }
 /**
+ * Enrolled Otter scanner agents and their bound sites.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "otter-scanners".
+ */
+export interface OtterScanner {
+  id: string;
+  name: string;
+  site: string | Site;
+  enabled?: boolean | null;
+  enrolledAt?: string | null;
+  lastSeenAt?: string | null;
+  version?: string | null;
+  capabilities?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  interfaces?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  computerName?: string | null;
+  inventoryReportedAt?: string | null;
+  networkAdapters?:
+    | {
+        name: string;
+        friendlyName: string;
+        description: string;
+        macAddress?: string | null;
+        ipAddresses?: string[] | null;
+        id?: string | null;
+      }[]
+    | null;
+  currentRun?: (string | null) | OtterRun;
+  enrollmentTokenHash?: string | null;
+  enrollmentExpiresAt?: string | null;
+  credentialHash?: string | null;
+  credentialExpiresAt?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Immutable scan assignments and outcomes.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "otter-runs".
+ */
+export interface OtterRun {
+  id: string;
+  name: string;
+  site: string | Site;
+  scanner: string | OtterScanner;
+  profile?: (string | null) | OtterProfile;
+  schedule?: (string | null) | OtterSchedule;
+  scheduleOccurrenceKey?: string | null;
+  status:
+    | 'queued'
+    | 'assigned'
+    | 'running'
+    | 'completed'
+    | 'partial'
+    | 'failed'
+    | 'cancel-requested'
+    | 'cancelled'
+    | 'expired';
+  scheduledFor?: string | null;
+  assignedAt?: string | null;
+  leaseExpiresAt?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  progress?: number | null;
+  message?: string | null;
+  import?: (string | null) | AssetImport;
+  configSnapshot?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  importOverridesSnapshot?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  encryptedCredentialsSnapshot?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Central Otter settings. SNMP and OPC UA credentials are encrypted and write-only.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "otter-profiles".
+ */
+export interface OtterProfile {
+  id: string;
+  name: string;
+  site: string | Site;
+  scanner: string | OtterScanner;
+  /**
+   * Managed scan options. Site, controller URL, output path, and API credentials are managed by OTserver.
+   */
+  configuration: {
+    /**
+     * IPv4 addresses or CIDR ranges; maximum 65,536 addresses per scan.
+     */
+    targets: string[];
+    /**
+     * Select a reported adapter or enter its technical name. The scanner requires an explicit choice when multiple adapters are available.
+     */
+    interface?: string | null;
+    /**
+     * Optional expected sender MAC. Otter refreshes and uses the selected adapter’s actual MAC at scan start.
+     */
+    sourceMac?: string | null;
+    /**
+     * Disables S7, EtherNet/IP, BACnet, FINS, Fox, DNP3, IEC 61850, NetBIOS, SMB, RPC, and OPC UA. ARP, PROFINET, SNMP, and LLDP are controlled separately.
+     */
+    noProtocols?: boolean | null;
+    noArp?: boolean | null;
+    noProfinet?: boolean | null;
+    allowDcpSource?: boolean | null;
+    noS7?: boolean | null;
+    noEnip?: boolean | null;
+    noBacnet?: boolean | null;
+    noFins?: boolean | null;
+    noFox?: boolean | null;
+    noDnp3?: boolean | null;
+    noIec61850?: boolean | null;
+    noNetbios?: boolean | null;
+    noSmb?: boolean | null;
+    noRpc?: boolean | null;
+    noOpcua?: boolean | null;
+    noSnmp?: boolean | null;
+    noLldp?: boolean | null;
+    /**
+     * OPC UA ports to probe. Leave empty to use Otter defaults: 4840, 4841, and 48400.
+     */
+    opcuaPorts?: number[] | null;
+  };
+  /**
+   * Optional human-quality overrides, applied to every imported asset. Saved with each run.
+   */
+  assetOverrides?: {
+    assetOwner?: string | null;
+    location?: string | null;
+  };
+  customFieldOverrides?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  credentialsConfigured?: boolean | null;
+  encryptedCredentials?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Select an Otter configuration; its site, scanner, scan options, and import overrides are used automatically. Offline schedules coalesce to their latest due run.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "otter-schedules".
+ */
+export interface OtterSchedule {
+  id: string;
+  name: string;
+  site: string | Site;
+  scanner: string | OtterScanner;
+  profile: string | OtterProfile;
+  scheduleType: 'once' | 'interval' | 'cron';
+  runAt?: string | null;
+  intervalMinutes?: number | null;
+  /**
+   * Five fields: minute hour day-of-month month day-of-week.
+   */
+  cron?: string | null;
+  /**
+   * IANA time zone, for example Europe/Berlin.
+   */
+  timezone: string;
+  enabled?: boolean | null;
+  nextRunAt?: string | null;
+  lastRunAt?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
  * Define optional fields that appear on every asset and import.
  *
  * This interface was referenced by `Config`'s JSON-Schema
@@ -578,6 +798,10 @@ export interface UserRole {
    * The permanent Admin role has unrestricted access.
    */
   isAdmin?: boolean | null;
+  /**
+   * Manage Otter scanners, configuration, and schedules within permitted sites.
+   */
+  otterConfig?: boolean | null;
   /**
    * Each permission applies to the selected site and all descendants.
    */
@@ -828,7 +1052,7 @@ export interface AuditLog {
   documentLabel?: string | null;
   asset?: (string | null) | Asset;
   assetID?: string | null;
-  actorType: 'user' | 'system';
+  actorType: 'otter' | 'user' | 'system';
   actorID?: string | null;
   actorName?: string | null;
   actorEmail?: string | null;
@@ -1289,9 +1513,11 @@ export interface IdentityCasesSelect<T extends boolean = true> {
  * via the `definition` "asset-imports_select".
  */
 export interface AssetImportsSelect<T extends boolean = true> {
+  name?: T;
   executionMode?: T;
   jobID?: T;
   submittedBy?: T;
+  executorType?: T;
   executorID?: T;
   retriedBy?: T;
   fileDigest?: T;
@@ -1303,6 +1529,8 @@ export interface AssetImportsSelect<T extends boolean = true> {
   appliedKey?: T;
   duplicateOf?: T;
   site?: T;
+  scanner?: T;
+  otterRun?: T;
   source?: T;
   assetOverrides?:
     | T
@@ -1336,6 +1564,130 @@ export interface AssetImportsSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "otter-scanners_select".
+ */
+export interface OtterScannersSelect<T extends boolean = true> {
+  name?: T;
+  site?: T;
+  enabled?: T;
+  enrolledAt?: T;
+  lastSeenAt?: T;
+  version?: T;
+  capabilities?: T;
+  interfaces?: T;
+  computerName?: T;
+  inventoryReportedAt?: T;
+  networkAdapters?:
+    | T
+    | {
+        name?: T;
+        friendlyName?: T;
+        description?: T;
+        macAddress?: T;
+        ipAddresses?: T;
+        id?: T;
+      };
+  currentRun?: T;
+  enrollmentTokenHash?: T;
+  enrollmentExpiresAt?: T;
+  credentialHash?: T;
+  credentialExpiresAt?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "otter-profiles_select".
+ */
+export interface OtterProfilesSelect<T extends boolean = true> {
+  name?: T;
+  site?: T;
+  scanner?: T;
+  configuration?:
+    | T
+    | {
+        targets?: T;
+        interface?: T;
+        sourceMac?: T;
+        noProtocols?: T;
+        noArp?: T;
+        noProfinet?: T;
+        allowDcpSource?: T;
+        noS7?: T;
+        noEnip?: T;
+        noBacnet?: T;
+        noFins?: T;
+        noFox?: T;
+        noDnp3?: T;
+        noIec61850?: T;
+        noNetbios?: T;
+        noSmb?: T;
+        noRpc?: T;
+        noOpcua?: T;
+        noSnmp?: T;
+        noLldp?: T;
+        opcuaPorts?: T;
+      };
+  assetOverrides?:
+    | T
+    | {
+        assetOwner?: T;
+        location?: T;
+      };
+  customFieldOverrides?: T;
+  credentialsConfigured?: T;
+  encryptedCredentials?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "otter-schedules_select".
+ */
+export interface OtterSchedulesSelect<T extends boolean = true> {
+  name?: T;
+  site?: T;
+  scanner?: T;
+  profile?: T;
+  scheduleType?: T;
+  runAt?: T;
+  intervalMinutes?: T;
+  cron?: T;
+  timezone?: T;
+  enabled?: T;
+  nextRunAt?: T;
+  lastRunAt?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "otter-runs_select".
+ */
+export interface OtterRunsSelect<T extends boolean = true> {
+  name?: T;
+  site?: T;
+  scanner?: T;
+  profile?: T;
+  schedule?: T;
+  scheduleOccurrenceKey?: T;
+  status?: T;
+  scheduledFor?: T;
+  assignedAt?: T;
+  leaseExpiresAt?: T;
+  startedAt?: T;
+  completedAt?: T;
+  progress?: T;
+  message?: T;
+  import?: T;
+  configSnapshot?: T;
+  importOverridesSnapshot?: T;
+  encryptedCredentialsSnapshot?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "asset-fields_select".
  */
 export interface AssetFieldsSelect<T extends boolean = true> {
@@ -1352,6 +1704,7 @@ export interface AssetFieldsSelect<T extends boolean = true> {
 export interface UserRolesSelect<T extends boolean = true> {
   name?: T;
   isAdmin?: T;
+  otterConfig?: T;
   permissions?:
     | T
     | {

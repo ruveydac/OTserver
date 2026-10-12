@@ -138,10 +138,22 @@ const preventDeletingUsedSites: CollectionBeforeDeleteHook = async ({ id, req })
     req,
     where: { 'permissions.site': { equals: id } },
   })
+  const otters = await req.payload.count({
+    collection: 'otter-scanners',
+    overrideAccess: true,
+    req,
+    where: { site: { equals: id } },
+  })
 
-  if (children.totalDocs || assets.totalDocs || imports.totalDocs || roles.totalDocs) {
+  if (
+    children.totalDocs ||
+    assets.totalDocs ||
+    imports.totalDocs ||
+    roles.totalDocs ||
+    otters.totalDocs
+  ) {
     throw new APIError(
-      'Move or delete this site’s child sites, assets, imports, and role permissions before deleting it.',
+      'Move or delete this site’s child sites, assets, imports, Otter scanners, and role permissions before deleting it.',
       400,
     )
   }

@@ -96,21 +96,32 @@ describe('queued import execution boundary', () => {
   })
 
   it('enforces current site write access for every principal state', async () => {
-    await expect(requireSiteWriter('site-1', { user: undefined } as never)).rejects.toMatchObject({
-      status: 403,
-    })
+    await expect(
+      requireSiteWriter('site-1', { context: {}, user: undefined } as never),
+    ).rejects.toMatchObject({ status: 403 })
     mocks.authorization = { isAdmin: false, writableSiteIDs: ['site-1'] }
     await expect(
-      requireSiteWriter({ id: 'site-1' }, { user: { id: 'user-1' } } as never),
+      requireSiteWriter({ id: 'site-1' }, { context: {}, user: { id: 'user-1' } } as never),
     ).resolves.toBeUndefined()
     mocks.authorization = { isAdmin: false, writableSiteIDs: ['another-site'] }
     await expect(
-      requireSiteWriter('site-1', { user: { id: 'user-1' } } as never),
+      requireSiteWriter('site-1', { context: {}, user: { id: 'user-1' } } as never),
     ).rejects.toMatchObject({ status: 403 })
     mocks.authorization = { isAdmin: true, writableSiteIDs: [] }
     await expect(
-      requireSiteWriter('site-1', { user: { id: 'admin-1' } } as never),
+      requireSiteWriter('site-1', { context: {}, user: { id: 'admin-1' } } as never),
     ).resolves.toBeUndefined()
+  })
+
+  it('restricts scanner-backed queued imports to the scanner’s exact site', async () => {
+    const req = {
+      context: { otterScannerID: 'scanner-1', otterScannerSiteID: 'site-1' },
+      user: { id: 'otter:scanner-1' },
+    }
+    await expect(requireSiteWriter('site-1', req as never)).resolves.toBeUndefined()
+    await expect(requireSiteWriter('child-site', req as never)).rejects.toMatchObject({
+      status: 403,
+    })
   })
 
   it('treats completion and superseded jobs as idempotent no-ops', async () => {

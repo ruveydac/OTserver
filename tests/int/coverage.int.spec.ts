@@ -124,6 +124,7 @@ describe('site authorization', () => {
     expect(await getSiteAndDescendantIDs(['plant'], req as never)).toEqual(['plant', 'line'])
     const authorization = await getAuthorization(req as never)
     expect(authorization).toEqual({
+      canConfigureOtter: false,
       isAdmin: false,
       readableSiteIDs: ['plant', 'archive', 'line'],
       writableSiteIDs: ['plant', 'line'],
@@ -134,6 +135,7 @@ describe('site authorization', () => {
 
   it('handles anonymous, missing-role, and admin access', async () => {
     expect(await getAuthorization(request() as never)).toEqual({
+      canConfigureOtter: false,
       isAdmin: false,
       readableSiteIDs: [],
       writableSiteIDs: [],
@@ -886,12 +888,14 @@ describe('admin presentation', () => {
           assets: { create: true },
           'asset-imports': { create: true },
           sites: { read: true },
+          'otter-scanners': { read: true },
         },
       } as never,
     })
     const html = renderToStaticMarkup(view)
     expect(html).toContain('Total assets</span><strong>4')
     expect(html).toContain('Manage sites')
+    expect(html).toContain('Manage Otters')
     expect(html).toContain('PLC')
     expect(html).toContain('Plant')
   })

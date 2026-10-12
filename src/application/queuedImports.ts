@@ -1,7 +1,14 @@
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { APIError, type Payload, type PayloadHandler, type PayloadRequest } from 'payload'
+import {
+  APIError,
+  createLocalReq,
+  type Payload,
+  type PayloadHandler,
+  type PayloadRequest,
+  type TypedUser,
+} from 'payload'
 import { getAuthorization, relationshipID } from '../access/authorization'
 import { inTransaction } from '../integrations/payload/transactions'
 import { withRequestContext } from '../integrations/payload/context'
@@ -15,6 +22,7 @@ export const fileDigest = (data: Buffer) => createHash('sha256').update(data).di
 const internalImportFields = [
   'jobID',
   'submittedBy',
+  'executorType',
   'executorID',
   'retriedBy',
   'fileDigest',
@@ -28,6 +36,11 @@ const publicImport = (doc: AssetImport): AssetImport => {
 }
 
 export const requireSiteWriter = async (site: unknown, req: PayloadRequest) => {
+  const scannerSiteID = req.context.otterScannerSiteID
+  if (typeof scannerSiteID === 'string') {
+    if (scannerSiteID === String(relationshipID(site))) return
+    throw new APIError('Site write permission is required.', 403)
+  }
   const access = await getAuthorization(req)
   if (
     !req.user ||
@@ -79,8 +92,9 @@ export const retryImport: PayloadHandler = async (req) => {
         req,
         data: {
           status: 'pending',
-          executorID: String(req.user!.id),
-          retriedBy: String(req.user!.id),
+          executorType: req.context.otterScannerID ? 'otter' : 'user',
+          executorID: String(req.context.otterScannerID || req.user!.id),
+          retriedBy: String(req.context.otterScannerID || req.user!.id),
           error: null,
           completedAt: null,
           queuedAt: new Date().toISOString(),
@@ -110,27 +124,67 @@ export const executeQueuedImport = async (
   const start = Date.now()
   try {
     if (doc.executionMode !== 'queued') throw new APIError('Invalid processing mode.', 400)
-    const user = await payload.findByID({
-      collection: 'users',
-      id: doc.executorID || '',
-      depth: 0,
-      disableErrors: true,
-    })
-    if (!user) throw new APIError('Executing user is missing.', 403)
-    const req = await principalRequest(
-      payload,
-      { ...user, collection: 'users' },
-      {
-        importWrite: true,
-        skipAssetImport: true,
-      },
-    )
+    let req: PayloadRequest
+    if (doc.executorType === 'otter') {
+      const scanner = await payload.findByID({
+        collection: 'otter-scanners',
+        id: doc.executorID || '',
+        depth: 0,
+        disableErrors: true,
+        overrideAccess: true,
+      })
+      const credentialExpiresAt = Date.parse(scanner?.credentialExpiresAt || '')
+      if (
+        !scanner?.enabled ||
+        !scanner.credentialHash ||
+        !Number.isFinite(credentialExpiresAt) ||
+        credentialExpiresAt <= Date.now()
+      )
+        throw new APIError('Executing Otter scanner is missing, disabled, or expired.', 403)
+      const siteID = String(relationshipID(scanner.site) || '')
+      if (!siteID) throw new APIError('Otter scanner site is missing.', 403)
+      req = await createLocalReq(
+        {
+          context: {
+            importWrite: true,
+            otterImportAuthorized: true,
+            otterScannerID: String(scanner.id),
+            otterScannerSiteID: siteID,
+            skipAssetImport: true,
+          },
+          user: {
+            collection: 'users',
+            email: `otter-${scanner.id}@otter.invalid`,
+            id: `otter:${scanner.id}`,
+            otterScannerID: String(scanner.id),
+            role: null,
+          } as unknown as TypedUser,
+        },
+        payload,
+      )
+    } else {
+      const user = await payload.findByID({
+        collection: 'users',
+        id: doc.executorID || '',
+        depth: 0,
+        disableErrors: true,
+      })
+      if (!user) throw new APIError('Executing user is missing.', 403)
+      req = await principalRequest(
+        payload,
+        { ...user, collection: 'users' },
+        {
+          importWrite: true,
+          skipAssetImport: true,
+        },
+      )
+    }
     await requireSiteWriter(doc.site, req)
     await payload.update({
       collection: 'asset-imports',
       id: doc.id,
       req,
-      overrideAccess: false,
+      overrideAccess: doc.executorType === 'otter',
       data: {
         status: 'running',
         startedAt: new Date().toISOString(),
@@ -170,7 +224,7 @@ export const executeQueuedImport = async (
         collection: 'asset-imports',
         id: doc.id,
         req,
-        overrideAccess: false,
+        overrideAccess: doc.executorType === 'otter',
         data: { completedAt: new Date().toISOString() },
       })
     })

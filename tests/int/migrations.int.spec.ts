@@ -5,6 +5,10 @@ import {
   down as removeSitePaths,
   up as addSitePaths,
 } from '../../src/migrations/20260926_111902_site_paths'
+import {
+  down as removeOtterIndexes,
+  up as addOtterIndexes,
+} from '../../src/migrations/20261010_164200_otter_indexes'
 
 describe('queued import baseline migration', () => {
   it('adds synchronous defaults and reverses only untouched records', async () => {
@@ -77,5 +81,41 @@ describe('site path migration', () => {
 
     await removeSitePaths(args as never)
     expect(updateMany).toHaveBeenCalledWith({}, { $unset: { path: '' } }, { session: args.session })
+  })
+})
+
+describe('Otter index migration', () => {
+  it('creates partial unique indexes for credentials and schedule occurrences', async () => {
+    const runCollection = { createIndex: vi.fn(async () => 'run-index'), dropIndex: vi.fn() }
+    const scannerCollection = {
+      createIndex: vi.fn(async () => 'scanner-index'),
+      dropIndex: vi.fn(),
+    }
+    const args = {
+      payload: {
+        db: {
+          collections: {
+            'otter-runs': { collection: runCollection },
+            'otter-scanners': { collection: scannerCollection },
+          },
+        },
+      },
+      session: { id: 'session' },
+    }
+
+    await addOtterIndexes(args as never)
+    expect(runCollection.createIndex).toHaveBeenCalledWith(
+      { scheduleOccurrenceKey: 1 },
+      {
+        name: 'otter_run_schedule_occurrence_unique',
+        unique: true,
+        partialFilterExpression: { scheduleOccurrenceKey: { $type: 'string' } },
+      },
+    )
+    expect(scannerCollection.createIndex).toHaveBeenCalledTimes(2)
+    await removeOtterIndexes(args as never)
+    expect(runCollection.dropIndex).toHaveBeenCalledWith('otter_run_schedule_occurrence_unique')
+    expect(scannerCollection.dropIndex).toHaveBeenCalledWith('otter_scanner_credential_unique')
+    expect(scannerCollection.dropIndex).toHaveBeenCalledWith('otter_scanner_enrollment_unique')
   })
 })

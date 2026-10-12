@@ -34,6 +34,8 @@ Main locations:
 - `src/components/`: custom Payload admin views and fields.
 - `src/domain/`, `src/application/`, `src/integrations/`: pure rules, use cases, and Payload/MongoDB boundaries.
 - `src/jobs/`, `src/worker.ts`: fenced import and maintenance queues using Payload jobs.
+- `src/otter/`: site-scoped Otter enrollment, machine authentication, encrypted profiles, schedules, and controller API.
+- `otter_management.md`: management protocol and scanner-side Otter implementation checklist.
 - `otserver-otter/contracts/otserver-scan-v2.schema.json`: pinned canonical Otter wire contract.
 - `tests/int/`: application and importer integration tests.
 
@@ -103,6 +105,38 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
   access to both sites; import site selection never silently moves an existing physical asset.
 - Identity relationships must belong to the same site. Graph/identifier changes lock the affected
   assets (including ancestry) to prevent snapshot-isolation races. Preserve history site scope.
+- Otter Config is an additional role capability, not a substitute for site permissions. Scanner,
+  profile, schedule, run, and managed import data stay bound to one exact site. Scanner credentials
+  are machine principals restricted to `/api/otter/v1` and their own `/api/asset-imports` records;
+  never give them generic Payload or descendant-site access.
+- Otter enrollment tokens are single-use, short-lived digests; machine credentials are hashed,
+  expiring, and revocable. SNMP/OPC UA credentials are encrypted with
+  `OTSERVER_OTTER_ENCRYPTION_KEY` and must never be returned to ordinary profile reads or logged.
+- Otter enrollment and polling inventory reports include the computer name and at most 32 adapters,
+  each with technical/friendly names, description, MAC, and at most 16 IPv4/IPv6 addresses. Validate
+  reports and keep them bound to the exact scanner; never include credentials in adapter inventory.
+- Manage enrollment from the Otter Scanners collection popup. All scan options and human import
+  overrides belong to Otter Configurations (`otter-profiles`); manual runs select a configuration
+  explicitly and schedules reference one. Snapshot scan options, encrypted credentials, and import
+  overrides together for every run. Never layer scanner-level network overrides onto configurations.
+  Generic scanner writes may change only the name; controller-owned inventory and credentials remain
+  protected. Internal controller updates use the `otterScannerUpdate` request context.
+  Manual configuration runs require a Yes/No authorization confirmation. Schedules derive their
+  scanner and exact site from the selected configuration on save, ignoring supplied scope fields.
+  New configurations store an encrypted SNMP v2c `public` community by default; later credential
+  replacement or clearing must survive configuration edits.
+- Managed import display names include Otter, scanner name, site path/name, and a UTC timestamp.
+  Scanner-supplied overrides are discarded in favor of the server-owned run snapshot.
+- Otter Runs expose terminal failure reasons in `message`. Lease expiry records the missed-heartbeat
+  reason, and older clients reporting failure without a message get an explicit missing-details
+  fallback. Scanner-generated reasons must remain credential-safe and survive finish retries.
+- Otter controller URLs require HTTPS except for HTTP on `localhost`, `127.0.0.1`, or `[::1]`,
+  regardless of `NODE_ENV`. Browser management accepts loopback aliases only on the same scheme and
+  port as an allowed origin; retain origin checks for external requests.
+- Create due Otter schedule occurrences and claim runs transactionally during scanner polling.
+  Preserve the schedule-occurrence partial unique index, one active assignment per scanner, lease
+  checks, and latest-only offline catch-up. Scanner-side changes belong in `otserver-otter` and must
+  coordinate with `otter_management.md`.
 
 ### Auditability
 
@@ -115,6 +149,8 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
   asset moves. Merged/split views may resolve aliases and endpoint evidence without rewriting logs.
 - New collection mutations are covered by `withAudit`; custom actions outside collection hooks must
   call `writeAudit` explicitly with the original request and target context.
+- Treat scanner operations as the explicit `otter` audit actor and redact credential/community fields
+  when extending enrollment or controller configuration.
 - Never bypass auditing merely to simplify bulk operations or imports.
 
 ### Vulnerability matching
@@ -251,7 +287,11 @@ application.
 Vitest runs integration files serially because they share database state. New behavior affecting
 authorization, imports, quality precedence, audit logs, parsing, or bulk operations needs a focused
 integration test. Otter implementation and protocol tests belong in the `otserver-otter`
-repository.
+repository. Run `pnpm test:otter-client` against the test replica set to build the headless executable
+and verify real-client REST enrollment, import, and credential reuse after restart. To test a specific
+build, use `OTTER_CLIENT_BIN=otserver-otter/target/debug/otserver-otter pnpm test:int
+tests/int/otter-client.int.spec.ts`. Local-file CLI/GUI operation must
+remain independent of the managed `controller` command and its private state directory.
 
 The development server permits HMR only from `192.168.50.*` in `next.config.ts`. Keep production
 origin policy separate from this home-network development exception.

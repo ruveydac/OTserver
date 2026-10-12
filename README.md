@@ -44,6 +44,8 @@ field merging, flexible hierarchies, role-based access, search, and a complete a
   protected Admin role retains unrestricted access.
 - **Discovery imports** — Ingest Siemens PRONETA XML, Nmap XML, and OTserver Otter JSON into a
   selected site.
+- **Otter management** — Enroll site-bound scanners, configure encrypted scan profiles, schedule
+  jobs, and inspect run history from the management interface.
 - **Physical device identity** — Correlate qualified hardware identities across multiple network
   interfaces; retain site-scoped MAC bindings, module installations, and replacement history.
 - **Evidence-aware merging** — Higher-quality discoveries can improve lower-quality data while
@@ -76,6 +78,8 @@ services:
     environment:
       DATABASE_URL: mongodb://mongo:27017/otserver?replicaSet=rs0
       OTSERVER_SECRET: ${OTSERVER_SECRET:?Set OTSERVER_SECRET in .env}
+      OTSERVER_PUBLIC_URL: ${OTSERVER_PUBLIC_URL:-}
+      OTSERVER_OTTER_ENCRYPTION_KEY: ${OTSERVER_OTTER_ENCRYPTION_KEY:-}
       OTSERVER_QUEUED_IMPORTS: ${OTSERVER_QUEUED_IMPORTS:-off}
       OTSERVER_VULNERABILITY_FEEDS: ${OTSERVER_VULNERABILITY_FEEDS:-on}
       OTSERVER_WORKER_MODE: ${OTSERVER_WORKER_MODE:-standalone}
@@ -142,6 +146,10 @@ Create a `.env` file beside it with a long random secret, and keep that secret a
 
 ```dotenv
 OTSERVER_SECRET=replace-with-a-long-random-secret
+# Required for managed Otter jobs and encrypted SNMP/OPC UA profile credentials.
+OTSERVER_PUBLIC_URL=https://otserver.example
+# Generate with: openssl rand -hex 32. Keep this key stable and backed up.
+OTSERVER_OTTER_ENCRYPTION_KEY=replace-with-64-hex-characters
 ```
 
 Pull the images and start the application and MongoDB:
@@ -188,6 +196,10 @@ pnpm dev
 ```
 
 Then open <http://localhost:3000/admin>. The first account receives the protected Admin role.
+
+For local Otter management, set `OTSERVER_PUBLIC_URL=http://localhost:3000` in `.env` and restart
+OTserver. HTTP works on `localhost`, `127.0.0.1`, and `[::1]`, including production-mode builds;
+Otter must run on the same host when using these loopback URLs. Remote controllers require HTTPS.
 
 The repository's `docker-compose.yml` is the production-style standalone deployment. Run
 `docker compose up -d mongo` when only a local development database is needed, or
@@ -317,10 +329,33 @@ Only scan networks you own or are authorized to assess. Otter does not perform c
 writes, SNMP SET, DCP Set, DNP3 writes, operates, class assignment, freezes, or restarts, brute
 force, exploits, vulnerability scripts, or Modbus requests.
 
-Users can enable a Payload API key on their account. With an OTserver URL, site ID, and that key in
-the Otter environment or executable-adjacent `otter.json`, Otter can send its completed
-JSON directly to the existing REST importer with the user's current site permissions. The local
-scan file is retained.
+For standalone CLI uploads, users can enable a Payload API key on their account. With an OTserver
+URL, site ID, and that key in the Otter environment or executable-adjacent `otter.json`, Otter can
+send completed JSON to the existing REST importer using the user's current site permissions. The
+local scan file is retained. Managed scanner uploads use site-bound Otter credentials instead;
+see [Otter management](otter_management.md).
+
+### Central Otter management
+
+OTserver provides site-scoped Payload collections for Otter registrations, scan profiles,
+encrypted SNMP/OPC UA credentials, schedules, manual runs, and run history. Enrolled agents report
+their computer name and network adapters; the Payload profile editor uses that inventory for interface
+selection and exposes all managed scan options. Grant the **Otter Config**
+capability to a role; users still need the corresponding site read/write permissions. Enrollment
+tokens are single-use, and scanner credentials are restricted to that scanner's bound site.
+Open **Otter → Otter Scanners** and select **Create New** for the enrollment popup. Use
+**Otter → Otter Configurations** to select the scanner and site, set all scan options, configure
+import overrides, and queue a scan with **Run now**. Schedules reference these same configurations.
+Each run snapshots its options, credentials, and import overrides. Managed import names include
+the scanner name, site, and UTC date/time. Existing scanner-level settings are no longer applied;
+copy any previously used network overrides into the appropriate configuration before running it.
+
+Use Otter's `controller --server-url URL --enroll --ack-authorized` command and paste the token
+from the enrollment popup at the prompt. For same-host development, `--server-url 127.0.0.1:3000`
+uses HTTP; remote controllers require HTTPS. Restart without `--enroll` to reuse the saved
+credential. Setup and the management protocol are documented in [`otter_management.md`](otter_management.md). Set
+`OTSERVER_PUBLIC_URL` and a stable `OTSERVER_OTTER_ENCRYPTION_KEY` before configuring managed
+profiles. Apply the Otter management migration during the normal versioned upgrade procedure.
 
 OTserver Otter, its platform guide, contract, tests, and interoperability lab are maintained in the
 separate [`otserver-otter` repository](https://github.com/ruveydac/otserver-otter).
@@ -334,8 +369,8 @@ separate [`otserver-otter` repository](https://github.com/ruveydac/otserver-otte
 - All registered collections are audited for creates, updates, deletes, and authentication events.
 - Audit entries are immutable and redact fields resembling passwords, secrets, tokens, hashes, or
   sessions.
-- Otter SNMP and OPC UA settings, including credentials, live in executable-adjacent `otter.json`
-  and are never included in logs or scan exports.
+- Standalone Otter SNMP and OPC UA credentials remain in executable-adjacent `otter.json`. Managed
+  profile credentials are encrypted at rest. Neither form is included in logs or scan exports.
 
 ## Technology
 
@@ -357,6 +392,7 @@ src/importers/     PRONETA, Nmap, Otter parsers, and quality merging
 src/search/        Lucene query translation and graphical-filter integration
 src/vulnerabilities/ Feed synchronization, CPE parsing, and passive matching
 src/components/    OTserver admin views, branding, and fields
+src/otter/         Site-bound scanner enrollment, controller API, encrypted profiles, and schedules
 otserver-otter/    Pinned scanner repository and canonical export contract
 tests/int/         Application and importer integration tests
 ```
@@ -378,6 +414,17 @@ pnpm test:container
 ```
 
 Set `CONTAINER_RUNTIME=docker` or `CONTAINER_RUNTIME=podman` to select one explicitly.
+
+Verify controller interoperability with the real Rust executable and Payload REST API against a
+disposable MongoDB replica-set database (requires the Rust toolchain and initialized Otter submodule):
+
+```bash
+TEST_DATABASE_URL='mongodb://127.0.0.1:27018/otserver-test?replicaSet=rs0&directConnection=true' \
+  pnpm test:otter-client
+```
+
+This builds the headless client and tests enrollment using bare loopback and explicit HTTP URLs,
+assignment execution, schema-v2 upload/import, and restart using saved credentials.
 
 Coverage is enforced at 90% for the application:
 

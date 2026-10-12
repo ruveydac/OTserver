@@ -124,6 +124,16 @@ export const UserRoles: CollectionConfig = {
       label: 'Administrator',
     },
     {
+      name: 'otterConfig',
+      type: 'checkbox',
+      admin: {
+        condition: (data) => !data.isAdmin,
+        description: 'Manage Otter scanners, configuration, and schedules within permitted sites.',
+      },
+      defaultValue: false,
+      label: 'Otter Config',
+    },
+    {
       name: 'permissions',
       type: 'array',
       admin: {

@@ -1,6 +1,7 @@
 // ponytail: order-based placement assumes OT Inventory stays the first visible
 // nav group; move the link into the group markup if group order ever varies
-.topology-nav-link {
+.topology-nav-link,
+.otter-nav-link {
   order: 1;
   margin-bottom: calc(var(--base) * 0.5);
 }

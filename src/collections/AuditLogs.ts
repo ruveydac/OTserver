@@ -21,7 +21,7 @@ type AuditAction = 'create' | 'custom' | 'delete' | 'login' | 'logout' | 'update
 type Document = Record<string, unknown>
 
 const ignoredFields = new Set(['collection', 'createdAt', 'id', 'updatedAt'])
-const sensitiveField = /api[-_]?key|hash|password|salt|secret|session|token/i
+const sensitiveField = /api[-_]?key|community|credential|hash|password|salt|secret|session|token/i
 
 const canReadAuditLogs: Access = async ({ req }) => {
   const authorization = await getAuthorization(req)
@@ -80,6 +80,8 @@ export const writeAudit = async ({
 }) => {
   const document = clean(after ?? before)
   const actor = clean(req.user)
+  const scannerID =
+    typeof req.context.otterScannerID === 'string' ? req.context.otterScannerID : undefined
   const documentID = document.id === undefined ? undefined : String(document.id)
   const documentLabel = labelFor(document)
   const relatedAsset = relationshipID(
@@ -95,10 +97,14 @@ export const writeAudit = async ({
     data: {
       action,
       ...(relationshipID(document.site) ? { site: relationshipID(document.site) as string } : {}),
-      actorEmail: typeof actor.email === 'string' ? actor.email : undefined,
-      actorID: actor.id === undefined ? undefined : String(actor.id),
-      actorName: typeof actor.name === 'string' ? actor.name : undefined,
-      actorType: req.user ? 'user' : 'system',
+      actorEmail: !scannerID && typeof actor.email === 'string' ? actor.email : undefined,
+      actorID: scannerID || (actor.id === undefined ? undefined : String(actor.id)),
+      actorName: scannerID
+        ? `Otter scanner ${scannerID}`
+        : typeof actor.name === 'string'
+          ? actor.name
+          : undefined,
+      actorType: scannerID ? 'otter' : req.user ? 'user' : 'system',
       ...(assetID ? { asset: assetID, assetID } : {}),
       changes: getAuditChanges(before, after),
       documentID,
@@ -220,7 +226,7 @@ export const AuditLogs: CollectionConfig = {
       name: 'actorType',
       type: 'select',
       index: true,
-      options: ['user', 'system'],
+      options: ['otter', 'user', 'system'],
       required: true,
     },
     { name: 'actorID', type: 'text', index: true, label: 'Actor ID' },

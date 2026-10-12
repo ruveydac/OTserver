@@ -9,12 +9,14 @@ import {
 } from 'payload'
 
 type Authorization = {
+  canConfigureOtter: boolean
   isAdmin: boolean
   readableSiteIDs: string[]
   writableSiteIDs: string[]
 }
 
 const noAuthorization: Authorization = {
+  canConfigureOtter: false,
   isAdmin: false,
   readableSiteIDs: [],
   writableSiteIDs: [],
@@ -75,7 +77,7 @@ export const getAuthorization = async (req: PayloadRequest): Promise<Authorizati
     })
     const role = roles.docs[0]
     if (!role) return noAuthorization
-    if (role.isAdmin) return { ...noAuthorization, isAdmin: true }
+    if (role.isAdmin) return { ...noAuthorization, canConfigureOtter: true, isAdmin: true }
 
     const readableRoots = new Set<string>()
     const writableRoots = new Set<string>()
@@ -88,7 +90,12 @@ export const getAuthorization = async (req: PayloadRequest): Promise<Authorizati
 
     const readableSiteIDs = await getSiteAndDescendantIDs([...readableRoots], req)
     const writableSiteIDs = await getSiteAndDescendantIDs([...writableRoots], req)
-    return { isAdmin: false, readableSiteIDs, writableSiteIDs }
+    return {
+      canConfigureOtter: Boolean(role.otterConfig),
+      isAdmin: false,
+      readableSiteIDs,
+      writableSiteIDs,
+    }
   })()
 
   req.context.siteAuthorization = authorization
@@ -130,16 +137,32 @@ export const canAssignRoles: FieldAccess = async ({ req }) => {
 }
 
 export const canReadSiteDocuments: Access = async ({ req }) => {
+  const scannerID = req.context.otterScannerID
+  if (typeof scannerID === 'string')
+    return req.context.assetImport === true
+      ? { site: { equals: String(req.context.otterScannerSiteID) } }
+      : false
+  const scannerSiteID = req.context.otterScannerSiteID
+  if (typeof scannerSiteID === 'string') return { site: { equals: scannerSiteID } }
   const authorization = await getAuthorization(req)
   return authorization.isAdmin ? true : { site: { in: authorization.readableSiteIDs } }
 }
 
 export const canWriteSiteDocuments: Access = async ({ req }) => {
+  const scannerSiteID = req.context.otterScannerSiteID
+  if (typeof scannerSiteID === 'string')
+    return req.context.assetImport === true ? { site: { equals: scannerSiteID } } : false
   const authorization = await getAuthorization(req)
   return authorization.isAdmin ? true : { site: { in: authorization.writableSiteIDs } }
 }
 
 export const canCreateSiteDocument: Access = async ({ data, req }) => {
+  const scannerSiteID = req.context.otterScannerSiteID
+  if (typeof scannerSiteID === 'string')
+    return (
+      req.context.assetImport === true &&
+      String(relationshipID(data?.site)) === String(scannerSiteID)
+    )
   const authorization = await getAuthorization(req)
   if (authorization.isAdmin) return true
   if (!data) return authorization.writableSiteIDs.length > 0
@@ -147,17 +170,46 @@ export const canCreateSiteDocument: Access = async ({ data, req }) => {
   return Boolean(siteID && authorization.writableSiteIDs.includes(String(siteID)))
 }
 
+export const canCreateOtterImport: Access = async ({ data, req }) => {
+  const scannerID = req.context.otterScannerID
+  const siteID = req.context.otterScannerSiteID
+  if (typeof scannerID === 'string' && typeof siteID === 'string') {
+    const requestedSite = relationshipID(data?.site)
+    return (
+      Boolean(data) &&
+      (data?.source === undefined || data.source === 'otserver-otter') &&
+      (!requestedSite || String(requestedSite) === siteID)
+    )
+  }
+  const authorization = await getAuthorization(req)
+  if (authorization.isAdmin) return true
+  if (!data) return authorization.writableSiteIDs.length > 0
+  const requestedSite = relationshipID(data.site)
+  return Boolean(requestedSite && authorization.writableSiteIDs.includes(String(requestedSite)))
+}
+
+export const canReadOtterImports: Access = async (args) => {
+  const { req } = args
+  const scannerID = req.context.otterScannerID
+  if (typeof scannerID === 'string') return { scanner: { equals: scannerID } }
+  return canReadSiteDocuments(args)
+}
+
 export const canReadSites: Access = async ({ req }) => {
+  const scannerSiteID = req.context.otterScannerSiteID
+  if (typeof scannerSiteID === 'string') return { id: { equals: scannerSiteID } }
   const authorization = await getAuthorization(req)
   return authorization.isAdmin ? true : { id: { in: authorization.readableSiteIDs } }
 }
 
 export const canWriteSites: Access = async ({ req }) => {
+  if (typeof req.context.otterScannerSiteID === 'string') return false
   const authorization = await getAuthorization(req)
   return authorization.isAdmin ? true : { id: { in: authorization.writableSiteIDs } }
 }
 
 export const canCreateSite: Access = async ({ data, req }) => {
+  if (typeof req.context.otterScannerSiteID === 'string') return false
   const authorization = await getAuthorization(req)
   if (authorization.isAdmin) return true
   if (!data) return authorization.writableSiteIDs.length > 0
@@ -168,17 +220,35 @@ export const canCreateSite: Access = async ({ data, req }) => {
 export const filterWritableSites = async ({
   req,
 }: Pick<FilterOptionsProps, 'req'>): Promise<true | Where> => {
+  const scannerSiteID = req.context.otterScannerSiteID
+  if (typeof scannerSiteID === 'string') return { id: { equals: scannerSiteID } }
   if (!req.user) return true
   const authorization = await getAuthorization(req)
   return authorization.isAdmin ? true : { id: { in: authorization.writableSiteIDs } }
 }
 
 export const enforceWritableSite: CollectionBeforeChangeHook = async ({
+  collection,
   data,
+  operation,
   originalDoc,
   req,
 }) => {
   if (!req.user) return data
+  const scannerSiteID = req.context.otterScannerSiteID
+  if (typeof scannerSiteID === 'string') {
+    if (
+      (req.context.assetImport === true ||
+        req.context.otterImportAuthorized === true ||
+        (collection.slug === 'asset-imports' &&
+          operation === 'create' &&
+          data.source === 'otserver-otter')) &&
+      String(relationshipID(Object.hasOwn(data, 'site') ? data.site : originalDoc?.site)) ===
+        scannerSiteID
+    )
+      return data
+    throw new APIError('Otter scanners may only import into their bound site.', 403)
+  }
   const authorization = await getAuthorization(req)
   if (authorization.isAdmin) return data
 

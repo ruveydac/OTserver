@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   acquireWorker: vi.fn(),
   authorization: { isAdmin: true },
   delay: vi.fn(async () => undefined),
+  expireOtterLeases: vi.fn(async () => undefined),
   renewWorker: vi.fn(),
   systemRequest: vi.fn(async () => ({ context: {} })),
 }))
@@ -20,6 +21,10 @@ vi.mock('../../src/jobs/ownership', () => ({
 }))
 
 vi.mock('../../src/jobs/maintenance', () => ({ SYNC_INTERVAL_MS: 10_000 }))
+
+vi.mock('../../src/otter/controller', () => ({
+  expireOtterLeases: mocks.expireOtterLeases,
+}))
 
 vi.mock('../../src/integrations/payload/requests', () => ({
   systemRequest: mocks.systemRequest,
@@ -236,10 +241,38 @@ describe('worker scheduling and execution', () => {
       controller.abort()
     })
     await runWorker(payload as never, 'maintenance', controller.signal)
+    expect(mocks.expireOtterLeases).toHaveBeenCalledWith(payload)
     expect(payload.jobs.run).toHaveBeenCalledWith(
       expect.objectContaining({ queue: 'maintenance', limit: 1, sequential: true }),
     )
     expect(mocks.renewWorker).toHaveBeenLastCalledWith(payload, fence, true)
+  })
+
+  it('reaps expired Otter leases while a maintenance task is still running', async () => {
+    vi.useFakeTimers()
+    const controller = new AbortController()
+    const payload = makePayload()
+    let releaseJob!: () => void
+    let markStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve
+    })
+    const job = new Promise<undefined>((resolve) => {
+      releaseJob = () => resolve(undefined)
+    })
+    payload.jobs.run.mockImplementationOnce(() => {
+      markStarted()
+      return job
+    })
+
+    const worker = runWorker(payload as never, 'maintenance', controller.signal)
+    await started
+    await vi.advanceTimersByTimeAsync(15_000)
+
+    expect(mocks.expireOtterLeases).toHaveBeenCalledTimes(2)
+    controller.abort()
+    releaseJob()
+    await worker
   })
 
   it('logs a sanitized execution failure and still releases ownership', async () => {
