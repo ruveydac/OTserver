@@ -151,6 +151,7 @@ describe('asset network fields', () => {
       },
       payload: {
         config: { routes: { admin: '/admin' } },
+        count: vi.fn().mockResolvedValue({ totalDocs: 0 }),
         findByID: vi.fn().mockImplementation(({ collection }: { collection: string }) =>
           Promise.resolve(
             collection === 'sites'
@@ -303,6 +304,7 @@ describe('asset network fields', () => {
       },
       payload: {
         config: { routes: { admin: '/admin' } },
+        count: vi.fn().mockResolvedValue({ totalDocs: 0 }),
         findByID: vi
           .fn()
           .mockImplementation(({ collection }: { collection: string }) =>
@@ -382,6 +384,7 @@ describe('asset network fields', () => {
       },
       payload: {
         config: { routes: { admin: '/admin' } },
+        count: vi.fn().mockResolvedValue({ totalDocs: 0 }),
         findByID: vi
           .fn()
           .mockImplementation(({ collection }: { collection: string }) =>

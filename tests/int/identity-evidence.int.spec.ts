@@ -50,17 +50,46 @@ describe('identity evidence boundaries', () => {
   })
 
   it('does not mistake malformed or partial protocol values for physical identity', () => {
+    const macAddress = '00:11:22:33:44:55'
     const base = {
       source: 'ethernet-ip',
       observedAt: '2026-09-01T00:00:00Z',
       quality: 'high' as const,
-      fields: { serialNumber: '00000042' },
-      raw: { vendorId: 1, deviceType: 14, serialNumber: '00000042' },
+      fields: { macAddress, serialNumber: '00000042', vendor: 'Acme' },
+      raw: {
+        vendorId: 1,
+        deviceType: 14,
+        serialNumber: '00000042',
+        observationId: 'df4f3d70-dd8a-4454-85de-034211f4742d',
+        subject: { kind: 'device', macAddress },
+        serialClaim: {
+          scope: 'cpu',
+          issuer: 'Acme',
+          manufacturerId: 1,
+          original: '00000042',
+        },
+      },
     }
     expect(observationIdentity(base)?.scope).toBe('cpu')
-    expect(observationIdentity({ ...base, raw: { ...base.raw, deviceType: 2 } })?.scope).toBe(
-      'device',
-    )
+    expect(
+      observationIdentity({
+        ...base,
+        raw: {
+          ...base.raw,
+          deviceType: 2,
+          serialClaim: { ...base.raw.serialClaim, scope: 'device' },
+        },
+      })?.scope,
+    ).toBe('device')
+    expect(
+      observationIdentity({
+        ...base,
+        raw: {
+          ...base.raw,
+          serialClaim: { ...base.raw.serialClaim, scope: 'adapter' },
+        },
+      }),
+    ).toBeUndefined()
     expect(observationIdentity({ ...base, raw: { ...base.raw, vendorId: 0 } })).toBeUndefined()
     expect(observationIdentity({ ...base, raw: { ...base.raw, vendorId: 1.5 } })).toBeUndefined()
     expect(
@@ -75,6 +104,22 @@ describe('identity evidence boundaries', () => {
     const root = '1.3.6.1.2.1.47.1.1.1.1.'
     const raw = {
       unrelated: 'ignored',
+      observationId: 'df4f3d70-dd8a-4454-85de-034211f4742d',
+      subject: { kind: 'device', macAddress: '00:11:22:33:44:55' },
+      physicalEntities: [
+        {
+          ref: 'entity:2',
+          entPhysicalIndex: '2',
+          class: 'module',
+          parentRef: null,
+          serialClaim: {
+            scope: 'module',
+            componentRef: 'entity:2',
+            issuer: 'Acme',
+            original: 'MODULE42',
+          },
+        },
+      ],
       [`${root}5.1`]: 6,
       [`${root}5.2`]: 9,
       [`${root}11.2`]: 'MODULE42',
@@ -87,7 +132,7 @@ describe('identity evidence boundaries', () => {
     }
     const items = expandPhysicalEvidence({
       name: 'Adapter',
-      macAddress: '00:11:22:33:44:55',
+      macAddress,
       observations: [base, { ...base, source: 'snmp', raw }],
     })
     expect(items).toHaveLength(2)
@@ -122,7 +167,7 @@ describe('identity evidence boundaries', () => {
     ).toEqual({ serialNumber: 'X' })
   })
 
-  it('derives PROFINET identity from source-qualified I&M serial claims', () => {
+  it('does not promote PROFINET component serial claims to device identity', () => {
     const base = {
       source: 'profinet-dcp',
       observedAt: '2026-09-01T00:00:00Z',
@@ -142,12 +187,7 @@ describe('identity evidence boundaries', () => {
         ],
       },
     }
-    expect(observationIdentity(base)).toEqual({
-      authority: 'profinet',
-      manufacturer: '42',
-      scope: 'device',
-      serial: 'S C-V1X40202',
-    })
+    expect(observationIdentity(base)).toBeUndefined()
     const im5 = {
       ...base,
       fields: { serialNumber: 'A1B2C3' },
@@ -163,12 +203,7 @@ describe('identity evidence boundaries', () => {
         ],
       },
     }
-    expect(observationIdentity(im5)).toEqual({
-      authority: 'profinet',
-      manufacturer: '258',
-      scope: 'device',
-      serial: 'A1B2C3',
-    })
+    expect(observationIdentity(im5)).toBeUndefined()
     expect(observationIdentity({ ...base, fields: { serialNumber: 'S C-OTHER' } })).toBeUndefined()
     expect(
       observationIdentity({
@@ -190,24 +225,156 @@ describe('identity evidence boundaries', () => {
     const split = expandPhysicalEvidence({
       name: 'PLC',
       macAddress: '00:11:22:33:44:55',
-      observations: [base, { ...base, source: 's7', raw: { module: '6ES7' } }],
+      observations: [
+        base,
+        {
+          ...base,
+          source: 's7',
+          raw: {
+            module: '6ES7',
+            observationId: 'df4f3d70-dd8a-4454-85de-034211f4742d',
+            subject: { kind: 'device', macAddress: '00:11:22:33:44:55' },
+            serialClaim: {
+              scope: 'cpu',
+              issuer: 'Siemens',
+              original: 'S C-V1X40202',
+              encoding: 's7-szl-text',
+              normalizationVersion: 1,
+            },
+          },
+        },
+      ],
     })
-    expect(split).toHaveLength(2)
+    expect(split).toHaveLength(1)
     expect(split[0].identity).toEqual({
-      authority: 'profinet',
-      manufacturer: '42',
-      scope: 'device',
+      authority: 'siemens',
+      manufacturer: 'siemens',
+      scope: 'cpu',
       serial: 'S C-V1X40202',
     })
-    expect(split[1]).toMatchObject({
-      identity: { authority: 'siemens', manufacturer: 'siemens', scope: 'cpu' },
-      componentRef: hardwareKey({
-        authority: 'siemens',
-        manufacturer: 'siemens',
-        scope: 'cpu',
-        serial: 'S C-V1X40202',
-      }),
-      observedViaMAC: '00:11:22:33:44:55',
+  })
+
+  it('uses only qualified unique SNMP chassis roots for device identity', () => {
+    const root = '1.3.6.1.2.1.47.1.1.1.1.'
+    const macAddress = '00:11:22:33:44:55'
+    const entity = (index: string, className: string, serial: string) => ({
+      ref: `entity:${index}`,
+      entPhysicalIndex: index,
+      class: className,
+      parentRef: null,
+      serialClaim: {
+        scope: className,
+        componentRef: `entity:${index}`,
+        issuer: 'Acme',
+        original: serial,
+      },
+    })
+    const observation = (classes: Array<[string, number, string, string]>, selected?: string) => {
+      const raw: Record<string, unknown> = {
+        observationId: 'df4f3d70-dd8a-4454-85de-034211f4742d',
+        subject: { kind: 'device', macAddress },
+        physicalEntities: classes.map(([index, , className, serial]) =>
+          entity(index, className, serial),
+        ),
+      }
+      for (const [index, classID, , serial] of classes) {
+        raw[`${root}4.${index}`] = 0
+        raw[`${root}5.${index}`] = classID
+        raw[`${root}11.${index}`] = serial
+        raw[`${root}12.${index}`] = 'Acme'
+      }
+      if (selected) {
+        raw.identityComponentRef = `entity:${selected}`
+        raw.serialClaim = {
+          scope: classes.find(([index]) => index === selected)?.[2],
+          componentRef: `entity:${selected}`,
+          issuer: 'Acme',
+          original: classes.find(([index]) => index === selected)?.[3],
+        }
+      }
+      return {
+        source: 'snmp',
+        observedAt: '2026-09-01T00:00:00Z',
+        quality: 'high' as const,
+        fields: { ipAddress: '192.0.2.10' },
+        raw,
+      }
+    }
+
+    const unique = expandPhysicalEvidence({
+      name: 'Switch',
+      macAddress,
+      observations: [observation([['1', 3, 'chassis', 'ROOT1']], '1')],
+    })
+    expect(unique[0].identity).toEqual({
+      authority: 'entity-mib',
+      manufacturer: 'acme',
+      scope: 'chassis',
+      serial: 'ROOT1',
+    })
+
+    const moduleOnly = expandPhysicalEvidence({
+      name: 'Switch',
+      macAddress,
+      observations: [observation([['1', 9, 'module', 'MODULE1']])],
+    })
+    expect(moduleOnly[0].identity).toBeUndefined()
+    expect(moduleOnly[1]).toMatchObject({ identity: { scope: 'module', serial: 'MODULE1' } })
+
+    const ambiguous = expandPhysicalEvidence({
+      name: 'Switch',
+      macAddress,
+      observations: [
+        observation([
+          ['1', 3, 'chassis', 'ROOT1'],
+          ['2', 11, 'stack', 'ROOT2'],
+        ]),
+      ],
+    })
+    expect(ambiguous[0].identity).toBeUndefined()
+  })
+
+  it('retains component identity when an SNMP module is qualified', () => {
+    const component = expandPhysicalEvidence({
+      name: 'Adapter',
+      macAddress: '00:11:22:33:44:55',
+      observations: [
+        {
+          source: 'snmp',
+          observedAt: '2026-09-01T00:00:00Z',
+          quality: 'high',
+          fields: { ipAddress: '192.0.2.10' },
+          raw: {
+            observationId: 'df4f3d70-dd8a-4454-85de-034211f4742d',
+            subject: { kind: 'device', macAddress: '00:11:22:33:44:55' },
+            physicalEntities: [
+              {
+                ref: 'entity:2',
+                entPhysicalIndex: '2',
+                class: 'module',
+                serialClaim: {
+                  scope: 'module',
+                  componentRef: 'entity:2',
+                  issuer: 'Acme',
+                  original: 'MODULE42',
+                },
+              },
+            ],
+            '1.3.6.1.2.1.47.1.1.1.1.4.2': 99,
+            '1.3.6.1.2.1.47.1.1.1.1.5.2': 9,
+            '1.3.6.1.2.1.47.1.1.1.1.11.2': 'MODULE42',
+            '1.3.6.1.2.1.47.1.1.1.1.12.2': 'Acme',
+          },
+        },
+      ],
+    })
+    expect(component[1]).toMatchObject({
+      identity: {
+        authority: 'entity-mib',
+        manufacturer: 'acme',
+        scope: 'module',
+        serial: 'MODULE42',
+      },
     })
   })
 

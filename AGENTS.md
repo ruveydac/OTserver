@@ -34,6 +34,8 @@ Main locations:
 - `src/components/`: custom Payload admin views and fields.
 - `src/domain/`, `src/application/`, `src/integrations/`: pure rules, use cases, and Payload/MongoDB boundaries.
 - `src/jobs/`, `src/worker.ts`: fenced import and maintenance queues using Payload jobs.
+- `src/otter/`: site-scoped Otter enrollment, machine authentication, encrypted profiles, schedules, and controller API.
+- `otter_management.md`: management protocol and scanner-side Otter implementation checklist.
 - `otserver-otter/contracts/otserver-scan-v2.schema.json`: pinned canonical Otter wire contract.
 - `tests/int/`: application and importer integration tests.
 
@@ -103,6 +105,38 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
   access to both sites; import site selection never silently moves an existing physical asset.
 - Identity relationships must belong to the same site. Graph/identifier changes lock the affected
   assets (including ancestry) to prevent snapshot-isolation races. Preserve history site scope.
+- Otter Config is an additional role capability, not a substitute for site permissions. Scanner,
+  profile, schedule, run, and managed import data stay bound to one exact site. Scanner credentials
+  are machine principals restricted to `/api/otter/v1` and their own `/api/asset-imports` records;
+  never give them generic Payload or descendant-site access.
+- Otter enrollment tokens are single-use, short-lived digests; machine credentials are hashed,
+  expiring, and revocable. SNMP/OPC UA credentials are encrypted with
+  `OTSERVER_OTTER_ENCRYPTION_KEY` and must never be returned to ordinary profile reads or logged.
+- Otter enrollment and polling inventory reports include the computer name and at most 32 adapters,
+  each with technical/friendly names, description, MAC, and at most 16 IPv4/IPv6 addresses. Validate
+  reports and keep them bound to the exact scanner; never include credentials in adapter inventory.
+- Manage enrollment from the Otter Scanners collection popup. All scan options and human import
+  overrides belong to Otter Configurations (`otter-profiles`); manual runs select a configuration
+  explicitly and schedules reference one. Snapshot scan options, encrypted credentials, and import
+  overrides together for every run. Never layer scanner-level network overrides onto configurations.
+  Generic scanner writes may change only the name; controller-owned inventory and credentials remain
+  protected. Internal controller updates use the `otterScannerUpdate` request context.
+  Manual configuration runs require a Yes/No authorization confirmation. Schedules derive their
+  scanner and exact site from the selected configuration on save, ignoring supplied scope fields.
+  New configurations store an encrypted SNMP v2c `public` community by default; later credential
+  replacement or clearing must survive configuration edits.
+- Managed import display names include Otter, scanner name, site path/name, and a UTC timestamp.
+  Scanner-supplied overrides are discarded in favor of the server-owned run snapshot.
+- Otter Runs expose terminal failure reasons in `message`. Lease expiry records the missed-heartbeat
+  reason, and older clients reporting failure without a message get an explicit missing-details
+  fallback. Scanner-generated reasons must remain credential-safe and survive finish retries.
+- Otter controller URLs require HTTPS except for HTTP on `localhost`, `127.0.0.1`, or `[::1]`,
+  regardless of `NODE_ENV`. Browser management accepts loopback aliases only on the same scheme and
+  port as an allowed origin; retain origin checks for external requests.
+- Create due Otter schedule occurrences and claim runs transactionally during scanner polling.
+  Preserve the schedule-occurrence partial unique index, one active assignment per scanner, lease
+  checks, and latest-only offline catch-up. Scanner-side changes belong in `otserver-otter` and must
+  coordinate with `otter_management.md`.
 
 ### Auditability
 
@@ -115,6 +149,8 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
   asset moves. Merged/split views may resolve aliases and endpoint evidence without rewriting logs.
 - New collection mutations are covered by `withAudit`; custom actions outside collection hooks must
   call `writeAudit` explicitly with the original request and target context.
+- Treat scanner operations as the explicit `otter` audit actor and redact credential/community fields
+  when extending enrollment or controller configuration.
 - Never bypass auditing merely to simplify bulk operations or imports.
 
 ### Vulnerability matching
@@ -160,9 +196,11 @@ To add an importer:
 
 PRONETA has no public stable schema: accept known paths and capitalization variants, tolerate missing
 and unknown fields, and preserve useful raw data. Nmap input must be XML produced with `-oX`.
-OTserver Otter JSON must validate against schema version 2. A contract change requires coordinated
-updates to the canonical schema and Rust implementation in `otserver-otter`, an updated submodule
-pointer here, plus this repository's TypeScript importer, fixtures, and tests.
+Otter producer conformance is checked against the canonical schema and shared fixtures; management
+also rejects malformed required structure while keeping unknown optional evidence opaque. A contract
+change requires coordinated updates to the canonical schema and Rust implementation in
+`otserver-otter`, an updated submodule pointer here, plus this repository's TypeScript importer,
+fixtures, and tests.
 
 Human-supplied bulk import fields are declared once in `userSuppliedAssetFields` in
 `src/collections/Assets.ts`; the asset and import UIs derive from it. Custom field definitions are
@@ -206,29 +244,23 @@ Requirements: Node.js 22, pnpm 10, and a MongoDB 8 replica set. Copy `.env.examp
 a long random `OTSERVER_SECRET`. `docker compose up` provides the standalone OTserver and MongoDB;
 the optional `workers` profile is only for separate high-throughput workers.
 
-Integration tests need a replica set matching `DATABASE_URL`, or the optional `TEST_DATABASE_URL`
-override. Start a throwaway instance
-with Podman:
+Test commands own a disposable MongoDB 8 replica set and a unique upload directory. Use Docker or
+Podman; direct Vitest invocations stop before loading Payload unless an owning test harness supplies
+`OTSERVER_TEST_DATABASE_OWNER`, `TEST_DATABASE_URL`, and `OTSERVER_TEST_UPLOAD_DIR`.
 
 ```bash
-podman run -d --rm --name otserver-identity-test-mongo -p 27018:27017 \
-  docker.io/library/mongo:8 --replSet rs0 --bind_ip_all
-podman exec otserver-identity-test-mongo mongosh --quiet --eval \
-  'rs.initiate({_id:"rs0",members:[{_id:0,host:"localhost:27017"}]})'
-TEST_DATABASE_URL='mongodb://127.0.0.1:27018/otserver-test?replicaSet=rs0&directConnection=true' \
-  OTSERVER_VULNERABILITY_FEEDS=off pnpm test
+pnpm test
 ```
 
-Tear it down with `podman stop otserver-identity-test-mongo`; `--rm` removes it.
 MongoDB operations sharing a request transaction must run serially. `withAudit` establishes the
 transaction before Payload 3.87's parallel relationship validation can race its first command.
 
 Run `pnpm test:container` after changing the Dockerfile or startup/bootstrap behavior. It detects
 Docker or Podman, builds the production image, starts an isolated MongoDB replica set, verifies the
-fresh-database seeds, embedded workers, and first-user registration, and removes its containers and
-network.
+fresh-database seeds, external workers without `.env`, queue processing, first-user registration,
+and a database/upload/secret restore, then removes its containers and network.
 
-`vitest.config.mts` sets a 60s per-test timeout because these tests boot Payload against a real
+`vitest.config.mts` sets 60s per-test and hook timeouts because these tests boot Payload against a real
 MongoDB. A cold container makes the first run slower than later ones.
 
 Run the smallest relevant checks while developing, then the full set before committing:
@@ -243,15 +275,19 @@ git diff --check
 
 Run `pnpm check:generated` for generated-file drift. Production upgrades drain workers, back up the
 database and uploads, and apply versioned migrations before workers restart; see `docs/operations.md`.
-The full `pnpm benchmark:capacity` dataset is release-only and must use a disposable database.
 
 `pnpm test:coverage` enforces at least 90% statements, branches, functions, and lines for the
-application.
+application. `src/migrations/**` is excluded from the percentage; exercise migration behavior with
+the real database migration runner in focused integration tests.
 
 Vitest runs integration files serially because they share database state. New behavior affecting
 authorization, imports, quality precedence, audit logs, parsing, or bulk operations needs a focused
 integration test. Otter implementation and protocol tests belong in the `otserver-otter`
-repository.
+repository. Run `pnpm test:otter-client` to build the headless executable and verify real-client REST
+enrollment, import, and credential reuse after restart. To test a specific
+build, use `OTTER_CLIENT_BIN=otserver-otter/target/debug/otserver-otter pnpm test:int
+tests/int/otter-client.int.spec.ts`. Local-file CLI/GUI operation must
+remain independent of the managed `controller` command and its private state directory.
 
 The development server permits HMR only from `192.168.50.*` in `next.config.ts`. Keep production
 origin policy separate from this home-network development exception.

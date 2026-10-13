@@ -408,6 +408,8 @@ export const bindImportedIdentity = async (
           endpoint: result.id,
           observedAt,
         },
+        assetID: String(asset.id),
+        siteID: site,
         req,
         targetCollection: 'network-endpoints',
       })

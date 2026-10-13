@@ -16,6 +16,12 @@ describe('asset Lucene search', () => {
     expect(parseAssetSearch('osAccuracy:[80 TO 100]')).toEqual({
       osAccuracy: { greater_than_equal: 80, less_than_equal: 100 },
     })
+    expect(parseAssetSearch(whereToLucene({ vulnerabilityCount: { greater_than: 0 } }))).toEqual({
+      vulnerabilityCount: { greater_than: 0 },
+    })
+    expect(whereToLucene({ vulnerabilityCount: { greater_than: 0 } })).toBe(
+      'vulnerabilityCount:{0 TO *}',
+    )
     expect(parseAssetSearch('status:(online OR maintenance)')).toEqual({
       or: [{ status: { equals: 'online' } }, { status: { equals: 'maintenance' } }],
     })

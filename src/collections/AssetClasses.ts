@@ -167,38 +167,6 @@ export const initializeAssetClasses = async (payload: Payload) => {
       overrideAccess: true,
     })
   }
-
-  const assets = await payload.find({
-    collection: 'assets',
-    depth: 0,
-    overrideAccess: true,
-    pagination: false,
-    where: { assetClass: { exists: false } },
-  })
-  for (const asset of assets.docs) {
-    const legacyType = (asset as { assetType?: unknown }).assetType
-    const key = typeof legacyType === 'string' ? legacyType : 'other'
-    const assetClass = await ensureAssetClass(payload, key)
-    const existingProvenance = asset.fieldProvenance
-    const fieldProvenance: Record<string, unknown> =
-      existingProvenance &&
-      typeof existingProvenance === 'object' &&
-      !Array.isArray(existingProvenance)
-        ? { ...(existingProvenance as Record<string, unknown>) }
-        : {}
-    if (fieldProvenance.assetType && !fieldProvenance.assetClass) {
-      fieldProvenance.assetClass = fieldProvenance.assetType
-    }
-    delete fieldProvenance.assetType
-
-    await payload.update({
-      collection: 'assets',
-      context: { assetClassMigration: true },
-      data: { assetClass: assetClass.id, assetType: null, fieldProvenance },
-      id: asset.id,
-      overrideAccess: true,
-    })
-  }
 }
 
 export const assignDefaultAssetClass: CollectionBeforeValidateHook = async ({

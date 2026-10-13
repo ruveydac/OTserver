@@ -21,19 +21,96 @@ export type ServiceEvidence = {
 
 const array = (value: unknown): unknown[] => (Array.isArray(value) ? value : [])
 
+const snmpScope = (value: string): HardwareIdentity['scope'] | undefined =>
+  value === 'chassis' || value === 'stack'
+    ? 'chassis'
+    : value === 'module' || value === 'cpu'
+      ? value
+      : undefined
+
+const subjectMatches = (asset: ImportedAsset | undefined, observation: ImportedObservation) => {
+  const subject = record(record(observation.raw).subject)
+  const fields = observation.mergeFields || observation.fields
+  const macAddress = text(asset?.macAddress) || text(fields.macAddress)
+  if (subject.kind === 'device') {
+    const subjectMAC = text(subject.macAddress)
+    return Boolean(
+      macAddress &&
+      subjectMAC &&
+      validateMACAddress(subjectMAC) === true &&
+      normalizeMAC(subjectMAC) === normalizeMAC(macAddress),
+    )
+  }
+  const ipAddress = text(subject.ipAddress)
+  const observationID = text(record(observation.raw).observationId)
+  return Boolean(
+    !macAddress &&
+    /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(observationID) &&
+    isIP(ipAddress) !== 0 &&
+    ipAddress === text(fields.ipAddress),
+  )
+}
+
+const snmpEntityIdentity = (
+  asset: ImportedAsset | undefined,
+  observation: ImportedObservation,
+  index: string,
+  entityClass: string,
+  manufacturer: string,
+  serial: string,
+): HardwareIdentity | undefined => {
+  const raw = record(observation.raw)
+  const ref = `entity:${index}`
+  const entity = array(raw.physicalEntities)
+    .map(record)
+    .find(
+      (item) =>
+        text(item.ref) === ref &&
+        text(item.entPhysicalIndex) === index &&
+        text(item.class) === entityClass,
+    )
+  const claim = record(entity?.serialClaim)
+  const scope = snmpScope(entityClass)
+  if (
+    !entity ||
+    !scope ||
+    !subjectMatches(asset, observation) ||
+    !manufacturer ||
+    !serial ||
+    claim.scope !== entityClass ||
+    claim.componentRef !== ref ||
+    claim.issuer !== manufacturer ||
+    claim.original !== serial
+  )
+    return undefined
+  try {
+    return normalizeIdentity({ authority: 'entity-mib', manufacturer, scope, serial })
+  } catch {
+    return undefined
+  }
+}
+
 /** Only source-specific identity layouts that the pinned v2 scanner actually emits. */
 export const observationIdentity = (
   observation: ImportedObservation,
+  asset?: ImportedAsset,
 ): HardwareIdentity | undefined => {
   const raw = record(observation.raw)
   const fields = observation.mergeFields || observation.fields
   const serial = text(fields.serialNumber)
+  const claim = record(raw.serialClaim)
   let identity: HardwareIdentity | undefined
   if (
     observation.source === 'ethernet-ip' &&
     Number.isInteger(raw.vendorId) &&
     Number.isInteger(raw.deviceType) &&
-    serial === text(raw.serialNumber)
+    serial === text(raw.serialNumber) &&
+    subjectMatches(asset, observation) &&
+    claim.scope ===
+      (raw.deviceType === 12 ? 'adapter' : raw.deviceType === 14 ? 'cpu' : 'device') &&
+    Number(claim.manufacturerId) === raw.vendorId &&
+    text(claim.original) === serial &&
+    (!text(claim.issuer) || text(claim.issuer) === text(fields.vendor))
   ) {
     identity = {
       authority: 'cip',
@@ -41,40 +118,16 @@ export const observationIdentity = (
       scope: raw.deviceType === 12 ? 'adapter' : raw.deviceType === 14 ? 'cpu' : 'device',
       serial,
     }
-  } else if (observation.source === 's7' && text(raw.module) && serial) {
+  } else if (
+    observation.source === 's7' &&
+    text(raw.module) &&
+    serial &&
+    subjectMatches(asset, observation) &&
+    claim.scope === 'cpu' &&
+    text(claim.issuer).toLowerCase() === 'siemens' &&
+    text(claim.original) === serial
+  ) {
     identity = { authority: 'siemens', manufacturer: 'siemens', scope: 'cpu', serial }
-  } else if (observation.source === 'profinet-dcp') {
-    const pnio = array(raw.pnioRecords)
-      .map(record)
-      .map((item) => record(item.parsed))
-    const claims = pnio.flatMap((parsed) => [
-      ...(text(parsed.manufacturerId) && text(parsed.serialNumber)
-        ? [{ vendor: parsed.manufacturerId, serial: text(parsed.serialNumber) }]
-        : []),
-      ...array(parsed.im5Data)
-        .map(record)
-        .flatMap((im) =>
-          text(im.vendorId) && text(im.imSerialNumber)
-            ? [{ vendor: im.vendorId, serial: text(im.imSerialNumber) }]
-            : [],
-        ),
-    ])
-    const match = claims.find(({ serial: value }) => value === serial)
-    const manufacturer = match ? Number.parseInt(text(match.vendor), 16) : NaN
-    if (
-      match &&
-      serial &&
-      Number.isInteger(manufacturer) &&
-      manufacturer >= 1 &&
-      manufacturer <= 65535
-    ) {
-      identity = {
-        authority: 'profinet',
-        manufacturer: String(manufacturer),
-        scope: 'device',
-        serial,
-      }
-    }
   }
   if (!identity) return undefined
   try {
@@ -210,7 +263,7 @@ export const serviceEvidence = (device: Record<string, unknown>): ServiceEvidenc
 export const expandPhysicalEvidence = (asset: ImportedAsset): ImportedAsset[] => {
   const observations = asset.observations || []
   const claims = observations.flatMap((observation) => {
-    const identity = observationIdentity(observation)
+    const identity = observationIdentity(observation, asset)
     return identity ? [{ identity, observation }] : []
   })
   const root = claims.find(({ observation }) => observation.source === 'ethernet-ip') || claims[0]
@@ -235,6 +288,7 @@ export const expandPhysicalEvidence = (asset: ImportedAsset): ImportedAsset[] =>
   const entityRoot = '1.3.6.1.2.1.47.1.1.1.1.'
   for (const observation of observations.filter(({ source }) => source === 'snmp')) {
     const raw = record(observation.raw)
+    const physicalEntities = array(raw.physicalEntities).map(record)
     const indexes = [
       ...new Set(
         Object.keys(raw).flatMap((key) =>
@@ -244,18 +298,22 @@ export const expandPhysicalEvidence = (asset: ImportedAsset): ImportedAsset[] =>
     ]
     const entities = indexes.flatMap((index) => {
       const value = (column: number) => raw[`${entityRoot}${column}.${index}`]
-      if (![3, 9].includes(Number(value(5)))) return []
-      const identity: HardwareIdentity = {
-        authority: 'entity-mib',
-        manufacturer: text(value(12)),
-        scope: Number(value(5)) === 3 ? 'chassis' : 'module',
-        serial: text(value(11)),
-      }
-      try {
-        normalizeIdentity(identity)
-      } catch {
-        return []
-      }
+      const className = new Map([
+        [3, 'chassis'],
+        [9, 'module'],
+        [11, 'stack'],
+        [12, 'cpu'],
+      ]).get(Number(value(5)))
+      if (!className) return []
+      const identity = snmpEntityIdentity(
+        asset,
+        observation,
+        index,
+        className,
+        text(value(12)),
+        text(value(11)),
+      )
+      if (!identity) return []
       return [
         {
           index,
@@ -283,16 +341,28 @@ export const expandPhysicalEvidence = (asset: ImportedAsset): ImportedAsset[] =>
           : item,
       )
     }
+    const roots = physicalEntities.filter(
+      (entity) => !text(entity.parentRef) && ['chassis', 'stack'].includes(text(entity.class)),
+    )
+    const selectedRoot = roots.length === 1 ? roots[0] : undefined
+    const selectedRootClaim = record(selectedRoot?.serialClaim)
+    const topLevelClaim = record(raw.serialClaim)
+    const selectedRootEntity = entities.find(
+      ({ index, identity, parent }) =>
+        selectedRoot &&
+        text(selectedRoot.entPhysicalIndex) === index &&
+        parent === '0' &&
+        identity.scope === 'chassis' &&
+        text(raw.identityComponentRef) === text(selectedRoot.ref) &&
+        topLevelClaim.scope === selectedRootClaim.scope &&
+        topLevelClaim.componentRef === selectedRootClaim.componentRef &&
+        topLevelClaim.issuer === selectedRootClaim.issuer &&
+        topLevelClaim.original === selectedRootClaim.original,
+    )
     for (const entity of entities) {
-      const componentRef = `${asset.macAddress}:entity:${entity.index}`
+      const componentRef = `${asset.macAddress || text(raw.observationId)}:entity:${entity.index}`
       const parent = entities.find(({ index }) => index === entity.parent)
-      // Preserve the root chassis as its own record too when another protocol identified an adapter.
-      if (
-        !root &&
-        entity.identity.scope === 'chassis' &&
-        entity.parent === '0' &&
-        entities.filter((item) => item.parent === '0').length === 1
-      ) {
+      if (!root && selectedRootEntity?.index === entity.index) {
         result[0].identity = entity.identity
         result[0].componentRef = componentRef
         result[0].observations = observations.map((item) =>
@@ -310,7 +380,11 @@ export const expandPhysicalEvidence = (asset: ImportedAsset): ImportedAsset[] =>
           name: entity.fields.model || entity.identity.serial,
           identity: entity.identity,
           componentRef,
-          ...(parent ? { parentComponentRef: `${asset.macAddress}:entity:${parent.index}` } : {}),
+          ...(parent
+            ? {
+                parentComponentRef: `${asset.macAddress || text(raw.observationId)}:entity:${parent.index}`,
+              }
+            : {}),
           ...(Number.isInteger(entity.position) && Number(entity.position) >= 0
             ? { slotPath: String(entity.position) }
             : {}),

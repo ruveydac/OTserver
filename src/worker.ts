@@ -1,4 +1,8 @@
-process.loadEnvFile?.()
+try {
+  process.loadEnvFile?.()
+} catch (error) {
+  if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+}
 
 const { getPayload } = await import('payload')
 const { default: config } = await import('./payload.config')

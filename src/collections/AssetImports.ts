@@ -8,11 +8,12 @@ import {
 } from 'payload'
 import { isDeepStrictEqual } from 'node:util'
 import {
-  canCreateSiteDocument,
-  canReadSiteDocuments,
+  canCreateOtterImport,
+  canReadOtterImports,
   canWriteSiteDocuments,
   enforceWritableSite,
   filterWritableSites,
+  relationshipID,
 } from '../access/authorization'
 import { userSuppliedAssetFields } from '../domain/assetFields'
 import { sanitizeCustomFieldValues } from './AssetFields'
@@ -25,7 +26,7 @@ import {
   requireSiteWriter,
   retryImport,
 } from '../application/queuedImports'
-import { withRequestContext } from '../integrations/payload/context'
+import { assertCurrentOtterRunLease } from '../otter/runLease'
 export { getAssetOverrides } from '../application/processImport'
 
 const MAX_DIAGNOSTICS_LENGTH = 4_000_000
@@ -34,18 +35,31 @@ const normalizeLegacyOtterSource: CollectionBeforeValidateHook = ({ data }) => {
   if (data?.source === 'otserver-scanner') data.source = 'otserver-otter'
   return data
 }
+const bindOtterUpload: CollectionBeforeValidateHook = ({ data, operation, req }) => {
+  const scannerID =
+    typeof req.context.otterScannerID === 'string' ? req.context.otterScannerID : undefined
+  if (!scannerID || req.context.importWrite || !data) return data
+  if (operation !== 'create')
+    throw new APIError('Otter uploads cannot modify existing imports.', 403)
+  const siteID = String(req.context.otterScannerSiteID || '')
+  const requestedSite = relationshipID(data.site)
+  if (!siteID || (requestedSite && String(requestedSite) !== siteID))
+    throw new APIError('Otter uploads are restricted to the scanner’s bound site.', 403)
+  data.site = siteID
+  data.source = 'otserver-otter'
+  return data
+}
 const runImport: CollectionAfterChangeHook = async ({ context, doc, req, operation }) => {
   if (context.skipAssetImport || !req.file) return doc
   if (doc.executionMode === 'queued') return operation === 'create' ? queueImport(doc, req) : doc
-  return withRequestContext(req, { importWrite: true }, () =>
-    processImport({ doc, data: req.file!.data, req }),
-  )
+  return processImport({ doc, data: req.file.data, req })
 }
 
 const managed = [
   'status',
   'jobID',
   'submittedBy',
+  'executorType',
   'executorID',
   'retriedBy',
   'fileDigest',
@@ -65,6 +79,8 @@ const managed = [
   'warnings',
   'scanMetadata',
   'unresolved',
+  'scanner',
+  'otterRun',
 ]
 const immutable = [
   'executionMode',
@@ -73,6 +89,8 @@ const immutable = [
   'assetOverrides',
   'customFieldOverrides',
   'sourceVersion',
+  'scanner',
+  'otterRun',
   'filename',
 ]
 const internalFieldAccess = { create: () => false, read: () => false, update: () => false }
@@ -84,7 +102,10 @@ const protectProcessing: CollectionBeforeChangeHook = async ({
   context,
 }) => {
   if (context.importWrite) return data
+  const scannerID =
+    typeof req.context.otterScannerID === 'string' ? req.context.otterScannerID : undefined
   if (operation === 'update') {
+    if (scannerID) throw new APIError('Otter uploads cannot modify existing imports.', 403)
     for (const field of managed)
       if (Object.hasOwn(data, field) && !isDeepStrictEqual(data[field], originalDoc?.[field]))
         throw new APIError('Processing state is managed by the server.', 400)
@@ -97,14 +118,71 @@ const protectProcessing: CollectionBeforeChangeHook = async ({
     return data
   }
   // Discard caller-supplied processing state, including through generic REST/GraphQL APIs.
+  const scannerRunID = scannerID ? relationshipID(data.otterRun) : undefined
   for (const field of managed) delete data[field]
+  if (scannerID) {
+    const siteID = String(req.context.otterScannerSiteID || '')
+    if (!siteID || (Object.hasOwn(data, 'site') && String(relationshipID(data.site)) !== siteID))
+      throw new APIError('Otter uploads are restricted to the scanner’s bound site.', 403)
+    data.site = siteID
+    data.source = 'otserver-otter'
+    data.scanner = scannerID
+    delete data.assetOverrides
+    delete data.customFieldOverrides
+    const runID = scannerRunID
+    const scanner = await req.payload.findByID({
+      collection: 'otter-scanners',
+      id: scannerID,
+      depth: 0,
+      overrideAccess: true,
+      req,
+    })
+    if (runID) {
+      const run = await req.payload.findByID({
+        collection: 'otter-runs',
+        depth: 0,
+        id: String(runID),
+        overrideAccess: true,
+        req,
+      })
+      if (
+        String(relationshipID(run.scanner)) !== scannerID ||
+        String(relationshipID(run.site)) !== siteID ||
+        !['assigned', 'running'].includes(run.status)
+      )
+        throw new APIError(
+          'The scan run does not belong to this scanner or is no longer active.',
+          409,
+        )
+      assertCurrentOtterRunLease(run, scanner, new Date())
+      data.otterRun = String(runID)
+      const snapshot = run.importOverridesSnapshot
+      if (snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)) {
+        data.assetOverrides = snapshot.assetOverrides || {}
+        data.customFieldOverrides = snapshot.customFieldOverrides || {}
+      }
+    } else {
+      delete data.otterRun
+    }
+    const site = await req.payload.findByID({
+      collection: 'sites',
+      id: siteID,
+      depth: 0,
+      overrideAccess: true,
+      req,
+    })
+    data.name = `Otter — ${scanner.name} — ${site.path || site.name} — ${new Date().toISOString()}`
+    req.context.otterImportAuthorized = true
+  }
+  if (!data.name) data.name = data.filename || req.file?.name
   data.status = 'pending'
   data.attemptCount = 0
   if (data.executionMode === 'queued') {
     if (!queuedImportsEnabled()) throw new APIError('Queued imports are not enabled.', 503)
     await requireSiteWriter(data.site, req)
     if (!req.file) throw new APIError('A file is required for a queued import.', 400)
-    data.submittedBy = data.executorID = String(req.user!.id)
+    data.submittedBy = data.executorID = scannerID || String(req.user!.id)
+    data.executorType = scannerID ? 'otter' : 'user'
     data.fileDigest = fileDigest(req.file.data)
     data.queuedAt = new Date().toISOString()
     data.processingInput = {
@@ -152,14 +230,14 @@ export const AssetImports: CollectionConfig = {
     singular: 'Import',
   },
   access: {
-    create: canCreateSiteDocument,
+    create: canCreateOtterImport,
     delete: canWriteSiteDocuments,
-    read: canReadSiteDocuments,
+    read: canReadOtterImports,
     update: canWriteSiteDocuments,
   },
   admin: {
     defaultColumns: [
-      'filename',
+      'name',
       'site',
       'source',
       'sourceVersion',
@@ -170,9 +248,17 @@ export const AssetImports: CollectionConfig = {
     ],
     description: 'Import physical identity and network evidence into a selected site.',
     group: 'OT Inventory',
-    useAsTitle: 'filename',
+    useAsTitle: 'name',
   },
   fields: [
+    {
+      name: 'name',
+      type: 'text',
+      admin: { readOnly: true },
+      hooks: {
+        afterRead: [({ value, originalDoc }) => value || originalDoc?.filename],
+      },
+    },
     {
       name: 'executionMode',
       type: 'select',
@@ -190,12 +276,14 @@ export const AssetImports: CollectionConfig = {
       type: 'ui',
       admin: { components: { Field: '@/components/ImportStatus' } },
     },
-    ...['jobID', 'submittedBy', 'executorID', 'retriedBy', 'fileDigest'].map((name) => ({
-      name,
-      type: 'text' as const,
-      access: internalFieldAccess,
-      admin: { readOnly: true, hidden: true },
-    })),
+    ...['jobID', 'submittedBy', 'executorType', 'executorID', 'retriedBy', 'fileDigest'].map(
+      (name) => ({
+        name,
+        type: 'text' as const,
+        access: internalFieldAccess,
+        admin: { readOnly: true, hidden: true },
+      }),
+    ),
     {
       name: 'processingInput',
       type: 'json',
@@ -234,6 +322,17 @@ export const AssetImports: CollectionConfig = {
       index: true,
       relationTo: 'sites',
       required: true,
+    },
+    {
+      name: 'scanner',
+      type: 'text',
+      admin: { hidden: true, readOnly: true },
+      index: true,
+    },
+    {
+      name: 'otterRun',
+      type: 'text',
+      admin: { hidden: true, readOnly: true },
     },
     {
       name: 'source',
@@ -355,11 +454,11 @@ export const AssetImports: CollectionConfig = {
   hooks: {
     beforeOperation: [protectUpload],
     afterChange: [runImport],
-    beforeValidate: [normalizeLegacyOtterSource],
+    beforeValidate: [normalizeLegacyOtterSource, bindOtterUpload],
     beforeChange: [
       enforceWritableSite,
-      sanitizeCustomFieldValues,
       protectProcessing,
+      sanitizeCustomFieldValues,
       ({ data, context }) => {
         if (context.appliedImportKey) data.appliedKey = context.appliedImportKey
         return data
@@ -372,6 +471,6 @@ export const AssetImports: CollectionConfig = {
     bulkUpload: false,
     mimeTypes: ['application/json', 'application/xml', 'text/json', 'text/plain', 'text/xml'],
     pasteURL: false,
-    staticDir: 'import-files',
+    staticDir: process.env.OTSERVER_TEST_UPLOAD_DIR || 'import-files',
   },
 }

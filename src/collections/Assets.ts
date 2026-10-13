@@ -98,7 +98,7 @@ export const Assets: CollectionConfig = {
       name: 'identityRevision',
       type: 'number',
       defaultValue: 0,
-      admin: { hidden: true },
+      admin: { hidden: true, disableListFilter: true },
       access: { create: () => false, update: () => false },
     },
     {
@@ -117,7 +117,13 @@ export const Assets: CollectionConfig = {
       options: ['unknown', 'device', 'chassis', 'module'],
     },
     { name: 'catalogNumber', type: 'text', label: 'Catalog / part number' },
-    { name: 'slotCapacity', type: 'number', min: 0, max: 65536 },
+    {
+      name: 'slotCapacity',
+      type: 'number',
+      min: 0,
+      max: 65536,
+      admin: { disableListFilter: true },
+    },
     {
       name: 'lifecycle',
       type: 'select',
@@ -126,19 +132,34 @@ export const Assets: CollectionConfig = {
       index: true,
       admin: { readOnly: true, position: 'sidebar' },
     },
-    { name: 'baselined', type: 'checkbox', defaultValue: false, admin: { position: 'sidebar' } },
-    { name: 'mergedInto', type: 'relationship', relationTo: 'assets', admin: { readOnly: true } },
-    { name: 'replacedBy', type: 'relationship', relationTo: 'assets', admin: { readOnly: true } },
+    {
+      name: 'baselined',
+      type: 'checkbox',
+      defaultValue: false,
+      admin: { disableListFilter: true, position: 'sidebar' },
+    },
+    {
+      name: 'mergedInto',
+      type: 'relationship',
+      relationTo: 'assets',
+      admin: { disableListFilter: true, readOnly: true },
+    },
+    {
+      name: 'replacedBy',
+      type: 'relationship',
+      relationTo: 'assets',
+      admin: { disableListFilter: true, readOnly: true },
+    },
     {
       name: 'networkAddresses',
       type: 'array',
-      admin: { hidden: true },
+      admin: { disableListFilter: true, hidden: true },
       fields: [{ name: 'address', type: 'text', index: true, required: true }],
     },
     {
       name: 'networkMACs',
       type: 'array',
-      admin: { hidden: true },
+      admin: { disableListFilter: true, hidden: true },
       fields: [{ name: 'address', type: 'text', index: true, required: true }],
     },
     {
@@ -191,12 +212,12 @@ export const Assets: CollectionConfig = {
     {
       name: 'fieldProvenance',
       type: 'json',
-      admin: { hidden: true },
+      admin: { disableListFilter: true, hidden: true },
     },
     {
       name: 'assetType',
       type: 'text',
-      admin: { hidden: true },
+      admin: { disableListFilter: true, hidden: true },
       label: 'Legacy asset type',
     },
     {

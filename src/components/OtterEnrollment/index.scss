@@ -1,0 +1,22 @@
+.otter-enrollment {
+  margin-bottom: var(--base);
+  label {
+    display: block;
+    margin-bottom: var(--base);
+  }
+  input,
+  select {
+    display: block;
+    width: 100%;
+    margin-top: calc(var(--base) / 2);
+  }
+}
+
+.otter-enrollment__instructions {
+  code {
+    display: block;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+    margin: var(--base) 0;
+  }
+}

@@ -8,6 +8,7 @@ import {
   hideFromNonAdmins,
 } from '../../access/authorization'
 import { ensureAdminRole } from '../UserRoles'
+import { otterMachineStrategy } from '../../otter/security'
 
 const hasUsers = async (req: PayloadRequest) =>
   (
@@ -53,7 +54,7 @@ export const Users: CollectionConfig = {
     hidden: hideFromNonAdmins,
     useAsTitle: 'name',
   },
-  auth: { useAPIKey: true },
+  auth: { strategies: [otterMachineStrategy], useAPIKey: true },
   fields: [
     {
       name: 'name',

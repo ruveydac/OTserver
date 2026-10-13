@@ -70,8 +70,13 @@ describe('processImport runtime boundaries', () => {
       id,
       ...data,
     }))
+    const originalContext = {
+      assetImport: false,
+      importWrite: 'outer-operation',
+      identityImportSource: 'previous-source',
+    }
     const req = {
-      context: {},
+      context: { ...originalContext },
       payload: { create, find, update },
     }
     mocks.parseNmap.mockReturnValue({
@@ -127,6 +132,7 @@ describe('processImport runtime boundaries', () => {
       topologyName: undefined,
       warnings: 'one warning',
     })
+    expect(req.context).toEqual(originalContext)
   })
 
   it('rejects an oversized identity import before opening a transaction', async () => {
@@ -136,14 +142,19 @@ describe('processImport runtime boundaries', () => {
       warnings: [],
     })
 
+    const req = {
+      context: { assetImport: false, importWrite: 'outer-operation' },
+      payload: {},
+    }
     await expect(
       processImport({
         data: Buffer.from('<nmaprun />'),
         doc: doc as never,
-        req: { context: {}, payload: {} } as never,
+        req: req as never,
         throwValidationErrors: true,
       }),
     ).rejects.toThrow('limited to 2000')
     expect(mocks.requireTransaction).not.toHaveBeenCalled()
+    expect(req.context).toEqual({ assetImport: false, importWrite: 'outer-operation' })
   })
 })

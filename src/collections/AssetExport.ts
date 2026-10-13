@@ -113,7 +113,7 @@ export const exportAssetsCSV: PayloadHandler = async (req) => {
   return new Response(stream as unknown as BodyInit, {
     headers: {
       'Cache-Control': 'no-store',
-      'Content-Disposition': `attachment; filename="assets-${cutoff.slice(0, 10)}.csv"`,
+      'Content-Disposition': `attachment; filename="assets-diagnostic-${cutoff.slice(0, 10)}.csv"`,
       'Content-Type': 'text/csv; charset=utf-8',
     },
   })

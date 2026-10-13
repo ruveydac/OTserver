@@ -21,7 +21,16 @@ type AuditAction = 'create' | 'custom' | 'delete' | 'login' | 'logout' | 'update
 type Document = Record<string, unknown>
 
 const ignoredFields = new Set(['collection', 'createdAt', 'id', 'updatedAt'])
-const sensitiveField = /api[-_]?key|hash|password|salt|secret|session|token/i
+const sensitiveField = /api[-_]?key|community|credential|hash|password|salt|secret|session|token/i
+const assetSubjectFields: Record<string, string[]> = {
+  'asset-identifiers': ['asset'],
+  'asset-installations': ['module', 'parent'],
+  'asset-observations': ['asset'],
+  'identity-cases': ['asset', 'candidate'],
+  'network-endpoints': ['asset'],
+  'service-bindings': ['asset'],
+  'topology-links': ['localAsset', 'remoteAsset'],
+}
 
 const canReadAuditLogs: Access = async ({ req }) => {
   const authorization = await getAuthorization(req)
@@ -69,24 +78,36 @@ export const writeAudit = async ({
   action,
   after,
   before,
+  assetID: explicitAssetID,
   req,
+  siteID: explicitSiteID,
   targetCollection,
 }: {
   action: AuditAction
   after?: unknown
+  assetID?: string
   before?: unknown
   req: PayloadRequest
+  siteID?: string
   targetCollection: string
 }) => {
   const document = clean(after ?? before)
   const actor = clean(req.user)
+  const scannerID =
+    typeof req.context.otterScannerID === 'string' ? req.context.otterScannerID : undefined
   const documentID = document.id === undefined ? undefined : String(document.id)
   const documentLabel = labelFor(document)
-  const relatedAsset = relationshipID(
-    document.asset ?? document.localAsset ?? document.module ?? document.parent,
-  )
+  const relatedAsset = assetSubjectFields[targetCollection]
+    ?.map((field) => relationshipID(document[field]))
+    .find(Boolean)
   const assetID =
-    targetCollection === 'assets' ? documentID : relatedAsset ? String(relatedAsset) : undefined
+    explicitAssetID ||
+    (targetCollection === 'assets'
+      ? documentID
+      : relatedAsset === undefined
+        ? undefined
+        : String(relatedAsset))
+  const siteID = explicitSiteID || relationshipID(document.site)
   const forwardedFor = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
   const requestPath = req.url ? new URL(req.url, 'http://local').pathname : undefined
 
@@ -94,11 +115,15 @@ export const writeAudit = async ({
     collection: 'audit-logs',
     data: {
       action,
-      ...(relationshipID(document.site) ? { site: relationshipID(document.site) as string } : {}),
-      actorEmail: typeof actor.email === 'string' ? actor.email : undefined,
-      actorID: actor.id === undefined ? undefined : String(actor.id),
-      actorName: typeof actor.name === 'string' ? actor.name : undefined,
-      actorType: req.user ? 'user' : 'system',
+      ...(siteID ? { site: siteID as string } : {}),
+      actorEmail: !scannerID && typeof actor.email === 'string' ? actor.email : undefined,
+      actorID: scannerID || (actor.id === undefined ? undefined : String(actor.id)),
+      actorName: scannerID
+        ? `Otter scanner ${scannerID}`
+        : typeof actor.name === 'string'
+          ? actor.name
+          : undefined,
+      actorType: scannerID ? 'otter' : req.user ? 'user' : 'system',
       ...(assetID ? { asset: assetID, assetID } : {}),
       changes: getAuditChanges(before, after),
       documentID,
@@ -220,7 +245,7 @@ export const AuditLogs: CollectionConfig = {
       name: 'actorType',
       type: 'select',
       index: true,
-      options: ['user', 'system'],
+      options: ['otter', 'user', 'system'],
       required: true,
     },
     { name: 'actorID', type: 'text', index: true, label: 'Actor ID' },

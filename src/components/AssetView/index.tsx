@@ -11,9 +11,10 @@ import {
   statusLabels,
 } from '@/components/labels'
 import DeviceIdentity from '@/components/DeviceIdentity'
-import { assetHistoryScope } from '@/identity/relationships'
+import { loadAssetPanel } from '@/application/assetPanel'
 import type { Asset, AssetObservation, AuditLog, TopologyLink } from '@/payload-types'
-import { bySeverity, findAssemblyVulnerabilities } from '@/vulnerabilities/match'
+import type { VulnerabilityMatch } from '@/vulnerabilities/matching'
+import { bySeverity } from '@/vulnerabilities/match'
 import { documentClientProps } from '@/integrations/payload/admin'
 
 import './index.scss'
@@ -51,6 +52,11 @@ const array = (value: unknown): unknown[] => (Array.isArray(value) ? value : [])
 const firstParam = (value: unknown): string | undefined => {
   const item = Array.isArray(value) ? value[0] : value
   return typeof item === 'string' ? item : undefined
+}
+
+const pageNumber = (value: unknown) => {
+  const page = Number(firstParam(value))
+  return Number.isSafeInteger(page) && page > 0 ? page : 1
 }
 
 const relationID = (value: unknown): string | undefined => {
@@ -141,6 +147,27 @@ const Section = ({
     </dl>
   </section>
 )
+
+const PageNavigation = ({
+  currentPage,
+  href,
+  label,
+  totalPages,
+}: {
+  currentPage: number
+  href: (page: number) => string
+  label: string
+  totalPages: number
+}) =>
+  totalPages > 1 ? (
+    <nav aria-label={label} className="asset-view__pagination">
+      {currentPage > 1 ? <Link href={href(currentPage - 1)}>← Newer</Link> : <span />}
+      <span>
+        {label} page {currentPage} of {totalPages}
+      </span>
+      {currentPage < totalPages ? <Link href={href(currentPage + 1)}>Older →</Link> : null}
+    </nav>
+  ) : null
 
 const InspectorCard = ({ children, title }: { children: ReactNode; title: string }) => (
   <section className="asset-view__inspector-card">
@@ -265,7 +292,7 @@ const VulnerabilityList = ({
   matches,
 }: {
   assetURL: string
-  matches: ReturnType<typeof findAssemblyVulnerabilities> extends Promise<infer T> ? T : never
+  matches: VulnerabilityMatch[]
 }) => {
   const visible = matches.slice(0, MAX_LISTED_VULNERABILITIES)
 
@@ -313,55 +340,13 @@ const AssetView = async (props: DocumentViewServerProps) => {
   const selectedTab: Tab = tabs.some(({ id }) => id === selectedParam)
     ? (selectedParam as Tab)
     : 'overview'
-  const historyPageParam = firstParam(props.searchParams?.historyPage)
-  const requestedHistoryPage = Number(historyPageParam)
-  const historyPage =
-    Number.isInteger(requestedHistoryPage) && requestedHistoryPage > 0 ? requestedHistoryPage : 1
+  const historyPage = pageNumber(props.searchParams?.historyPage)
+  const discoveryPage = pageNumber(props.searchParams?.discoveryPage)
+  const topologyPage = pageNumber(props.searchParams?.topologyPage)
   const populatedSite = typeof asset.site === 'object' ? asset.site : undefined
   const populatedAssetClass = typeof asset.assetClass === 'object' ? asset.assetClass : undefined
-  const siteID = relationID(asset.site)
-  const assetClassID = relationID(asset.assetClass)
-  const historyScope = asset.uuid
-    ? await assetHistoryScope(asset.id, props.payload, props.user)
-    : {
-        assets: { asset: { equals: asset.id } },
-        observations: { asset: { equals: asset.id } },
-      }
   const customFields = record(asset.customFields)
-  const endpointCountRequest = props.payload.count
-    ? props.payload.count({
-        collection: 'network-endpoints',
-        overrideAccess: false,
-        user: props.user,
-        where: { and: [{ asset: { equals: asset.id } }, { endedAt: { exists: false } }] },
-      })
-    : Promise.resolve({ totalDocs: asset.networkAddresses?.length || 0 })
-  const siteRequest =
-    populatedSite?.path || !siteID
-      ? Promise.resolve(populatedSite)
-      : props.payload.findByID({
-          collection: 'sites',
-          depth: 0,
-          disableErrors: true,
-          id: siteID,
-          overrideAccess: false,
-          select: { name: true, path: true },
-          user: props.user,
-        })
-  const assetClassRequest =
-    populatedAssetClass?.name || !assetClassID
-      ? Promise.resolve(populatedAssetClass)
-      : props.payload.findByID({
-          collection: 'asset-classes',
-          depth: 0,
-          disableErrors: true,
-          id: assetClassID,
-          overrideAccess: false,
-          select: { name: true },
-          user: props.user,
-        })
-
-  const [
+  const {
     definitions,
     auditLogs,
     observations,
@@ -370,50 +355,16 @@ const AssetView = async (props: DocumentViewServerProps) => {
     endpointCount,
     loadedSite,
     loadedAssetClass,
-  ] = await Promise.all([
-    props.payload.find({
-      collection: 'asset-fields',
-      depth: 0,
-      overrideAccess: false,
-      pagination: false,
-      sort: 'label',
-      user: props.user,
-    }),
-    props.payload.find({
-      collection: 'audit-logs',
-      depth: 0,
-      limit: 50,
-      overrideAccess: false,
-      page: historyPage,
-      sort: '-createdAt',
-      user: props.user,
-      where: historyScope.assets,
-    }),
-    props.payload.find({
-      collection: 'asset-observations',
-      depth: 0,
-      limit: 20,
-      overrideAccess: false,
-      sort: '-observedAt',
-      user: props.user,
-      where: historyScope.observations,
-    }),
-    props.payload.find({
-      collection: 'topology-links',
-      depth: 0,
-      limit: 20,
-      overrideAccess: false,
-      sort: '-observedAt',
-      user: props.user,
-      where: {
-        or: [{ localAsset: { equals: asset.id } }, { remoteAsset: { equals: asset.id } }],
-      },
-    }),
-    findAssemblyVulnerabilities(props.payload, asset, { user: props.user }),
-    endpointCountRequest,
-    siteRequest,
-    assetClassRequest,
-  ])
+    historyScopeTruncated,
+  } = await loadAssetPanel({
+    asset,
+    payload: props.payload,
+    user: props.user,
+    historyPage,
+    discoveryPage,
+    topologyPage,
+    pageSize: 50,
+  })
 
   const matches = vulnerabilityMatches.slice().sort(bySeverity)
   const severityCounts = Object.fromEntries(
@@ -427,6 +378,8 @@ const AssetView = async (props: DocumentViewServerProps) => {
   const latestObservation = observations.docs[0]
   const tabURL = (tab: Tab, page?: number) =>
     `${assetURL}?tab=${tab}${page ? `&historyPage=${page}` : ''}`
+  const pageURL = (tab: Tab, parameter: string, page: number) =>
+    `${assetURL}?tab=${tab}&${parameter}=${page}`
   const recordLinks = () =>
     tabs.map(({ id, label }) => (
       <Link
@@ -547,6 +500,9 @@ const AssetView = async (props: DocumentViewServerProps) => {
           title="Custom fields"
         />
       ) : null}
+      {definitions.hasNextPage ? (
+        <p role="status">Only the first 200 custom field definitions are shown.</p>
+      ) : null}
       <Section
         details={
           topologyLinks.docs.length
@@ -558,6 +514,14 @@ const AssetView = async (props: DocumentViewServerProps) => {
         title="Observed connections"
         wide
       />
+      {topologyLinks.totalPages > 1 ? (
+        <PageNavigation
+          currentPage={topologyPage}
+          href={(page) => pageURL('overview', 'topologyPage', page)}
+          label="Topology"
+          totalPages={topologyLinks.totalPages}
+        />
+      ) : null}
     </>
   )
 
@@ -588,6 +552,12 @@ const AssetView = async (props: DocumentViewServerProps) => {
         }
         title="Observed topology"
         wide
+      />
+      <PageNavigation
+        currentPage={topologyPage}
+        href={(page) => pageURL('network', 'topologyPage', page)}
+        label="Topology"
+        totalPages={topologyLinks.totalPages}
       />
     </>
   )
@@ -735,17 +705,25 @@ const AssetView = async (props: DocumentViewServerProps) => {
   )
 
   const discovery = (
-    <Section
-      details={
-        observations.docs.length
-          ? observations.docs.map((observation, index) =>
-              observationDetails(observation, index === 0),
-            )
-          : [{ label: 'Evidence', value: 'No scanner evidence recorded yet.', wide: true }]
-      }
-      title="Discovery evidence"
-      wide
-    />
+    <>
+      <Section
+        details={
+          observations.docs.length
+            ? observations.docs.map((observation, index) =>
+                observationDetails(observation, index === 0),
+              )
+            : [{ label: 'Evidence', value: 'No scanner evidence recorded yet.', wide: true }]
+        }
+        title="Discovery evidence"
+        wide
+      />
+      <PageNavigation
+        currentPage={discoveryPage}
+        href={(page) => pageURL('discovery', 'discoveryPage', page)}
+        label="Discovery evidence"
+        totalPages={observations.totalPages}
+      />
+    </>
   )
 
   const history = (
@@ -819,7 +797,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
               className="asset-view__secondary-action"
               href={`${apiRoute}/assets/export-csv?where[id][equals]=${encodeURIComponent(asset.id)}`}
             >
-              Export CSV
+              Export diagnostic CSV
             </Link>
             <DensityToggle />
             <Link className="asset-view__edit" href={`${assetURL}/edit`}>
@@ -872,6 +850,12 @@ const AssetView = async (props: DocumentViewServerProps) => {
       <nav aria-label="Asset sections" className="asset-view__tabs">
         {recordLinks()}
       </nav>
+      {historyScopeTruncated ? (
+        <p role="status">
+          History is bounded to 200 merged records and 200 related endpoints. Some earlier entries
+          may be outside this view.
+        </p>
+      ) : null}
 
       <div className="asset-view__workspace">
         <div className="asset-view__main">{mainContent}</div>

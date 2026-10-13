@@ -71,22 +71,7 @@ export const ensureAdminRole = async (payload: Payload, req?: PayloadRequest) =>
 }
 
 export const initializeAuthorization = async (payload: Payload) => {
-  const adminRole = await ensureAdminRole(payload)
-  const users = await payload.find({
-    collection: 'users',
-    depth: 0,
-    overrideAccess: true,
-    pagination: false,
-    where: { role: { exists: false } },
-  })
-  for (const user of users.docs) {
-    await payload.update({
-      collection: 'users',
-      data: { role: adminRole.id },
-      id: user.id,
-      overrideAccess: true,
-    })
-  }
+  await ensureAdminRole(payload)
 }
 
 export const UserRoles: CollectionConfig = {
@@ -122,6 +107,16 @@ export const UserRoles: CollectionConfig = {
       },
       defaultValue: false,
       label: 'Administrator',
+    },
+    {
+      name: 'otterConfig',
+      type: 'checkbox',
+      admin: {
+        condition: (data) => !data.isAdmin,
+        description: 'Manage Otter scanners, configuration, and schedules within permitted sites.',
+      },
+      defaultValue: false,
+      label: 'Otter Config',
     },
     {
       name: 'permissions',

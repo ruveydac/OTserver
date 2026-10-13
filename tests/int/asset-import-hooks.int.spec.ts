@@ -4,7 +4,9 @@ import { AssetImports } from '../../src/collections/AssetImports'
 
 const beforeValidate = AssetImports.hooks!.beforeValidate![0]!
 const afterChange = AssetImports.hooks!.afterChange![0]!
-const protectProcessing = AssetImports.hooks!.beforeChange![2]!
+const protectProcessing = AssetImports.hooks!.beforeChange!.find(
+  (hook) => hook.name === 'protectProcessing',
+)!
 const applyReplayKey = AssetImports.hooks!.beforeChange![3]!
 const beforeOperation = AssetImports.hooks!.beforeOperation![0]!
 

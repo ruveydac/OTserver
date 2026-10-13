@@ -18,19 +18,21 @@
     "worker:maintenance": "cross-env NODE_OPTIONS=--no-deprecation OTSERVER_WORKER_MODE=external tsx src/worker.ts maintenance",
     "migrate": "cross-env NODE_OPTIONS=--no-deprecation payload migrate",
     "migrate:status": "cross-env NODE_OPTIONS=--no-deprecation payload migrate:status",
-    "benchmark:capacity": "cross-env NODE_OPTIONS=--no-deprecation tsx scripts/benchmark-capacity.ts",
     "check:generated": "node scripts/check-generated.mjs",
     "test": "pnpm run test:int",
     "test:container": "sh tests/container-bootstrap.sh",
+    "test:safety": "bash tests/check-test-safety.sh",
+    "test:otter-client": "cargo build --locked --no-default-features --manifest-path otserver-otter/Cargo.toml && cross-env OTTER_CLIENT_BIN=otserver-otter/target/debug/otserver-otter OTSERVER_VULNERABILITY_FEEDS=off pnpm test:int tests/int/otter-client.int.spec.ts",
     "test:coverage": "pnpm run test:coverage:app",
-    "test:coverage:app": "cross-env NODE_OPTIONS=--no-deprecation vitest run --config=vitest.config.mts --coverage",
-    "test:int": "cross-env NODE_OPTIONS=--no-deprecation vitest run --config=vitest.config.mts"
+    "test:coverage:app": "pnpm run test:safety && bash tests/run-vitest.sh --coverage",
+    "test:int": "pnpm run test:safety && bash tests/run-vitest.sh"
   },
   "dependencies": {
     "@payloadcms/db-mongodb": "3.90.1",
     "@payloadcms/next": "3.90.1",
     "@payloadcms/ui": "3.90.1",
     "@xyflow/react": "^12.12.0",
+    "croner": "10.0.1",
     "cross-env": "^7.0.3",
     "graphql": "^16.14.2",
     "lucene-query-parser": "^1.2.0",
@@ -42,6 +44,8 @@
     "tsx": "4.20.6"
   },
   "devDependencies": {
+    "ajv": "8.18.0",
+    "ajv-formats": "3.0.1",
     "@types/node": "22.19.9",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",

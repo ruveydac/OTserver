@@ -56,6 +56,7 @@ const BeforeDashboard = async ({
   const canCreateAssets = Boolean(permissions?.collections?.assets?.create)
   const canCreateImports = Boolean(permissions?.collections?.['asset-imports']?.create)
   const canReadSites = Boolean(permissions?.collections?.sites?.read)
+  const canManageOtters = Boolean(permissions?.collections?.['otter-scanners']?.read)
 
   return (
     <section className="before-dashboard">
@@ -67,7 +68,7 @@ const BeforeDashboard = async ({
             Track industrial devices, network identities, ownership data, and operational state.
           </p>
         </div>
-        {canReadSites || canCreateImports || canCreateAssets ? (
+        {canReadSites || canCreateImports || canCreateAssets || canManageOtters ? (
           <div className="before-dashboard__actions">
             {canReadSites ? (
               <Link
@@ -88,6 +89,11 @@ const BeforeDashboard = async ({
             {canCreateAssets ? (
               <Link className="before-dashboard__button" href="/admin/collections/assets/create">
                 Add asset
+              </Link>
+            ) : null}
+            {canManageOtters ? (
+              <Link className="before-dashboard__button" href="/admin/collections/otter-scanners">
+                Manage Otters
               </Link>
             ) : null}
           </div>

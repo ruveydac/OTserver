@@ -124,6 +124,7 @@ describe('site authorization', () => {
     expect(await getSiteAndDescendantIDs(['plant'], req as never)).toEqual(['plant', 'line'])
     const authorization = await getAuthorization(req as never)
     expect(authorization).toEqual({
+      canConfigureOtter: false,
       isAdmin: false,
       readableSiteIDs: ['plant', 'archive', 'line'],
       writableSiteIDs: ['plant', 'line'],
@@ -134,6 +135,7 @@ describe('site authorization', () => {
 
   it('handles anonymous, missing-role, and admin access', async () => {
     expect(await getAuthorization(request() as never)).toEqual({
+      canConfigureOtter: false,
       isAdmin: false,
       readableSiteIDs: [],
       writableSiteIDs: [],
@@ -326,15 +328,15 @@ describe('collection safety hooks', () => {
       find: vi
         .fn()
         .mockResolvedValueOnce({ docs: [] })
-        .mockResolvedValueOnce({
+        .mockResolvedValue({
           docs: [{ id: 'admin-role', isAdmin: true, name: 'Admin', permissions: [] }],
-        })
-        .mockResolvedValueOnce({ docs: [{ id: 'user-1' }] }),
+        }),
       update: vi.fn(),
     }
     expect(await ensureAdminRole(payload as never)).toEqual({ id: 'admin-role' })
     await initializeAuthorization(payload as never)
-    expect(payload.update).toHaveBeenCalledWith(expect.objectContaining({ id: 'user-1' }))
+    expect(payload.create).toHaveBeenCalledTimes(1)
+    expect(payload.update).not.toHaveBeenCalled()
 
     const userReq = {
       payload: {
@@ -405,41 +407,25 @@ describe('collection safety hooks', () => {
     await expect(invoke(deleteRole, { id: 'role-1', req: roleReq })).resolves.toBeUndefined()
   })
 
-  it('seeds asset-class rules and migrates legacy asset fields', async () => {
+  it('seeds asset-class rules without migrating legacy asset fields at startup', async () => {
     const updates: unknown[] = []
     const payload = {
       count: vi.fn().mockResolvedValue({ totalDocs: 1 }),
       find: vi
         .fn()
-        .mockImplementation(
-          async ({
-            collection,
-            where,
-          }: {
-            collection: string
-            where?: { legacyKey?: { equals?: string } }
-          }) => {
-            if (collection === 'assets') {
-              return {
+        .mockImplementation(async ({ where }: { where?: { legacyKey?: { equals?: string } } }) => {
+          return where?.legacyKey?.equals === 'plc'
+            ? {
                 docs: [
-                  { id: 'asset-1', assetType: 'plc', fieldProvenance: { assetType: 'low' } },
-                  { id: 'asset-2', assetType: 42, fieldProvenance: [] },
+                  {
+                    assignmentRules: [{ manufacturerRegex: 'kept', modelRegex: 'kept' }],
+                    id: 'class-plc',
+                    ruleSeedVersion: 0,
+                  },
                 ],
               }
-            }
-            return where?.legacyKey?.equals === 'plc'
-              ? {
-                  docs: [
-                    {
-                      assignmentRules: [{ manufacturerRegex: 'kept', modelRegex: 'kept' }],
-                      id: 'class-plc',
-                      ruleSeedVersion: 0,
-                    },
-                  ],
-                }
-              : { docs: [{ assignmentRules: [], id: 'class-1', ruleSeedVersion: 0 }] }
-          },
-        ),
+            : { docs: [] }
+        }),
       update: vi.fn().mockImplementation(async (value: unknown) => {
         updates.push(value)
         return value
@@ -447,7 +433,7 @@ describe('collection safety hooks', () => {
     }
 
     await initializeAssetClasses(payload as never)
-    expect(updates.length).toBeGreaterThan(2)
+    expect(updates).toHaveLength(1)
     expect(updates).toContainEqual(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -456,10 +442,6 @@ describe('collection safety hooks', () => {
         id: 'class-plc',
       }),
     )
-    expect(updates.at(-1)).toMatchObject({
-      data: { assetClass: 'class-1', assetType: null, fieldProvenance: {} },
-      id: 'asset-2',
-    })
   })
 
   it('validates assignment rules and falls back to the Other class', async () => {
@@ -586,15 +568,20 @@ describe('collection safety hooks', () => {
     const scan = {
       devices: [
         {
+          interfaces: [],
           macAddress: 'AA:BB:CC:DD:EE:01',
+          macAddresses: ['AA:BB:CC:DD:EE:01'],
+          ipAddresses: [],
           observations: [
             {
               fields: { name: 'PLC 1' },
               observedAt: '2026-09-01T08:00:00.000Z',
+              raw: {},
               source: 's7',
               warnings: [],
             },
           ],
+          ports: [],
         },
       ],
       format: 'otserver-scan',
@@ -603,14 +590,30 @@ describe('collection safety hooks', () => {
           local: { macAddress: '00:11:22:33:44:55' },
           observedAt: '2026-09-01T08:00:00.000Z',
           remote: { macAddress: '66:77:88:99:AA:BB' },
+          raw: {},
           source: 'lldp',
         },
       ],
-      scan: { id: 'scan-1' },
-      scanner: { version: '' },
+      scan: {
+        id: '0c66dd2d-b5f2-462a-86ae-d43ef798ccdb',
+        startedAt: '2026-09-01T08:00:00Z',
+        finishedAt: '2026-09-01T08:01:00Z',
+        targets: ['192.0.2.0/24'],
+        interface: { id: 'test', name: 'Test adapter' },
+      },
+      scanner: { name: 'OTserver Otter', version: '0.4.0' },
       schemaVersion: 2,
-      unresolved: [{ fields: {}, observedAt: '2026-09-01T08:00:00.000Z', source: 'arp' }],
+      unresolved: [
+        {
+          fields: {},
+          observedAt: '2026-09-01T08:00:00.000Z',
+          raw: {},
+          source: 'arp',
+          warnings: [],
+        },
+      ],
       warnings: ['interface down'],
+      errors: [],
     }
     const file = { data: Buffer.from(JSON.stringify(scan)) }
     const importReq = (payload: Record<string, unknown>) => ({ context: {}, file, payload })
@@ -886,12 +889,14 @@ describe('admin presentation', () => {
           assets: { create: true },
           'asset-imports': { create: true },
           sites: { read: true },
+          'otter-scanners': { read: true },
         },
       } as never,
     })
     const html = renderToStaticMarkup(view)
     expect(html).toContain('Total assets</span><strong>4')
     expect(html).toContain('Manage sites')
+    expect(html).toContain('Manage Otters')
     expect(html).toContain('PLC')
     expect(html).toContain('Plant')
   })

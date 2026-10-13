@@ -40,7 +40,9 @@ const ImportInstructions = () => {
           <div className="import-instructions">
             <p>
               Choose an importer, prepare its file as described below, select the destination site,
-              and upload the file. Assets are merged only by MAC address.
+              and upload the file. Qualified manufacturer and serial evidence can identify physical
+              hardware; MAC addresses bind current network endpoints within the selected site.
+              Conflicting or unresolved evidence is retained for review.
             </p>
 
             {importSources.map((source) => (

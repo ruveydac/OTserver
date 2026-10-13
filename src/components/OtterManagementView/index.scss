@@ -1,0 +1,138 @@
+.otter-management {
+  display: grid;
+  gap: calc(var(--base) * 2);
+  margin: 0 auto;
+  max-width: 1280px;
+  width: 100%;
+}
+
+.otter-management__header,
+.otter-management__section-heading,
+.otter-management__token {
+  align-items: center;
+  display: flex;
+  gap: var(--base);
+  justify-content: space-between;
+}
+
+.otter-management__header nav,
+.otter-management__actions,
+.otter-management__token,
+.otter-management__commands {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--base) / 2);
+}
+
+.otter-management__header h1,
+.otter-management h2,
+.otter-management p {
+  margin: 0;
+}
+.otter-management__header p,
+.otter-management__setup > p,
+.otter-management__section-heading p,
+.otter-management__token p,
+.otter-management__steps small {
+  color: var(--theme-elevation-600);
+  margin-top: 0.35rem;
+}
+.otter-management__eyebrow {
+  color: var(--theme-elevation-600);
+  font-size: 0.8rem;
+  margin-bottom: 0.35rem !important;
+}
+.otter-management__setup,
+.otter-management__section {
+  border-top: 1px solid var(--theme-elevation-200);
+  display: grid;
+  gap: var(--base);
+  padding-top: var(--base);
+}
+.otter-management__steps {
+  display: grid;
+  gap: calc(var(--base) * 1.5);
+  margin: 0;
+  padding-left: 1.5rem;
+}
+.otter-management__steps > li {
+  display: grid;
+  gap: var(--base);
+  padding-left: 0.35rem;
+}
+.otter-management__steps h3 {
+  font-size: 1rem;
+  margin: 0;
+}
+.otter-management__enroll {
+  align-items: end;
+  display: grid;
+  gap: var(--base);
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.8fr) auto;
+}
+.otter-management__enroll label,
+.otter-management__scanner-select,
+.otter-management__steps > li > label {
+  display: grid;
+  gap: 0.4rem;
+}
+.otter-management input,
+.otter-management select {
+  background: var(--theme-input-bg);
+  border: 1px solid var(--theme-elevation-400);
+  border-radius: var(--style-radius-s);
+  color: var(--theme-text);
+  min-height: 42px;
+  padding: 0.55rem 0.7rem;
+}
+.otter-management__message {
+  border-inline-start: 3px solid var(--theme-success-500);
+  padding: 0.75rem 1rem;
+}
+.otter-management__token {
+  align-items: start;
+}
+.otter-management__token code,
+.otter-management__commands code {
+  background: var(--theme-elevation-50);
+  overflow-wrap: anywhere;
+  padding: 0.7rem;
+}
+.otter-management__token code {
+  flex: 1 1 360px;
+}
+.otter-management__commands {
+  align-items: center;
+}
+.otter-management__commands p {
+  flex-basis: 100%;
+}
+.otter-management__commands code {
+  flex: 1 1 360px;
+}
+.otter-management__table-wrap {
+  overflow-x: auto;
+}
+.otter-management .table table {
+  min-width: 720px;
+}
+.otter-management td small {
+  color: var(--theme-elevation-600);
+  display: block;
+  margin-top: 0.3rem;
+}
+.otter-management__empty {
+  color: var(--theme-elevation-600);
+  padding: 1rem 0;
+}
+
+@media (max-width: 900px) {
+  .otter-management__header,
+  .otter-management__section-heading {
+    align-items: start;
+    flex-direction: column;
+  }
+  .otter-management__enroll {
+    grid-template-columns: 1fr;
+  }
+}

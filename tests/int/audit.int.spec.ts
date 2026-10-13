@@ -44,6 +44,29 @@ describe('audit log', () => {
       overrideAccess: false,
       user,
     })
+    const childSite = await payload.create({
+      collection: 'sites',
+      data: { name: `Audit child site ${randomUUID()}`, parent: site.id, type: 'Area' },
+      overrideAccess: false,
+      user,
+    })
+    await payload.update({
+      collection: 'sites',
+      id: childSite.id,
+      data: { parent: null },
+      overrideAccess: false,
+      user,
+    })
+    const siteLogs = await payload.find({
+      collection: 'audit-logs',
+      depth: 0,
+      pagination: false,
+      where: {
+        and: [{ targetCollection: { equals: 'sites' } }, { documentID: { equals: childSite.id } }],
+      },
+    })
+    expect(siteLogs.docs).toHaveLength(2)
+    expect(siteLogs.docs.every(({ asset, assetID }) => !asset && !assetID)).toBe(true)
     const asset = await payload.create({
       collection: 'assets',
       data: {
@@ -193,6 +216,7 @@ describe('audit log', () => {
     ).rejects.toThrow()
 
     await payload.delete({ collection: 'asset-fields', id: setting.id })
+    await payload.delete({ collection: 'sites', id: childSite.id })
     await payload.delete({ collection: 'users', id: reader.id })
     await payload.delete({ collection: 'user-roles', id: readerRole.id })
     await payload.delete({ collection: 'sites', id: site.id })
@@ -206,7 +230,7 @@ describe('audit log', () => {
           { actorID: { equals: user.id } },
           {
             documentID: {
-              in: [asset.id, reader.id, readerRole.id, setting.id, site.id, user.id],
+              in: [asset.id, reader.id, readerRole.id, setting.id, site.id, childSite.id, user.id],
             },
           },
         ],

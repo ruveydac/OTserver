@@ -11,6 +11,7 @@ export default defineConfig({
         'src/components/TopologyView/**',
         'src/environment.d.ts',
         'src/importers/types.ts',
+        'src/migrations/**',
         'src/payload-types.ts',
         'src/payload.config.ts',
         'src/types/**',
@@ -25,6 +26,7 @@ export default defineConfig({
     include: ['tests/int/**/*.int.spec.{ts,tsx}'],
     setupFiles: ['./vitest.setup.ts'],
     // Integration tests boot Payload against a real MongoDB; the 5s default is too tight.
+    hookTimeout: 60_000,
     testTimeout: 60_000,
   },
 })

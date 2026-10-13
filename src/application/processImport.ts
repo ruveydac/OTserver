@@ -20,6 +20,7 @@ import {
   suggestAttachmentChange,
 } from '../identity/reconcile'
 import { scopedKey } from '../identity/keys'
+import { withRequestContext } from '../integrations/payload/context'
 
 const parsers = {
   nmap: parseNmap,
@@ -38,7 +39,8 @@ export const getAssetOverrides = (value: unknown) => {
   )
 }
 
-export const processImport = async ({
+/** Runs within the caller's transaction; transaction commit and rollback belong to the caller. */
+const processImportInContext = async ({
   doc,
   data,
   req,
@@ -49,8 +51,6 @@ export const processImport = async ({
   req: PayloadRequest
   throwValidationErrors?: boolean
 }): Promise<AssetImport> => {
-  const context = req.context
-
   const startedAt = Date.now()
   let created = 0
   let updated = 0
@@ -77,8 +77,6 @@ export const processImport = async ({
       )
     await requireTransaction(req)
     mutating = true
-    req.context.assetImport = true
-    req.context.identityImportSource = doc.source
     const appliedKey = scopedKey(
       'import-v1',
       site,
@@ -98,21 +96,22 @@ export const processImport = async ({
       req,
     })
     if (replay.docs[0]) {
-      context.skipAssetImport = true
-      return req.payload.update({
-        collection: 'asset-imports',
-        id: doc.id,
-        overrideAccess: false,
-        req,
-        context: { skipAssetImport: true },
-        data: {
-          status: 'completed',
-          duplicateOf: replay.docs[0].id,
-          createdAssets: 0,
-          updatedAssets: 0,
-          warnings: 'This exact import and its overrides were already applied.',
-        },
-      })
+      return withRequestContext(req, { skipAssetImport: true }, () =>
+        req.payload.update({
+          collection: 'asset-imports',
+          id: doc.id,
+          overrideAccess: false,
+          req,
+          context: { skipAssetImport: true },
+          data: {
+            status: 'completed',
+            duplicateOf: replay.docs[0].id,
+            createdAssets: 0,
+            updatedAssets: 0,
+            warnings: 'This exact import and its overrides were already applied.',
+          },
+        }),
+      )
     }
 
     const assetIDs = new Map<string, string>()
@@ -345,48 +344,62 @@ export const processImport = async ({
       console.warn(`Import ${doc.id} took ${durationSeconds.toFixed(1)} seconds.`)
     }
 
-    context.skipAssetImport = true
-    context.appliedImportKey = appliedKey
-    return req.payload.update({
-      collection: 'asset-imports',
-      context: { skipAssetImport: true, appliedImportKey: appliedKey },
-      data: {
-        createdAssets: created,
-        appliedKey,
-        error: null,
-        projectName: topology.projectName,
-        scanMetadata: topology.scanMetadata,
-        skippedAssets:
-          topology.warnings.length +
-          (doc.source === 'otserver-otter' ? topology.unresolved?.length || 0 : 0),
-        sourceVersion,
-        status: 'completed',
-        topologyName: topology.topologyName,
-        unresolved: topology.unresolved,
-        updatedAssets: updated,
-        warnings: warnings.join('\n') || null,
-      },
-      id: doc.id,
-      overrideAccess: false,
-      req,
-    })
+    return withRequestContext(req, { appliedImportKey: appliedKey, skipAssetImport: true }, () =>
+      req.payload.update({
+        collection: 'asset-imports',
+        context: { skipAssetImport: true, appliedImportKey: appliedKey },
+        data: {
+          createdAssets: created,
+          appliedKey,
+          error: null,
+          projectName: topology.projectName,
+          scanMetadata: topology.scanMetadata,
+          skippedAssets:
+            topology.warnings.length +
+            (doc.source === 'otserver-otter' ? topology.unresolved?.length || 0 : 0),
+          sourceVersion,
+          status: 'completed',
+          topologyName: topology.topologyName,
+          unresolved: topology.unresolved,
+          updatedAssets: updated,
+          warnings: warnings.join('\n') || null,
+        },
+        id: doc.id,
+        overrideAccess: false,
+        req,
+      }),
+    )
   } catch (error) {
     if (!throwValidationErrors) req.payload.logger.error(error)
     // A write failure must escape the hook so Payload rolls back the entire inventory transaction.
     if (mutating || throwValidationErrors) throw error
-    context.skipAssetImport = true
-    return req.payload.update({
-      collection: 'asset-imports',
-      context: { skipAssetImport: true },
-      data: {
-        createdAssets: created,
-        error: error instanceof Error ? error.message : 'Import failed.',
-        status: 'failed',
-        updatedAssets: updated,
-      },
-      id: doc.id,
-      overrideAccess: false,
-      req,
-    })
+    return withRequestContext(req, { skipAssetImport: true }, () =>
+      req.payload.update({
+        collection: 'asset-imports',
+        context: { skipAssetImport: true },
+        data: {
+          createdAssets: created,
+          error: error instanceof Error ? error.message : 'Import failed.',
+          status: 'failed',
+          updatedAssets: updated,
+        },
+        id: doc.id,
+        overrideAccess: false,
+        req,
+      }),
+    )
   }
 }
+
+export const processImport = async (
+  input: Parameters<typeof processImportInContext>[0],
+): Promise<AssetImport> =>
+  withRequestContext(
+    input.req,
+    {
+      assetImport: true,
+      importWrite: true,
+      identityImportSource: input.doc.source,
+    },
+    () => processImportInContext(input),
+  )

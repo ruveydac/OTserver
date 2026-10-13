@@ -11,7 +11,7 @@ import { recoverQueue } from '../../src/jobs/worker'
 import { withWorkerFence } from '../../src/integrations/payload/workerContext'
 import type { AssetImport } from '../../src/payload-types'
 import { retryImport } from '../../src/application/queuedImports'
-import { principalRequest } from '../../src/integrations/payload/requests'
+import { principalRequest, systemRequest } from '../../src/integrations/payload/requests'
 
 const nmap = (mac: string) =>
   Buffer.from(`<!DOCTYPE nmaprun><nmaprun scanner="nmap" version="7.95" xmloutputversion="1.05">
@@ -40,6 +40,39 @@ const createFixture = async (payload: Payload) => {
 }
 
 describe('durable workers and queued imports', () => {
+  it('rejects an old worker write after another worker takes over its expired lease', async () => {
+    const payload = await getPayload({ config })
+    const name = `Fenced worker write ${randomUUID()}`
+    let currentFence: Awaited<ReturnType<typeof acquireWorker>> = null
+    let staleFence: Awaited<ReturnType<typeof acquireWorker>> = null
+
+    try {
+      staleFence = await acquireWorker(payload, 'imports')
+      expect(staleFence).not.toBeNull()
+      await renewWorker(payload, staleFence!, true)
+      currentFence = await acquireWorker(payload, 'imports')
+      expect(currentFence).not.toBeNull()
+      expect(currentFence!.owner).not.toBe(staleFence!.owner)
+
+      const req = await systemRequest(payload)
+      await expect(
+        withWorkerFence(staleFence!, () =>
+          payload.create({
+            collection: 'sites',
+            data: { name, type: 'Test' },
+            overrideAccess: true,
+            req,
+          }),
+        ),
+      ).rejects.toMatchObject({ status: 409 })
+      expect(
+        await payload.count({ collection: 'sites', where: { name: { equals: name } } }),
+      ).toMatchObject({ totalDocs: 0 })
+    } finally {
+      if (currentFence) await renewWorker(payload, currentFence, true).catch(() => {})
+    }
+  })
+
   it('commits once across redelivery after inventory commit and before acknowledgement', async () => {
     process.env.OTSERVER_QUEUED_IMPORTS = 'on'
     const payload = await getPayload({ config })
@@ -90,9 +123,7 @@ describe('durable workers and queued imports', () => {
       expect(fence).not.toBeNull()
       expect(await acquireWorker(payload, 'imports')).toBeNull()
       await recoverQueue(payload, fence!)
-      await withWorkerFence(fence!, () =>
-        payload.jobs.run({ queue: 'imports', limit: 1, sequential: true, silent: true }),
-      )
+      await withWorkerFence(fence!, () => payload.jobs.runByID({ id: jobID!, silent: true }))
 
       let completed = await payload.findByID({ collection: 'asset-imports', id: importID })
       expect(completed.status).toBe('completed')
@@ -109,9 +140,7 @@ describe('durable workers and queued imports', () => {
         data: { completedAt: null, processing: true, hasError: false, error: null },
       })
       await recoverQueue(payload, fence!)
-      await withWorkerFence(fence!, () =>
-        payload.jobs.run({ queue: 'imports', limit: 1, sequential: true, silent: true }),
-      )
+      await withWorkerFence(fence!, () => payload.jobs.runByID({ id: jobID!, silent: true }))
       completed = await payload.findByID({ collection: 'asset-imports', id: importID })
       expect(completed.status).toBe('completed')
       expect(
@@ -168,10 +197,9 @@ describe('durable workers and queued imports', () => {
       jobID = (await payload.findByID({ collection: 'asset-imports', id: imported.id })).jobID!
       await payload.delete({ collection: 'users', id: user.id })
       fence = await acquireWorker(payload, 'imports')
+      expect(fence).not.toBeNull()
       await recoverQueue(payload, fence!)
-      await withWorkerFence(fence!, () =>
-        payload.jobs.run({ queue: 'imports', limit: 1, sequential: true, silent: true }),
-      )
+      await withWorkerFence(fence!, () => payload.jobs.runByID({ id: jobID!, silent: true }))
       const failed = await payload.findByID({ collection: 'asset-imports', id: importID })
       expect(failed).toMatchObject({
         status: 'failed',
@@ -231,9 +259,10 @@ describe('durable workers and queued imports', () => {
         else await rm(storedPath)
 
         fence = await acquireWorker(payload, 'imports')
+        expect(fence).not.toBeNull()
         await recoverQueue(payload, fence!)
         await withWorkerFence(fence!, () =>
-          payload.jobs.run({ queue: 'imports', limit: 1, sequential: true, silent: true }),
+          payload.jobs.runByID({ id: imported!.jobID!, silent: true }),
         )
         expect(
           await payload.findByID({ collection: 'asset-imports', id: imported.id }),
@@ -257,7 +286,7 @@ describe('durable workers and queued imports', () => {
           const retried = await payload.findByID({ collection: 'asset-imports', id: imported.id })
           jobIDs.push(retried.jobID!)
           await withWorkerFence(fence!, () =>
-            payload.jobs.run({ queue: 'imports', limit: 1, sequential: true, silent: true }),
+            payload.jobs.runByID({ id: retried.jobID!, silent: true }),
           )
           expect(
             await payload.findByID({ collection: 'asset-imports', id: imported.id }),
@@ -323,10 +352,9 @@ describe('durable workers and queued imports', () => {
       await payload.update({ collection: 'users', id: user.id, data: { role: readerRole.id } })
 
       fence = await acquireWorker(payload, 'imports')
+      expect(fence).not.toBeNull()
       await recoverQueue(payload, fence!)
-      await withWorkerFence(fence!, () =>
-        payload.jobs.run({ queue: 'imports', limit: 1, sequential: true, silent: true }),
-      )
+      await withWorkerFence(fence!, () => payload.jobs.runByID({ id: jobID!, silent: true }))
       expect(await payload.findByID({ collection: 'asset-imports', id: importID })).toMatchObject({
         status: 'failed',
         error: 'The executing user no longer has write permission for this site.',
@@ -372,10 +400,11 @@ describe('durable workers and queued imports', () => {
         imports.push(await payload.findByID({ collection: 'asset-imports', id: accepted.id }))
       }
       fence = await acquireWorker(payload, 'imports')
+      expect(fence).not.toBeNull()
       await recoverQueue(payload, fence!)
       await withWorkerFence(fence!, async () => {
-        await payload.jobs.run({ queue: 'imports', limit: 1, sequential: true, silent: true })
-        await payload.jobs.run({ queue: 'imports', limit: 1, sequential: true, silent: true })
+        await payload.jobs.runByID({ id: imports[0]!.jobID!, silent: true })
+        await payload.jobs.runByID({ id: imports[1]!.jobID!, silent: true })
       })
       const completed = await Promise.all(
         imports.map(({ id }) => payload.findByID({ collection: 'asset-imports', id })),
