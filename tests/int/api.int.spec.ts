@@ -956,6 +956,155 @@ describe('asset CRUD', () => {
     }
   })
 
+  it('rolls back inventory, evidence, and audit rows after a mid-import write failure', async () => {
+    const macAddress = `02:${randomBytes(5).toString('hex').toUpperCase().match(/.{2}/g)?.join(':')}`
+    let siteID: string | undefined
+    let userID: string | undefined
+    let observationWriteAttempted = false
+    const observationModel = (
+      payload.db as unknown as {
+        collections: Record<string, { create: (...args: unknown[]) => Promise<unknown> }>
+      }
+    ).collections['asset-observations']
+    const insertSpy = vi.spyOn(observationModel, 'create').mockImplementation(async () => {
+      observationWriteAttempted = true
+      throw new Error('injected observation persistence failure')
+    })
+
+    try {
+      const adminRole = await ensureAdminRole(payload)
+      const user = await payload.create({
+        collection: 'users',
+        data: {
+          email: `rollback-${randomUUID()}@example.test`,
+          name: 'Import rollback operator',
+          password: randomUUID(),
+          role: adminRole.id,
+        },
+      })
+      userID = user.id
+      const site = await payload.create({
+        collection: 'sites',
+        data: { name: `Rollback site ${randomUUID()}`, type: 'Test' },
+        overrideAccess: false,
+        user,
+      })
+      siteID = site.id
+      const scan = JSON.parse(
+        await readFile(
+          new URL(
+            '../otserver_otter_files/OTserver-Otter-known-vulnerability.json',
+            import.meta.url,
+          ),
+          'utf8',
+        ),
+      ) as {
+        devices: {
+          macAddress: string
+          macAddresses: string[]
+          interfaces: { macAddress?: string }[]
+          observations: { fields: Record<string, unknown>; raw: Record<string, unknown> }[]
+        }[]
+        links: unknown[]
+        unresolved: unknown[]
+      }
+      const [device] = scan.devices
+      device.macAddress = macAddress
+      device.macAddresses = [macAddress]
+      for (const networkInterface of device.interfaces)
+        if (networkInterface.macAddress) networkInterface.macAddress = macAddress
+      for (const observation of device.observations) {
+        if (typeof observation.fields.macAddress === 'string')
+          observation.fields.macAddress = macAddress
+        const subject = observation.raw.subject
+        if (
+          subject &&
+          typeof subject === 'object' &&
+          !Array.isArray(subject) &&
+          (subject as Record<string, unknown>).kind === 'device'
+        )
+          (subject as Record<string, unknown>).macAddress = macAddress
+      }
+      scan.devices = [device]
+      scan.links = []
+      scan.unresolved = []
+      const file = Buffer.from(JSON.stringify(scan))
+      await expect(
+        payload.create({
+          collection: 'asset-imports',
+          data: { site: site.id, source: 'otserver-otter', sourceVersion: '0.2.0' } as never,
+          file: {
+            data: file,
+            mimetype: 'application/json',
+            name: `rollback-${randomUUID()}.json`,
+            size: file.length,
+          },
+          overrideAccess: false,
+          user,
+        }),
+      ).rejects.toThrow('injected observation persistence failure')
+      expect(observationWriteAttempted).toBe(true)
+
+      const assets = await payload.find({
+        collection: 'assets',
+        where: { macAddress: { equals: macAddress } },
+      })
+      const endpoints = await payload.find({
+        collection: 'network-endpoints',
+        where: { macAddress: { equals: macAddress } },
+      })
+      const imports = await payload.find({
+        collection: 'asset-imports',
+        where: { site: { equals: site.id } },
+      })
+      const evidence = await payload.find({
+        collection: 'asset-observations',
+        where: { site: { equals: site.id } },
+      })
+      const audit = await payload.find({
+        collection: 'audit-logs',
+        where: {
+          and: [
+            { site: { equals: site.id } },
+            {
+              targetCollection: {
+                in: ['assets', 'network-endpoints', 'asset-observations', 'asset-imports'],
+              },
+            },
+          ],
+        },
+      })
+      expect(assets.totalDocs).toBe(0)
+      expect(endpoints.totalDocs).toBe(0)
+      expect(imports.totalDocs).toBe(0)
+      expect(evidence.totalDocs).toBe(0)
+      expect(audit.totalDocs).toBe(0)
+    } finally {
+      insertSpy.mockRestore()
+      if (siteID) {
+        for (const imported of (
+          await payload.find({ collection: 'asset-imports', where: { site: { equals: siteID } } })
+        ).docs)
+          await payload.delete({ collection: 'asset-imports', id: imported.id })
+        for (const asset of (
+          await payload.find({
+            collection: 'assets',
+            where: { macAddress: { equals: macAddress } },
+          })
+        ).docs)
+          await payload.delete({ collection: 'assets', id: asset.id })
+        await payload.delete({ collection: 'sites', id: siteID })
+      }
+      if (userID) await payload.delete({ collection: 'users', id: userID })
+      const logs = await payload.find({
+        collection: 'audit-logs',
+        pagination: false,
+        where: { documentID: { in: [siteID, userID].filter(Boolean) as string[] } },
+      })
+      for (const log of logs.docs) await payload.delete({ collection: 'audit-logs', id: log.id })
+    }
+  })
+
   it('imports the anonymized full Nmap scan', async () => {
     const fixture = await readFile(new URL('../nmap_files/nmap.xml', import.meta.url), 'utf8')
     const randomMACPrefix = `02:${randomBytes(4).toString('hex').toUpperCase().match(/.{2}/g)?.join(':')}`

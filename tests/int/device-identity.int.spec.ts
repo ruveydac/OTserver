@@ -72,24 +72,41 @@ describe('device identity', () => {
   })
 
   it('extracts qualified v2 identities, conserves endpoint ambiguity, and preserves ENTITY-MIB containment', () => {
+    const address = mac()
     const observation = {
       source: 'ethernet-ip',
       observedAt: '2026-09-01T00:00:00Z',
       quality: 'high' as const,
-      fields: { serialNumber: '000000AB' },
-      raw: { vendorId: 1, deviceType: 12, serialNumber: '000000AB' },
+      fields: { macAddress: address, serialNumber: '000000AB' },
+      raw: {
+        vendorId: 1,
+        deviceType: 12,
+        serialNumber: '000000AB',
+        observationId: 'df4f3d70-dd8a-4454-85de-034211f4742d',
+        subject: { kind: 'device', macAddress: address },
+        serialClaim: {
+          scope: 'adapter',
+          manufacturerId: 1,
+          original: '000000AB',
+          encoding: 'cip-uint32-hex',
+          normalizationVersion: 1,
+        },
+      },
     }
     expect(observationIdentity(observation)?.scope).toBe('adapter')
     expect(observationIdentity({ ...observation, raw: {} })).toBeUndefined()
     expect(
       observationIdentity({
         ...observation,
-        fields: { serialNumber: '00000000' },
-        raw: { vendorId: 1, deviceType: 12, serialNumber: '00000000' },
+        fields: { macAddress: address, serialNumber: '00000000' },
+        raw: {
+          ...observation.raw,
+          serialNumber: '00000000',
+          serialClaim: { ...observation.raw.serialClaim, original: '00000000' },
+        },
       }),
     ).toBeUndefined()
     expect(observationIdentity({ ...observation, source: 'unknown' })).toBeUndefined()
-    const address = mac()
     expect(
       endpointEvidence({ macAddress: address, ipAddresses: ['bad', '192.0.2.1'] })[0].addresses,
     ).toEqual([{ address: '192.0.2.1' }])
@@ -130,6 +147,44 @@ describe('device identity', () => {
         '13.2': 'CPU',
       }).map(([key, value]) => [root + key, value]),
     )
+    Object.assign(raw, {
+      observationId: 'df4f3d70-dd8a-4454-85de-034211f4742d',
+      subject: { kind: 'device', macAddress: address },
+      identityComponentRef: 'entity:1',
+      serialClaim: {
+        scope: 'chassis',
+        componentRef: 'entity:1',
+        issuer: 'ACME',
+        original: 'CHASSIS001',
+        encoding: 'snmp-display-string',
+        normalizationVersion: 1,
+      },
+      physicalEntities: [
+        {
+          ref: 'entity:1',
+          entPhysicalIndex: '1',
+          class: 'chassis',
+          serialClaim: {
+            scope: 'chassis',
+            componentRef: 'entity:1',
+            issuer: 'ACME',
+            original: 'CHASSIS001',
+          },
+        },
+        {
+          ref: 'entity:2',
+          entPhysicalIndex: '2',
+          class: 'module',
+          parentRef: 'entity:1',
+          serialClaim: {
+            scope: 'module',
+            componentRef: 'entity:2',
+            issuer: 'ACME',
+            original: 'MODULE001',
+          },
+        },
+      ],
+    })
     const entities = expandPhysicalEvidence({
       name: 'rack',
       macAddress: address,
@@ -149,7 +204,18 @@ describe('device identity', () => {
           ...observation,
           source: 's7',
           fields: { serialNumber: 'CPU001' },
-          raw: { module: '6ES7-CPU' },
+          raw: {
+            module: '6ES7-CPU',
+            observationId: 'df4f3d70-dd8a-4454-85de-034211f4742d',
+            subject: { kind: 'device', macAddress: address },
+            serialClaim: {
+              scope: 'cpu',
+              issuer: 'Siemens',
+              original: 'CPU001',
+              encoding: 's7-szl-text',
+              normalizationVersion: 1,
+            },
+          },
         },
       ],
     })
@@ -263,7 +329,21 @@ describe('device identity', () => {
             macAddress,
             firmwareVersion: '3.1',
           },
-          raw: { vendorId: 1, deviceType: 12, serialNumber: hardwareSerial },
+          raw: {
+            vendorId: 1,
+            deviceType: 12,
+            serialNumber: hardwareSerial,
+            observationId: randomUUID(),
+            subject: { kind: 'device', macAddress },
+            serialClaim: {
+              scope: 'adapter',
+              issuer: 'Rockwell Automation',
+              manufacturerId: 1,
+              original: hardwareSerial,
+              encoding: 'cip-uint32-hex',
+              normalizationVersion: 1,
+            },
+          },
           warnings: [],
         },
       ],
@@ -320,6 +400,7 @@ describe('device identity', () => {
                 vendor: 'Siemens AG',
               },
               raw: { ouiVendor: 'Siemens AG' },
+              warnings: [],
             },
             {
               source: 's7',
@@ -351,6 +432,7 @@ describe('device identity', () => {
                 subject: { kind: 'device', macAddress },
                 listeners: [{ address: ipAddress, port: 102, route: [], transport: 'tcp' }],
               },
+              warnings: [],
             },
           ],
         },
@@ -1119,12 +1201,18 @@ describe('device identity', () => {
   it('preserves MAC-free unresolved v2 evidence and offers weak clues only for review', async () => {
     const siteID = await site()
     const noMAC = scan(serial(), [])
+    noMAC.scan.targets.push('192.0.2.70')
+    const macFreeSerial = `S7-${serial()}`
     const root = '1.3.6.1.2.1.47.1.1.1.1.'
     const observation = {
-      source: 'snmp',
+      source: 's7',
       observedAt: '2026-09-10T00:00:00Z',
-      fields: {},
+      fields: { ipAddress: '192.0.2.70', serialNumber: macFreeSerial },
       raw: {
+        observationId: randomUUID(),
+        subject: { kind: 'target', ipAddress: '192.0.2.70' },
+        module: '6ES7-CPU',
+        serialClaim: { scope: 'cpu', issuer: 'Siemens', original: macFreeSerial },
         [`${root}4.1`]: 0,
         [`${root}5.1`]: 3,
         [`${root}11.1`]: 'Chassis-' + serial(),
@@ -1132,7 +1220,19 @@ describe('device identity', () => {
       },
       warnings: [],
     }
-    const input = { ...noMAC, unresolved: [observation, { fields: {} }] }
+    const input = {
+      ...noMAC,
+      unresolved: [
+        observation,
+        {
+          source: 'unknown',
+          observedAt: '2026-09-10T00:00:00Z',
+          fields: {},
+          raw: {},
+          warnings: [],
+        },
+      ],
+    }
     expect(parseOTserverOtter(JSON.stringify(input)).assets[0].macAddress).toBeUndefined()
     const imported = await upload(siteID, input)
     expect(imported.createdAssets).toBe(1)
@@ -1232,6 +1332,15 @@ describe('device identity', () => {
       fields: { ipAddress: '192.0.2.70' },
       warnings: [],
       raw: {
+        observationId: randomUUID(),
+        subject: { kind: 'device', macAddress: input.devices[0]!.macAddress },
+        identityComponentRef: 'entity:1',
+        serialClaim: {
+          scope: 'chassis',
+          componentRef: 'entity:1',
+          issuer: 'Acme',
+          original: chassisSerial,
+        },
         [`${root}4.1`]: 0,
         [`${root}5.1`]: 3,
         [`${root}11.1`]: chassisSerial,
@@ -1244,6 +1353,32 @@ describe('device identity', () => {
         [`${root}12.2`]: 'Acme',
         [`${root}13.2`]: 'CPU module',
         [`${root}9.2`]: '1.2.3',
+        physicalEntities: [
+          {
+            ref: 'entity:1',
+            entPhysicalIndex: '1',
+            class: 'chassis',
+            parentRef: null,
+            serialClaim: {
+              scope: 'chassis',
+              componentRef: 'entity:1',
+              issuer: 'Acme',
+              original: chassisSerial,
+            },
+          },
+          {
+            ref: 'entity:2',
+            entPhysicalIndex: '2',
+            class: 'module',
+            parentRef: 'entity:1',
+            serialClaim: {
+              scope: 'module',
+              componentRef: 'entity:2',
+              issuer: 'Acme',
+              original: moduleSerial,
+            },
+          },
+        ],
       },
     }
     const frame = {
@@ -1523,6 +1658,16 @@ describe('device identity', () => {
     expect(panels[2]).toContain('ifIndex:1')
     expect(panels[2]).toContain('Confirm maintenance baseline')
     expect(panels[3]).not.toContain('Reconcile identity or lifecycle')
+    const networkPanel = renderToStaticMarkup(
+      await DeviceIdentity({ asset: newCPU, payload, user, view: 'network' }),
+    )
+    const hardwarePanel = renderToStaticMarkup(
+      await DeviceIdentity({ asset: newCPU, payload, user, view: 'hardware' }),
+    )
+    expect(networkPanel).toContain('Network identity')
+    expect(networkPanel).not.toContain('Hardware identifiers')
+    expect(hardwarePanel).toContain('Hardware identifiers')
+    expect(hardwarePanel).not.toContain('Current endpoints')
     expect(
       renderToStaticMarkup(
         await DeviceIdentity({

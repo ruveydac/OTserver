@@ -38,19 +38,17 @@ const OtterInterfaceField: TextFieldClientComponent = ({ field, path }) => {
   useEffect(() => {
     if (!scannerID) return
     const abort = new AbortController()
-    void fetch('/api/otter/v1/overview', { cache: 'no-store', signal: abort.signal })
+    void fetch(`/api/otter/v1/scanners/${encodeURIComponent(scannerID)}`, {
+      cache: 'no-store',
+      signal: abort.signal,
+    })
       .then((response) =>
-        response.ok
-          ? (response.json() as Promise<{
-              scanners?: Array<{ id: string; networkAdapters?: Adapter[] }>
-            }>)
-          : null,
+        response.ok ? (response.json() as Promise<{ networkAdapters?: Adapter[] }>) : null,
       )
-      .then((overview) =>
+      .then((scanner) =>
         setInventory({
           scannerID,
-          adapters:
-            overview?.scanners?.find((entry) => entry.id === scannerID)?.networkAdapters || [],
+          adapters: scanner?.networkAdapters || [],
         }),
       )
       .catch(() => setInventory({ scannerID, adapters: [] }))
@@ -113,6 +111,10 @@ const OtterInterfaceField: TextFieldClientComponent = ({ field, path }) => {
               : 'Enroll the scanner to select a reported adapter, or enter its technical name.'}
         </p>
       )}
+      <p className="field-description">
+        Layer-2 capture and ARP/DCP use this adapter. TCP/UDP, SNMP, and other native IP probes use
+        the operating system route table; configure host routes for multi-homed scanners.
+      </p>
     </div>
   )
 }

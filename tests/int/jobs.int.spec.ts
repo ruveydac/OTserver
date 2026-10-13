@@ -11,7 +11,7 @@ import { recoverQueue } from '../../src/jobs/worker'
 import { withWorkerFence } from '../../src/integrations/payload/workerContext'
 import type { AssetImport } from '../../src/payload-types'
 import { retryImport } from '../../src/application/queuedImports'
-import { principalRequest } from '../../src/integrations/payload/requests'
+import { principalRequest, systemRequest } from '../../src/integrations/payload/requests'
 
 const nmap = (mac: string) =>
   Buffer.from(`<!DOCTYPE nmaprun><nmaprun scanner="nmap" version="7.95" xmloutputversion="1.05">
@@ -40,6 +40,39 @@ const createFixture = async (payload: Payload) => {
 }
 
 describe('durable workers and queued imports', () => {
+  it('rejects an old worker write after another worker takes over its expired lease', async () => {
+    const payload = await getPayload({ config })
+    const name = `Fenced worker write ${randomUUID()}`
+    let currentFence: Awaited<ReturnType<typeof acquireWorker>> = null
+    let staleFence: Awaited<ReturnType<typeof acquireWorker>> = null
+
+    try {
+      staleFence = await acquireWorker(payload, 'imports')
+      expect(staleFence).not.toBeNull()
+      await renewWorker(payload, staleFence!, true)
+      currentFence = await acquireWorker(payload, 'imports')
+      expect(currentFence).not.toBeNull()
+      expect(currentFence!.owner).not.toBe(staleFence!.owner)
+
+      const req = await systemRequest(payload)
+      await expect(
+        withWorkerFence(staleFence!, () =>
+          payload.create({
+            collection: 'sites',
+            data: { name, type: 'Test' },
+            overrideAccess: true,
+            req,
+          }),
+        ),
+      ).rejects.toMatchObject({ status: 409 })
+      expect(
+        await payload.count({ collection: 'sites', where: { name: { equals: name } } }),
+      ).toMatchObject({ totalDocs: 0 })
+    } finally {
+      if (currentFence) await renewWorker(payload, currentFence, true).catch(() => {})
+    }
+  })
+
   it('commits once across redelivery after inventory commit and before acknowledgement', async () => {
     process.env.OTSERVER_QUEUED_IMPORTS = 'on'
     const payload = await getPayload({ config })

@@ -10,6 +10,41 @@ mode enrolls, polls, executes assigned snapshots, and uploads with a machine cre
 result remains the existing `otserver-scan` schema-version-2 document. Scanner setup, private state
 storage, recovery, and verification commands are documented in `otserver-otter/README.md`.
 
+## Scan-v2 contract and identity evidence
+
+The canonical Draft 2020-12 schema is `otserver-otter/contracts/otserver-scan-v2.schema.json`.
+Otter validates every serialized export against it, including UUID and date-time formats. Shared valid
+and invalid fixtures are checked by both Rust and TypeScript tests. Management remains a tolerant
+consumer for unknown optional protocol evidence, but required scan metadata, observations, links, and
+their required fields must be valid. New exports set `scan.interface.ipRoutePolicy` to
+`operating-system`; the selected interface records capture selection and does not bind native IP
+probes to that interface.
+
+Only these source-qualified fields can authorize physical identity in management:
+
+- **EtherNet/IP:** `raw.vendorId` and `raw.deviceType` must be integers; `raw.serialNumber`, the
+  source-qualified `raw.serialClaim`, and `fields.serialNumber` must agree. The claim manufacturer
+  ID/scope must match the vendor ID/device type. `raw.subject` must identify the same device or
+  qualified MAC-free endpoint as the observation.
+- **S7:** `raw.module` and `fields.serialNumber` must both be present, and `raw.serialClaim` must name
+  the same serial with Siemens as issuer and CPU scope. `raw.subject` must resolve to the observed
+  device or qualified MAC-free endpoint.
+- **SNMP ENTITY-MIB:** `raw.physicalEntities` supplies the entity reference, class, and scoped serial
+  claim. The claim reference, class/scope, issuer, and original serial must match the SNMP OID values.
+  `raw.subject` must match the reported device MAC, or a MAC-free endpoint must match its observation
+  IP and UUID `raw.observationId`. Only one unparented chassis/stack selected by
+  `raw.identityComponentRef` and the matching top-level `raw.serialClaim` can identify the device.
+  Module-only and ambiguous-root records cannot identify the device; a separately qualified component
+  claim can identify only that component.
+- **PROFINET:** `raw.pnioRecords` retains API/slot/subslot/index selection and
+  `raw.physicalEntities` retains component-scoped serial claims as evidence. Management does not
+  promote those claims to device identity. Legacy device-level manufacturer/software fields come only
+  from API 0, slot 0, subslot 1, index `0xAFF0`.
+
+Other `raw` protocol data remains opaque to identity resolution. A serial-like string without the
+source, manufacturer, component reference, and subject scope above can remain evidence, but it cannot
+authorize an automatic physical merge.
+
 ## Operator setup
 
 Set these values on every OTserver web process that manages or serves Otter requests:
@@ -135,6 +170,9 @@ interface selector displays each reported adapter's friendly name, MAC, and addr
 technical name. `sourceMac` is optional; Otter refreshes the selected adapter's actual MAC at scan
 start. The controller supplies the scanner's fixed site, OTserver URL, profile name, and upload
 destination. Profiles cannot specify `site`, `serverUrl`, `apiKey`, or an arbitrary local output path.
+The selected interface controls Layer-2 capture and ARP/DCP source selection. TCP/UDP, SNMP, and other
+native IP probes use the operating system's route table; operators of multi-homed scanners must set
+routes for the target networks in the operating system.
 
 Enter SNMP/OPC UA secrets through the profile's **SNMP and OPC UA credentials** controls. They are
 validated and encrypted at rest with AES-256-GCM using `OTSERVER_OTTER_ENCRYPTION_KEY`. The regular

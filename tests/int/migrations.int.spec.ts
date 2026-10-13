@@ -1,121 +1,132 @@
-import { describe, expect, it, vi } from 'vitest'
+import config from '@/payload.config'
+import { randomUUID } from 'node:crypto'
+import { beforeAll, describe, expect, it } from 'vitest'
+import { createLocalReq, getPayload, type Payload } from 'payload'
+import { ensureAssetClass, initializeAssetClasses } from '../../src/collections/AssetClasses'
+import { ensureAdminRole, initializeAuthorization } from '../../src/collections/UserRoles'
+import { migrations } from '../../src/migrations'
 
-import { down, up } from '../../src/migrations/20260922_205151_queued_import_baseline'
-import {
-  down as removeSitePaths,
-  up as addSitePaths,
-} from '../../src/migrations/20260926_111902_site_paths'
-import {
-  down as removeOtterIndexes,
-  up as addOtterIndexes,
-} from '../../src/migrations/20261010_164200_otter_indexes'
+let payload: Payload
 
-describe('queued import baseline migration', () => {
-  it('adds synchronous defaults and reverses only untouched records', async () => {
-    const updateMany = vi.fn(async () => ({ modifiedCount: 1 }))
-    const args = {
-      payload: {
-        db: { collections: { 'asset-imports': { collection: { updateMany } } } },
-      },
-      session: { id: 'session' },
-    }
-
-    await up(args as never)
-    expect(updateMany).toHaveBeenNthCalledWith(
-      1,
-      { executionMode: { $exists: false } },
-      { $set: { executionMode: 'sync', attemptCount: 0 } },
-      { session: args.session },
-    )
-
-    await down(args as never)
-    expect(updateMany).toHaveBeenNthCalledWith(
-      2,
-      { executionMode: 'sync', jobID: { $exists: false } },
-      { $unset: { executionMode: '', attemptCount: '' } },
-      { session: args.session },
-    )
-  })
+beforeAll(async () => {
+  payload = await getPayload({ config })
 })
 
-describe('site path migration', () => {
-  it('backfills hierarchical paths and removes them on rollback', async () => {
-    const docs = [
-      { _id: 'line', name: 'Line 1', parent: 'plant' },
-      { _id: 'plant', name: 'Plant' },
-    ]
-    const bulkWrite = vi.fn(async () => ({ modifiedCount: 2 }))
-    const updateMany = vi.fn(async () => ({ modifiedCount: 2 }))
-    const args = {
-      payload: {
-        db: {
-          collections: {
-            sites: {
-              collection: {
-                bulkWrite,
-                find: vi.fn(() => ({ toArray: vi.fn(async () => docs) })),
-                updateMany,
-              },
-            },
-          },
-        },
+describe('versioned legacy identity migration', () => {
+  it('leaves legacy rows unchanged at startup and migrates populated rows explicitly', async () => {
+    const site = await payload.create({
+      collection: 'sites',
+      data: { name: `Legacy migration ${randomUUID()}`, type: 'Test' },
+    })
+    const childSite = await payload.create({
+      collection: 'sites',
+      data: { name: `Legacy child ${randomUUID()}`, parent: site.id, type: 'Test' },
+    })
+    const adminRole = await ensureAdminRole(payload)
+    const user = await payload.create({
+      collection: 'users',
+      data: {
+        email: `legacy-migration-${randomUUID()}@example.test`,
+        name: 'Legacy user',
+        password: randomUUID(),
+        role: adminRole.id,
       },
-      session: { id: 'session' },
-    }
+    })
+    const initialClass = await ensureAssetClass(payload, 'other')
+    const asset = await payload.create({
+      collection: 'assets',
+      data: {
+        assetClass: initialClass.id,
+        criticality: 'low',
+        name: 'Legacy PLC',
+        site: site.id,
+        status: 'unknown',
+      },
+    })
 
-    await addSitePaths(args as never)
-    expect(bulkWrite).toHaveBeenCalledWith(
-      [
+    try {
+      await payload.db.collections.users.updateOne({ _id: user.id }, { $unset: { role: '' } })
+      await payload.db.collections.assets.updateOne(
+        { _id: asset.id },
         {
-          updateOne: {
-            filter: { _id: 'line' },
-            update: { $set: { path: 'Plant / Line 1' } },
+          $set: {
+            assetType: 'plc',
+            fieldProvenance: { assetType: { quality: 'medium', source: 'nmap' } },
           },
+          $unset: { assetClass: '' },
         },
-        {
-          updateOne: { filter: { _id: 'plant' }, update: { $set: { path: 'Plant' } } },
+      )
+      await initializeAssetClasses(payload)
+      await initializeAuthorization(payload)
+      const legacyAsset = (await payload.db.collections.assets
+        .findById(asset.id)
+        .select({ assetClass: 1 })
+        .lean()) as unknown as Record<string, unknown> | null
+      const legacyUser = (await payload.db.collections.users
+        .findById(user.id)
+        .select({ role: 1 })
+        .lean()) as unknown as Record<string, unknown> | null
+      expect(legacyAsset).not.toHaveProperty('assetClass')
+      expect(legacyUser).not.toHaveProperty('role')
+
+      await payload.db.migrate({ migrations: migrations as never })
+
+      const migratedAsset = (await payload.db.collections.assets
+        .findById(asset.id)
+        .lean()) as unknown as Record<string, unknown> | null
+      const migratedUser = (await payload.db.collections.users
+        .findById(user.id)
+        .lean()) as unknown as Record<string, unknown> | null
+      expect(migratedAsset).not.toBeNull()
+      expect(migratedUser).not.toBeNull()
+      expect(String(migratedAsset!.assetClass)).toBe((await ensureAssetClass(payload, 'plc')).id)
+      expect(migratedAsset!.fieldProvenance).toMatchObject({
+        assetClass: { quality: 'medium', source: 'nmap' },
+      })
+      expect(migratedAsset!.assetType).toBeFalsy()
+      expect(String(migratedUser?.role)).toBe(adminRole.id)
+      const auditCount = await payload.count({
+        collection: 'audit-logs',
+        where: {
+          and: [{ targetCollection: { equals: 'assets' } }, { documentID: { equals: asset.id } }],
         },
-      ],
-      { session: args.session },
-    )
+      })
+      expect(auditCount.totalDocs).toBeGreaterThan(0)
+      const migrationArgs = {
+        payload,
+        req: await createLocalReq({}, payload),
+        session: undefined,
+      }
+      const baseline = migrations[0]!
+      await baseline.up(migrationArgs as never)
+      await baseline.down(migrationArgs as never)
+      await baseline.up(migrationArgs as never)
 
-    await removeSitePaths(args as never)
-    expect(updateMany).toHaveBeenCalledWith({}, { $unset: { path: '' } }, { session: args.session })
-  })
-})
+      const sitePaths = migrations[1]!
+      await payload.db.collections.sites.updateOne(
+        { _id: childSite.id },
+        { $set: { parent: childSite.id } },
+      )
+      await expect(sitePaths.up(migrationArgs as never)).rejects.toThrow(
+        'Cannot migrate cyclic site hierarchy.',
+      )
+      await payload.db.collections.sites.updateOne(
+        { _id: childSite.id },
+        { $set: { parent: site.id } },
+      )
+      await sitePaths.up(migrationArgs as never)
+      await sitePaths.down(migrationArgs as never)
+      await sitePaths.up(migrationArgs as never)
 
-describe('Otter index migration', () => {
-  it('creates partial unique indexes for credentials and schedule occurrences', async () => {
-    const runCollection = { createIndex: vi.fn(async () => 'run-index'), dropIndex: vi.fn() }
-    const scannerCollection = {
-      createIndex: vi.fn(async () => 'scanner-index'),
-      dropIndex: vi.fn(),
+      const otterIndexes = migrations[2]!
+      await otterIndexes.down(migrationArgs as never)
+      await otterIndexes.up(migrationArgs as never)
+      await expect(migrations.at(-1)!.down({} as never)).rejects.toThrow('not reversible')
+    } finally {
+      await payload.delete({ collection: 'assets', id: asset.id })
+      await payload.delete({ collection: 'users', id: user.id })
+      await payload.delete({ collection: 'sites', id: childSite.id })
+      await payload.delete({ collection: 'sites', id: site.id })
     }
-    const args = {
-      payload: {
-        db: {
-          collections: {
-            'otter-runs': { collection: runCollection },
-            'otter-scanners': { collection: scannerCollection },
-          },
-        },
-      },
-      session: { id: 'session' },
-    }
-
-    await addOtterIndexes(args as never)
-    expect(runCollection.createIndex).toHaveBeenCalledWith(
-      { scheduleOccurrenceKey: 1 },
-      {
-        name: 'otter_run_schedule_occurrence_unique',
-        unique: true,
-        partialFilterExpression: { scheduleOccurrenceKey: { $type: 'string' } },
-      },
-    )
-    expect(scannerCollection.createIndex).toHaveBeenCalledTimes(2)
-    await removeOtterIndexes(args as never)
-    expect(runCollection.dropIndex).toHaveBeenCalledWith('otter_run_schedule_occurrence_unique')
-    expect(scannerCollection.dropIndex).toHaveBeenCalledWith('otter_scanner_credential_unique')
-    expect(scannerCollection.dropIndex).toHaveBeenCalledWith('otter_scanner_enrollment_unique')
   })
 })

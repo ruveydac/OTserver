@@ -1,4 +1,6 @@
 import config from '@/payload.config'
+import Ajv2020 from 'ajv/dist/2020.js'
+import addFormats from 'ajv-formats'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
@@ -278,6 +280,48 @@ describe('OTserver Otter importer', () => {
     })
   })
 
+  it('checks shared fixtures against the canonical schema with format validation', async () => {
+    const contractFile = (name: string) =>
+      readFile(new URL(`../../otserver-otter/contracts/${name}`, import.meta.url), 'utf8')
+    const [schemaJSON, validJSON, invalidJSON] = await Promise.all([
+      contractFile('otserver-scan-v2.schema.json'),
+      contractFile('otserver-scan-v2-valid.json'),
+      contractFile('otserver-scan-v2-invalid.json'),
+    ])
+    const ajv = new Ajv2020({
+      allErrors: true,
+      allowUnionTypes: true,
+      strict: true,
+      strictRequired: false,
+    })
+    addFormats(ajv)
+    const validate = ajv.compile(JSON.parse(schemaJSON))
+    const valid = JSON.parse(validJSON)
+    const invalid = JSON.parse(invalidJSON)
+
+    expect(validate(valid)).toBe(true)
+    expect(validate(invalid)).toBe(false)
+    expect(
+      validate.errors?.some(
+        ({ instancePath, keyword }) => instancePath === '/scan/id' && keyword === 'format',
+      ),
+    ).toBe(true)
+    const imported = parseOTserverOtter(validJSON)
+    expect(imported.assets).toHaveLength(3)
+    expect(imported.assets.find(({ identity }) => identity?.scope === 'chassis')).toMatchObject({
+      identity: { authority: 'entity-mib', scope: 'chassis', serial: 'SNMP-ROOT' },
+    })
+    expect(imported.assets.find(({ identity }) => identity?.scope === 'module')).toMatchObject({
+      identity: { authority: 'entity-mib', scope: 'module', serial: 'SNMP-MODULE' },
+    })
+    expect(imported.assets.some(({ serialNumber }) => serialNumber === 'PNIO-SUBMODULE')).toBe(
+      false,
+    )
+    expect(imported.links).toHaveLength(1)
+    expect(imported.unresolved).toHaveLength(1)
+    expect(() => parseOTserverOtter(invalidJSON)).toThrow('metadata are required')
+  })
+
   it('validates scanner files and rejects exported credentials', () => {
     const file = exportFile(randomMAC(), randomMAC())
     expect(parseOTserverOtter(JSON.stringify(file)).assets).toHaveLength(2)
@@ -370,7 +414,7 @@ describe('OTserver Otter importer', () => {
     })
   })
 
-  it('imports PROFINET DCP and I&M record details from PNIO scans', () => {
+  it('retains PNIO evidence without promoting component serials to device identity', () => {
     const localMAC = randomMAC()
     const file = mutableExport(localMAC, randomMAC())
     file.devices[0].observations = [
@@ -431,34 +475,50 @@ describe('OTserver Otter importer', () => {
 
     const [asset] = parseOTserverOtter(JSON.stringify(file)).assets
     expect(asset).toMatchObject({
-      catalogNumber: 'ORD-1',
       firmwareVersion: 'V1.2.3',
-      hardwareVersion: '3',
-      identity: {
-        authority: 'profinet',
-        manufacturer: '4660',
-        scope: 'device',
-        serial: 'SERIAL',
-      },
-      serialNumber: 'SERIAL',
       vendor: 'Chengdu Zongheng Intelligence Control Technology Co., Ltd.',
     })
+    expect(asset.identity).toBeUndefined()
+    expect(asset.serialNumber).toBeUndefined()
     expect(asset.observations?.[0]).toMatchObject({
       fields: {
         manufacturer: 'Chengdu Zongheng Intelligence Control Technology Co., Ltd.',
         softwareRevision: 'V1.2.3',
       },
       mergeFields: {
-        catalogNumber: 'ORD-1',
-        firmwareVersion: 'V1.2.3',
-        hardwareVersion: '3',
         protocols: ['profinet'],
-        serialNumber: 'SERIAL',
+        firmwareVersion: 'V1.2.3',
         vendor: 'Chengdu Zongheng Intelligence Control Technology Co., Ltd.',
       },
       quality: 'high',
       raw: { pnioRecords: expect.any(Array) },
       source: 'profinet-dcp',
+    })
+    const moduleOnly = mutableExport(randomMAC(), randomMAC())
+    moduleOnly.devices[0].observations = [
+      {
+        source: 'profinet-dcp',
+        observedAt: '2026-10-01T16:11:25Z',
+        fields: { manufacturer: 'Acme', serialNumber: 'MODULE-SERIAL' },
+        raw: {
+          pnioRecords: [
+            {
+              api: 7,
+              index: '0xAFF0',
+              slot: 3,
+              subslot: 1,
+              parsed: { manufacturerId: '1234', serialNumber: 'MODULE-SERIAL' },
+            },
+          ],
+        },
+        warnings: [],
+      },
+    ]
+    const [moduleAsset] = parseOTserverOtter(JSON.stringify(moduleOnly)).assets
+    expect(moduleAsset.identity).toBeUndefined()
+    expect(moduleAsset.serialNumber).toBeUndefined()
+    expect(moduleAsset.observations?.[0]?.raw).toMatchObject({
+      pnioRecords: [{ api: 7, slot: 3, subslot: 1 }],
     })
   })
 
@@ -473,8 +533,10 @@ describe('OTserver Otter importer', () => {
     const cleaned = mutableExport(localMAC, remoteMAC)
     cleaned.devices = [
       {
-        interfaces: 'invalid',
+        interfaces: [],
+        macAddresses: [localMAC],
         macAddress: localMAC.toLowerCase().replaceAll(':', '-'),
+        ipAddresses: [],
         observations: [
           {
             fields: {
@@ -490,16 +552,17 @@ describe('OTserver Otter importer', () => {
               unknown: 'preserved',
             },
             observedAt: '2026-08-10T10:00:00Z',
+            raw: {},
             source: 'future-protocol',
-            warnings: ['kept', 1],
+            warnings: ['kept'],
           },
         ],
-        ports: null,
+        ports: [],
       },
     ]
     cleaned.links = []
-    cleaned.warnings = ['warning', 1]
-    cleaned.errors = ['error', false]
+    cleaned.warnings = ['warning']
+    cleaned.errors = ['error']
     const result = parseOTserverOtter(JSON.stringify(cleaned))
     expect(result.assets[0]).toMatchObject({
       macAddress: localMAC,
@@ -534,8 +597,23 @@ describe('OTserver Otter importer', () => {
     expect(() => parseOTserverOtter(JSON.stringify(duplicate))).toThrow('Duplicate device MAC')
 
     const noObservations = mutableExport(localMAC, remoteMAC)
-    noObservations.devices = [{ macAddress: localMAC }]
+    noObservations.devices = [
+      {
+        macAddress: localMAC,
+        macAddresses: [localMAC],
+        ipAddresses: [],
+        observations: [],
+        interfaces: [],
+        ports: [],
+      },
+    ]
     expect(() => parseOTserverOtter(JSON.stringify(noObservations))).toThrow('has no observations')
+
+    const missingRequiredArray = mutableExport(localMAC, remoteMAC)
+    delete missingRequiredArray.devices[0].interfaces
+    expect(() => parseOTserverOtter(JSON.stringify(missingRequiredArray))).toThrow(
+      'missing required arrays',
+    )
 
     const badObservation = mutableExport(localMAC, remoteMAC)
     badObservation.devices[0].observations![0].observedAt = 'invalid'
@@ -553,7 +631,9 @@ describe('OTserver Otter importer', () => {
 
     const unknownLinkSource = mutableExport(localMAC, remoteMAC)
     unknownLinkSource.links[0].source = 1
-    expect(parseOTserverOtter(JSON.stringify(unknownLinkSource)).links?.[0].source).toBe('unknown')
+    expect(() => parseOTserverOtter(JSON.stringify(unknownLinkSource))).toThrow(
+      'links[0] is invalid',
+    )
   })
 
   it('imports every contract shape and supported asset field while merging by quality', async () => {
@@ -766,6 +846,184 @@ describe('OTserver Otter importer', () => {
         })
         for (const asset of assets.docs)
           await payload.delete({ collection: 'assets', id: asset.id })
+        await payload.delete({ collection: 'sites', id: siteID })
+      }
+      if (userID) await payload.delete({ collection: 'users', id: userID })
+    }
+  })
+
+  it('imports the shared non-empty contract through identity, topology, and audit persistence', async () => {
+    const payload: Payload = await getPayload({ config })
+    const firstMAC = randomMAC()
+    const secondMAC = randomMAC()
+    let siteID: string | undefined
+    let userID: string | undefined
+    let importID: string | undefined
+
+    try {
+      const adminRole = await ensureAdminRole(payload)
+      const user = await payload.create({
+        collection: 'users',
+        data: {
+          email: `contract-${randomUUID()}@example.test`,
+          name: 'Contract fixture operator',
+          password: randomUUID(),
+          role: adminRole.id,
+        },
+      })
+      userID = user.id
+      const site = await payload.create({
+        collection: 'sites',
+        data: { name: `Contract site ${randomUUID()}`, type: 'Test' },
+        overrideAccess: false,
+        user,
+      })
+      siteID = site.id
+
+      let contents = await readFile(
+        new URL('../../otserver-otter/contracts/otserver-scan-v2-valid.json', import.meta.url),
+        'utf8',
+      )
+      for (const [original, replacement] of [
+        ['02:10:00:00:00:01', firstMAC],
+        ['02:10:00:00:00:02', secondMAC],
+      ])
+        contents = contents.replaceAll(original, replacement)
+      const file = Buffer.from(contents)
+      const imported = await payload.create({
+        collection: 'asset-imports',
+        data: { site: site.id, source: 'otserver-otter', sourceVersion: '0.4.0' } as never,
+        file: {
+          data: file,
+          mimetype: 'application/json',
+          name: 'shared-contract.json',
+          size: file.length,
+        },
+        overrideAccess: false,
+        user,
+      })
+      importID = imported.id
+      expect(imported).toMatchObject({ createdAssets: 3, status: 'completed', skippedAssets: 1 })
+
+      const assets = await payload.find({
+        collection: 'assets',
+        depth: 0,
+        pagination: false,
+        where: { site: { equals: site.id } },
+      })
+      const chassis = assets.docs.find(({ serialNumber }) => serialNumber === 'SNMP-ROOT')
+      const physicalModule = assets.docs.find(({ serialNumber }) => serialNumber === 'SNMP-MODULE')
+      expect(chassis).toMatchObject({
+        macAddress: firstMAC,
+        physicalKind: 'chassis',
+        fieldProvenance: { vendor: { quality: 'high', source: 'snmp' } },
+      })
+      expect(physicalModule).toMatchObject({ physicalKind: 'module' })
+      const identities = await payload.find({
+        collection: 'asset-identifiers',
+        depth: 0,
+        pagination: false,
+        where: { site: { equals: site.id } },
+      })
+      expect(identities.docs).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            asset: chassis!.id,
+            authority: 'entity-mib',
+            scope: 'chassis',
+            serial: 'SNMP-ROOT',
+            source: 'qualified-otter-v2',
+          }),
+          expect.objectContaining({
+            asset: physicalModule!.id,
+            authority: 'entity-mib',
+            scope: 'module',
+            serial: 'SNMP-MODULE',
+            source: 'qualified-otter-v2',
+          }),
+        ]),
+      )
+      expect(chassis?.serialNumber).not.toBe('PNIO-SUBMODULE')
+
+      const endpoints = await payload.find({
+        collection: 'network-endpoints',
+        depth: 0,
+        pagination: false,
+        where: { site: { equals: site.id } },
+      })
+      expect(endpoints.docs).toHaveLength(2)
+      const installations = await payload.find({
+        collection: 'asset-installations',
+        depth: 0,
+        pagination: false,
+        where: { site: { equals: site.id } },
+      })
+      expect(installations.docs).toHaveLength(1)
+      expect(installations.docs[0]).toMatchObject({
+        parent: chassis!.id,
+        module: physicalModule!.id,
+      })
+      const links = await payload.find({
+        collection: 'topology-links',
+        depth: 0,
+        where: { import: { equals: imported.id } },
+      })
+      expect(links.docs).toHaveLength(1)
+      const observations = await payload.find({
+        collection: 'asset-observations',
+        depth: 0,
+        pagination: false,
+        where: { import: { equals: imported.id } },
+      })
+      expect(observations.docs).toHaveLength(4)
+      expect(observations.docs.find(({ source }) => source === 'profinet-dcp')?.raw).toMatchObject({
+        pnioRecords: [{ api: 7, slot: 3, subslot: 1 }],
+      })
+      const audit = await payload.find({
+        collection: 'audit-logs',
+        depth: 0,
+        pagination: false,
+        where: {
+          and: [
+            { site: { equals: site.id } },
+            { targetCollection: { equals: 'asset-observations' } },
+          ],
+        },
+      })
+      expect(audit.docs).toHaveLength(4)
+      expect(audit.docs.every(({ assetID }) => Boolean(assetID))).toBe(true)
+    } finally {
+      if (importID) {
+        await payload.delete({
+          collection: 'asset-observations',
+          overrideAccess: true,
+          where: { import: { equals: importID } },
+        })
+        await payload.delete({
+          collection: 'topology-links',
+          overrideAccess: true,
+          where: { import: { equals: importID } },
+        })
+        await payload.delete({ collection: 'asset-imports', id: importID })
+      }
+      if (siteID) {
+        await payload.delete({
+          collection: 'asset-installations',
+          overrideAccess: true,
+          where: { site: { equals: siteID } },
+        })
+        const assets = await payload.find({
+          collection: 'assets',
+          depth: 0,
+          pagination: false,
+          where: { site: { equals: siteID } },
+        })
+        for (const asset of assets.docs)
+          await payload.delete({ collection: 'assets', id: asset.id })
+        await payload.delete({
+          collection: 'audit-logs',
+          where: { site: { equals: siteID } },
+        })
         await payload.delete({ collection: 'sites', id: siteID })
       }
       if (userID) await payload.delete({ collection: 'users', id: userID })

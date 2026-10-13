@@ -196,9 +196,11 @@ To add an importer:
 
 PRONETA has no public stable schema: accept known paths and capitalization variants, tolerate missing
 and unknown fields, and preserve useful raw data. Nmap input must be XML produced with `-oX`.
-OTserver Otter JSON must validate against schema version 2. A contract change requires coordinated
-updates to the canonical schema and Rust implementation in `otserver-otter`, an updated submodule
-pointer here, plus this repository's TypeScript importer, fixtures, and tests.
+Otter producer conformance is checked against the canonical schema and shared fixtures; management
+also rejects malformed required structure while keeping unknown optional evidence opaque. A contract
+change requires coordinated updates to the canonical schema and Rust implementation in
+`otserver-otter`, an updated submodule pointer here, plus this repository's TypeScript importer,
+fixtures, and tests.
 
 Human-supplied bulk import fields are declared once in `userSuppliedAssetFields` in
 `src/collections/Assets.ts`; the asset and import UIs derive from it. Custom field definitions are
@@ -242,29 +244,23 @@ Requirements: Node.js 22, pnpm 10, and a MongoDB 8 replica set. Copy `.env.examp
 a long random `OTSERVER_SECRET`. `docker compose up` provides the standalone OTserver and MongoDB;
 the optional `workers` profile is only for separate high-throughput workers.
 
-Integration tests need a replica set matching `DATABASE_URL`, or the optional `TEST_DATABASE_URL`
-override. Start a throwaway instance
-with Podman:
+Test commands own a disposable MongoDB 8 replica set and a unique upload directory. Use Docker or
+Podman; direct Vitest invocations stop before loading Payload unless an owning test harness supplies
+`OTSERVER_TEST_DATABASE_OWNER`, `TEST_DATABASE_URL`, and `OTSERVER_TEST_UPLOAD_DIR`.
 
 ```bash
-podman run -d --rm --name otserver-identity-test-mongo -p 27018:27017 \
-  docker.io/library/mongo:8 --replSet rs0 --bind_ip_all
-podman exec otserver-identity-test-mongo mongosh --quiet --eval \
-  'rs.initiate({_id:"rs0",members:[{_id:0,host:"localhost:27017"}]})'
-TEST_DATABASE_URL='mongodb://127.0.0.1:27018/otserver-test?replicaSet=rs0&directConnection=true' \
-  OTSERVER_VULNERABILITY_FEEDS=off pnpm test
+pnpm test
 ```
 
-Tear it down with `podman stop otserver-identity-test-mongo`; `--rm` removes it.
 MongoDB operations sharing a request transaction must run serially. `withAudit` establishes the
 transaction before Payload 3.87's parallel relationship validation can race its first command.
 
 Run `pnpm test:container` after changing the Dockerfile or startup/bootstrap behavior. It detects
 Docker or Podman, builds the production image, starts an isolated MongoDB replica set, verifies the
-fresh-database seeds, embedded workers, and first-user registration, and removes its containers and
-network.
+fresh-database seeds, external workers without `.env`, queue processing, first-user registration,
+and a database/upload/secret restore, then removes its containers and network.
 
-`vitest.config.mts` sets a 60s per-test timeout because these tests boot Payload against a real
+`vitest.config.mts` sets 60s per-test and hook timeouts because these tests boot Payload against a real
 MongoDB. A cold container makes the first run slower than later ones.
 
 Run the smallest relevant checks while developing, then the full set before committing:
@@ -279,16 +275,16 @@ git diff --check
 
 Run `pnpm check:generated` for generated-file drift. Production upgrades drain workers, back up the
 database and uploads, and apply versioned migrations before workers restart; see `docs/operations.md`.
-The full `pnpm benchmark:capacity` dataset is release-only and must use a disposable database.
 
 `pnpm test:coverage` enforces at least 90% statements, branches, functions, and lines for the
-application.
+application. `src/migrations/**` is excluded from the percentage; exercise migration behavior with
+the real database migration runner in focused integration tests.
 
 Vitest runs integration files serially because they share database state. New behavior affecting
 authorization, imports, quality precedence, audit logs, parsing, or bulk operations needs a focused
 integration test. Otter implementation and protocol tests belong in the `otserver-otter`
-repository. Run `pnpm test:otter-client` against the test replica set to build the headless executable
-and verify real-client REST enrollment, import, and credential reuse after restart. To test a specific
+repository. Run `pnpm test:otter-client` to build the headless executable and verify real-client REST
+enrollment, import, and credential reuse after restart. To test a specific
 build, use `OTTER_CLIENT_BIN=otserver-otter/target/debug/otserver-otter pnpm test:int
 tests/int/otter-client.int.spec.ts`. Local-file CLI/GUI operation must
 remain independent of the managed `controller` command and its private state directory.

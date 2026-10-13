@@ -1,16 +1,7 @@
 import type { Where } from 'payload'
+import { graphicalAssetFieldNames } from './assetSearchFields'
 
-const fieldNames: Record<string, string> = {
-  assetOwner: 'owner',
-  assetClass: 'classid',
-  gatewayAddress: 'gateway',
-  ipAddress: 'ip',
-  macAddress: 'mac',
-  operatingSystem: 'os',
-  site: 'siteid',
-}
-
-const fieldName = (path: string) => fieldNames[path] ?? path
+const fieldName = (path: string) => graphicalAssetFieldNames[path] ?? path
 const quote = (value: unknown) =>
   `"${String(value).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`
 const term = (value: unknown) => String(value).replaceAll(/([+\-!(){}[\]^"~*?:\\/\s])/g, '\\$1')

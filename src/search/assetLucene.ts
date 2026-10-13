@@ -1,5 +1,6 @@
 import lucene from 'lucene-query-parser'
 import { APIError, type CollectionBeforeOperationHook, type Where } from 'payload'
+import { assetSearchFields } from './assetSearchFields'
 
 type LuceneNode = {
   boost?: null | number
@@ -16,57 +17,6 @@ type LuceneNode = {
   term?: string
   term_max?: string
   term_min?: string
-}
-
-type FieldKind = 'date' | 'keyword' | 'number' | 'text'
-
-const fields: Record<string, { kind: FieldKind; path: string }> = {
-  assetowner: { kind: 'text', path: 'assetOwner' },
-  uuid: { kind: 'keyword', path: 'uuid' },
-  lifecycle: { kind: 'keyword', path: 'lifecycle' },
-  physicalkind: { kind: 'keyword', path: 'physicalKind' },
-  catalog: { kind: 'text', path: 'catalogNumber' },
-  catalognumber: { kind: 'text', path: 'catalogNumber' },
-  assetclass: { kind: 'text', path: 'assetClass.name' },
-  assetclassid: { kind: 'keyword', path: 'assetClass' },
-  class: { kind: 'text', path: 'assetClass.name' },
-  classid: { kind: 'keyword', path: 'assetClass' },
-  criticality: { kind: 'keyword', path: 'criticality' },
-  createdat: { kind: 'date', path: 'createdAt' },
-  description: { kind: 'text', path: 'description' },
-  firmware: { kind: 'text', path: 'firmwareVersion' },
-  firmwareversion: { kind: 'text', path: 'firmwareVersion' },
-  gateway: { kind: 'text', path: 'gatewayAddress' },
-  gatewayaddress: { kind: 'text', path: 'gatewayAddress' },
-  hardware: { kind: 'text', path: 'hardwareVersion' },
-  hardwareversion: { kind: 'text', path: 'hardwareVersion' },
-  importsource: { kind: 'text', path: 'importSource' },
-  id: { kind: 'keyword', path: 'id' },
-  ip: { kind: 'keyword', path: 'ipAddress' },
-  ipaddress: { kind: 'keyword', path: 'ipAddress' },
-  lastimportedat: { kind: 'date', path: 'lastImportedAt' },
-  lastseen: { kind: 'date', path: 'lastSeen' },
-  location: { kind: 'text', path: 'location' },
-  mac: { kind: 'keyword', path: 'macAddress' },
-  macaddress: { kind: 'keyword', path: 'macAddress' },
-  model: { kind: 'text', path: 'model' },
-  name: { kind: 'text', path: 'name' },
-  networkmask: { kind: 'text', path: 'networkMask' },
-  notes: { kind: 'text', path: 'notes' },
-  operatingsystem: { kind: 'text', path: 'operatingSystem' },
-  os: { kind: 'text', path: 'operatingSystem' },
-  osaccuracy: { kind: 'number', path: 'osAccuracy' },
-  owner: { kind: 'text', path: 'assetOwner' },
-  protocol: { kind: 'keyword', path: 'protocols' },
-  protocols: { kind: 'keyword', path: 'protocols' },
-  serialnumber: { kind: 'text', path: 'serialNumber' },
-  site: { kind: 'text', path: 'site.name' },
-  siteid: { kind: 'keyword', path: 'site' },
-  sourceversion: { kind: 'text', path: 'sourceVersion' },
-  status: { kind: 'keyword', path: 'status' },
-  type: { kind: 'text', path: 'assetClass.name' },
-  updatedat: { kind: 'date', path: 'updatedAt' },
-  vendor: { kind: 'text', path: 'vendor' },
 }
 
 const implicitFields = [
@@ -86,7 +36,8 @@ const fail = (message: string): never => {
   throw new APIError(`Invalid asset search: ${message}`, 400)
 }
 
-const fieldFor = (name: string) => fields[name.toLowerCase()] ?? fail(`unknown field "${name}".`)
+const fieldFor = (name: string) =>
+  assetSearchFields[name.toLowerCase()] ?? fail(`unknown field "${name}".`)
 
 const normalizeKeyword = (path: string, value: string) => {
   if (path === 'macAddress') return value.replaceAll('-', ':').toUpperCase()

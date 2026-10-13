@@ -17,6 +17,12 @@ import {
 import { dueOccurrence } from './scheduling'
 import { getAssetOverrides } from '../application/processImport'
 import { systemRequest } from '../integrations/payload/requests'
+import {
+  activeRunStatuses,
+  assertCurrentOtterRunLease,
+  assertOtterRunOwner,
+  isRunLeaseExpired,
+} from './runLease'
 
 const json = (data: unknown, status = 200) =>
   Response.json(data, { headers: { 'Cache-Control': 'no-store' }, status })
@@ -285,9 +291,6 @@ const runInput = async (
   }
 }
 
-const activeRunStatuses: OtterRun['status'][] = ['assigned', 'running', 'cancel-requested']
-const leaseExpired = (run: OtterRun, now: Date) =>
-  !run.leaseExpiresAt || Date.parse(run.leaseExpiresAt) <= now.getTime()
 const isActiveRun = (run: OtterRun) => activeRunStatuses.includes(run.status)
 const leaseExpiredMessage =
   'Scanner lease expired because no heartbeat was received before the deadline. The scanner may have stopped or lost its controller connection.'
@@ -346,7 +349,7 @@ export const expireOtterLeases = async (payload: Payload, now = new Date()) => {
         overrideAccess: true,
         req,
       })
-      if (!isActiveRun(run) || !leaseExpired(run, now)) return
+      if (!isActiveRun(run) || !isRunLeaseExpired(run, now)) return
       const scannerID = relationshipID(run.scanner)
       if (!scannerID) {
         await payload.update({
@@ -385,8 +388,7 @@ const assignJob = async (req: PayloadRequest, scanner: OtterScanner, now: Date) 
       req,
     })
     if (isActiveRun(active)) {
-      if (active.status === 'cancel-requested') return active
-      if (!leaseExpired(active, now)) return active
+      if (!isRunLeaseExpired(active, now)) return active
       await expireRun(req, active, scanner, now)
     } else {
       await req.payload.update({
@@ -649,6 +651,24 @@ export const otterOverview: Endpoint['handler'] = async (req) => {
   })
 }
 
+export const getOtterScanner: Endpoint['handler'] = async (req) => {
+  const id = String(req.routeParams?.id || '')
+  const scanner = await req.payload.findByID({
+    collection: 'otter-scanners',
+    depth: 0,
+    id,
+    overrideAccess: false,
+    req,
+  })
+  await requireHuman(req, scanner.site)
+  return json({
+    id: String(scanner.id),
+    computerName: scanner.computerName,
+    networkAdapters: Array.isArray(scanner.networkAdapters) ? scanner.networkAdapters : [],
+    version: scanner.version,
+  })
+}
+
 export const createOtterScanner: Endpoint['handler'] = async (req) => {
   humanOrigin(req)
   const controllerUrl = publicControllerURL()
@@ -819,8 +839,7 @@ const activeRunForScanner = async (req: PayloadRequest, runID: string) => {
     overrideAccess: true,
     req,
   })
-  if (String(relationshipID(run.scanner)) !== String(scanner.id))
-    throw new APIError('Scan run does not belong to this scanner.', 404)
+  assertOtterRunOwner(run, scanner)
   return { run, scanner }
 }
 
@@ -828,9 +847,10 @@ export const startOtterRun: Endpoint['handler'] = async (req) => {
   const runID = String(req.routeParams?.id || '')
   const result = await inTransaction(req, async () => {
     const { run, scanner } = await activeRunForScanner(req, runID)
+    const now = new Date()
+    assertCurrentOtterRunLease(run, scanner, now)
     if (run.status === 'running') return { status: run.status }
     if (run.status !== 'assigned') throw new APIError('This scan run cannot be started.', 409)
-    const now = new Date()
     await req.payload.update({
       collection: 'otter-runs',
       id: run.id,
@@ -857,12 +877,13 @@ export const heartbeatOtterRun: Endpoint['handler'] = async (req) => {
     throw new APIError('Progress must be an integer from 0 to 100.', 400)
   const progress = typeof data.progress === 'number' ? data.progress : undefined
   const result = await inTransaction(req, async () => {
-    const { run } = await activeRunForScanner(req, runID)
+    const { run, scanner } = await activeRunForScanner(req, runID)
+    const now = new Date()
+    assertCurrentOtterRunLease(run, scanner, now)
     if (!['running', 'cancel-requested'].includes(run.status))
       throw new APIError('This scan run is no longer active.', 409)
     let leaseExpiresAt = run.leaseExpiresAt
     if (run.status !== 'cancel-requested') {
-      const now = new Date()
       leaseExpiresAt = new Date(now.getTime() + 120_000).toISOString()
       await req.payload.update({
         collection: 'otter-runs',
@@ -894,8 +915,7 @@ export const finishOtterRun: Endpoint['handler'] = async (req) => {
     const { run, scanner } = await activeRunForScanner(req, runID)
     if (['completed', 'partial', 'failed', 'cancelled'].includes(run.status))
       return { status: run.status }
-    if (!['assigned', 'running', 'cancel-requested'].includes(run.status))
-      throw new APIError('This scan run is no longer active.', 409)
+    assertCurrentOtterRunLease(run, scanner, new Date())
     const now = new Date().toISOString()
     if (importID) {
       const imported = await req.payload.find({
@@ -1157,6 +1177,7 @@ export const reenrollOtterScanner: Endpoint['handler'] = async (req) => {
 
 export const otterEndpoints: Endpoint[] = [
   { path: '/otter/v1/overview', method: 'get', handler: otterOverview },
+  { path: '/otter/v1/scanners/:id', method: 'get', handler: getOtterScanner },
   { path: '/otter/v1/scanners', method: 'post', handler: createOtterScanner },
   { path: '/otter/v1/scanners/:id/revoke', method: 'post', handler: revokeOtterScanner },
   { path: '/otter/v1/scanners/:id/reenroll', method: 'post', handler: reenrollOtterScanner },

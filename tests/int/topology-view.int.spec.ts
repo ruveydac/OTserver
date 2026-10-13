@@ -3,13 +3,14 @@ import { randomUUID } from 'node:crypto'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { getPayload, type Payload } from 'payload'
 
-import TopologyView, {
+import TopologyView from '../../src/components/TopologyView'
+import {
   buildTopologyGraph,
   computeSubnet,
   endpointPort,
   ipv4ToInt,
   maskToPrefix,
-} from '../../src/components/TopologyView'
+} from '../../src/components/TopologyView/graph'
 import { ensureAdminRole } from '../../src/collections/UserRoles'
 
 vi.mock('@payloadcms/ui', () => ({ DefaultListView: () => null }))

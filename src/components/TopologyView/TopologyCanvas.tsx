@@ -16,24 +16,7 @@ import {
 } from '@xyflow/react'
 
 import '@xyflow/react/dist/style.css'
-
-export type GraphNode = {
-  id: string
-  ipAddress?: string
-  label: string
-  status?: string
-  type: 'asset' | 'layer2' | 'router' | 'switch'
-}
-
-export type GraphEdge = {
-  count?: number
-  id: string
-  label?: string
-  redundant?: boolean
-  source: string
-  target: string
-  type: 'explicit' | 'layer2'
-}
+import type { GraphEdge, GraphNode } from './graph'
 
 const NodeHandles = () => (
   <>

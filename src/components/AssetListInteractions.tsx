@@ -82,7 +82,7 @@ const AssetListInteractions = () => {
             className="list-selection__button asset-export-csv"
             onClick={() => void downloadCSV()}
           >
-            Download CSV
+            Download diagnostic CSV
           </Button>,
           actionsTarget,
         )}

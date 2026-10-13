@@ -390,7 +390,7 @@ describe('asset list interactions', () => {
     })
     const bar = document.querySelector<HTMLElement>('.list-selection__actions')!
     const button = bar.querySelector<HTMLButtonElement>('.asset-export-csv')!
-    expect(button.textContent).toContain('Download CSV')
+    expect(button.textContent).toContain('Download diagnostic CSV')
     await act(async () => button.click())
     expect(fetch).toHaveBeenCalledWith('/api/assets/export-csv?where%5Bid%5D%5Bin%5D=abc')
 
@@ -534,30 +534,27 @@ describe('Otter profile credentials field', () => {
 describe('Otter profile interface field', () => {
   it('offers the selected scanner adapters and displays their addresses', async () => {
     mocks.fieldValue = 'eth0'
+    mocks.formFields = { scanner: { value: 'scanner-201' } }
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
-          scanners: [
+          id: 'scanner-201',
+          networkAdapters: [
             {
-              id: 'scanner-1',
-              networkAdapters: [
-                {
-                  name: 'eth0',
-                  friendlyName: 'Industrial Ethernet',
-                  description: 'Primary adapter',
-                  macAddress: '00:11:22:33:44:55',
-                  ipAddresses: ['192.0.2.10'],
-                },
-                {
-                  name: 'eth1',
-                  friendlyName: 'Service Ethernet',
-                  description: 'Maintenance adapter',
-                  macAddress: '00:11:22:33:44:66',
-                  ipAddresses: ['192.0.2.20'],
-                },
-              ],
+              name: 'eth0',
+              friendlyName: 'Industrial Ethernet',
+              description: 'Primary adapter',
+              macAddress: '00:11:22:33:44:55',
+              ipAddresses: ['192.0.2.10'],
+            },
+            {
+              name: 'eth1',
+              friendlyName: 'Service Ethernet',
+              description: 'Maintenance adapter',
+              macAddress: '00:11:22:33:44:66',
+              ipAddresses: ['192.0.2.20'],
             },
           ],
         }),
@@ -571,6 +568,11 @@ describe('Otter profile interface field', () => {
     )
     expect(container.textContent).toContain('Primary adapter')
     expect(container.textContent).toContain('00:11:22:33:44:55')
+    expect(container.textContent).toContain('operating system route table')
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/otter/v1/scanners/scanner-201',
+      expect.objectContaining({ cache: 'no-store' }),
+    )
     const select = container.querySelector('select')!
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(
@@ -1148,7 +1150,7 @@ describe('remaining Otter component states', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }))
     const field = createElement(OtterInterfaceField, { field: {}, path: 'interface' } as never)
     await render(field)
-    expect(fetch).toHaveBeenCalledWith('/api/otter/v1/overview', expect.anything())
+    expect(fetch).toHaveBeenCalledWith('/api/otter/v1/scanners/scanner-2', expect.anything())
     expect(container.textContent).toContain('eth9 · not currently reported')
     expect(container.textContent).toContain('not currently reported; its name is preserved')
 
@@ -1175,13 +1177,9 @@ describe('remaining Otter component states', () => {
       vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
-          scanners: [
-            {
-              id: 'scanner-3',
-              networkAdapters: [
-                { name: 'eth0', friendlyName: 'LAN', description: 'Local', ipAddresses: [] },
-              ],
-            },
+          id: 'scanner-3',
+          networkAdapters: [
+            { name: 'eth0', friendlyName: 'LAN', description: 'Local', ipAddresses: [] },
           ],
         }),
       }),
@@ -1201,7 +1199,7 @@ describe('remaining Otter component states', () => {
     expect(container.querySelector('.nav__link-indicator')).not.toBeNull()
   })
 
-  it('updates multiple SNMP and OPC UA credential rows independently', async () => {
+  it('keeps remaining SNMP and OPC UA credential rows after removing the first row', async () => {
     mocks.documentID = 'profile-1'
     mocks.fieldValue = false
     const fetchMock = vi.fn().mockResolvedValue({
@@ -1217,7 +1215,10 @@ describe('remaining Otter component states', () => {
       )!
       await act(async () => button.click())
     }
-    const setLabelInput = async (label: HTMLLabelElement, value: string) => {
+    const setEntryInput = async (entry: ParentNode, name: string, value: string) => {
+      const label = [...entry.querySelectorAll('label')].find((item) =>
+        item.textContent?.trim().startsWith(name),
+      )!
       const input = label.querySelector<HTMLInputElement>('input')!
       await act(async () => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(
@@ -1239,43 +1240,54 @@ describe('remaining Otter component states', () => {
 
     await click('Add SNMP credential')
     await click('Add SNMP credential')
+    const snmpEntries = container.querySelectorAll<HTMLElement>(
+      '.otter-credentials__section:first-of-type .otter-credentials__entry',
+    )
     const snmpSelects = container.querySelectorAll<HTMLSelectElement>(
       '.otter-credentials__section select',
     )
-    await setSelect(snmpSelects[0]!, 'auto')
-    await setSelect(snmpSelects[1]!, 'sha256')
-    await setSelect(snmpSelects[2]!, 'aes128')
-    for (const [label, value] of [
-      ['Community', 'private'],
-      ['Username', 'snmp-user'],
-      ['Context name', 'engineering'],
-      ['Authentication password', 'auth-secret'],
-      ['Privacy password', 'privacy-secret'],
-    ]) {
-      const field = [...container.querySelectorAll('label')].find((entry) =>
-        entry.textContent?.trim().startsWith(label),
-      )!
-      await setLabelInput(field, value)
+    await setSelect(snmpSelects[0]!, '1')
+    await setSelect(snmpSelects[1]!, 'sha1')
+    await setSelect(snmpSelects[2]!, 'des')
+    await setSelect(snmpSelects[3]!, 'auto')
+    await setSelect(snmpSelects[4]!, 'sha256')
+    await setSelect(snmpSelects[5]!, 'aes128')
+    for (const [entry, values] of [
+      [
+        snmpEntries[0]!,
+        [
+          ['Community', 'discard-community'],
+          ['Username', 'discard-user'],
+          ['Context name', 'discard-context'],
+          ['Authentication password', 'discard-auth'],
+          ['Privacy password', 'discard-privacy'],
+        ],
+      ],
+      [
+        snmpEntries[1]!,
+        [
+          ['Community', 'private'],
+          ['Username', 'snmp-user'],
+          ['Context name', 'engineering'],
+          ['Authentication password', 'auth-secret'],
+          ['Privacy password', 'privacy-secret'],
+        ],
+      ],
+    ] as const) {
+      for (const [name, value] of values) await setEntryInput(entry, name, value)
     }
 
     await click('Add OPC UA credential')
     await click('Add OPC UA credential')
     const opcuaSection = container.querySelectorAll('.otter-credentials__section')[1]!
-    const opcuaUsername = [...opcuaSection.querySelectorAll('label')].find((entry) =>
-      entry.textContent?.trim().startsWith('Username'),
-    )!
-    const opcuaPassword = [...opcuaSection.querySelectorAll('label')].find((entry) =>
-      entry.textContent?.trim().startsWith('Password'),
-    )!
-    await setLabelInput(opcuaUsername, 'operator')
-    await setLabelInput(opcuaPassword, 'opcua-secret')
+    const opcuaEntries = opcuaSection.querySelectorAll<HTMLElement>('.otter-credentials__entry')
+    await setEntryInput(opcuaEntries[0]!, 'Username', 'discard-opcua-user')
+    await setEntryInput(opcuaEntries[0]!, 'Password', 'discard-opcua-password')
+    await setEntryInput(opcuaEntries[1]!, 'Username', 'operator')
+    await setEntryInput(opcuaEntries[1]!, 'Password', 'opcua-secret')
 
-    for (const label of ['Remove SNMP credential', 'Remove OPC UA credential']) {
-      const remove = [...container.querySelectorAll('button')].filter((entry) =>
-        entry.textContent?.includes(label),
-      )[1]!
-      await act(async () => remove.click())
-    }
+    await act(async () => snmpEntries[0]!.querySelector('button')!.click())
+    await act(async () => opcuaEntries[0]!.querySelector('button')!.click())
     await click('Encrypt and save credentials')
 
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({

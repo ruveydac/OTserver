@@ -180,9 +180,9 @@ Confirm both worker heartbeats in the administrator operations endpoint. Do not 
 mode without running both worker services.
 
 For an upgrade from MAC-only inventory, follow the [identity migration](docs/device-identity.md#upgrade-from-mac-only-inventory)
-before starting this version. It requires a replica set and removal of the legacy unique MAC index.
-For subsequent upgrades, back up those volumes, update the image tag if pinned, then run
-`docker compose pull && docker compose up -d` again.
+with workers stopped and before accepting new imports. It requires a replica set and removal of the
+legacy unique MAC index.
+For database upgrades, worker operation, backup, and restore, follow the [operations guide](docs/operations.md).
 
 ### Local development
 
@@ -281,6 +281,8 @@ Import files are treated as untrusted input: parsers enforce size and structure 
 optional vendor data, and report malformed or uncorrelatable observations as warnings. The canonical
 wire contract is pinned through the `otserver-otter` submodule at
 [`otserver-otter/contracts/otserver-scan-v2.schema.json`](otserver-otter/contracts/otserver-scan-v2.schema.json).
+The Assets CSV is a schema-dependent diagnostic export; its columns follow the stored asset fields and
+may change as that schema evolves.
 
 Example searches:
 
@@ -399,7 +401,8 @@ tests/int/         Application and importer integration tests
 
 ## Development
 
-Run the smallest relevant check while working, then the full application suite:
+Run the smallest relevant check while working, then the full application suite. Test commands create
+and remove their own MongoDB 8 replica set and upload directory; Docker or Podman is required:
 
 ```bash
 pnpm test
@@ -415,12 +418,11 @@ pnpm test:container
 
 Set `CONTAINER_RUNTIME=docker` or `CONTAINER_RUNTIME=podman` to select one explicitly.
 
-Verify controller interoperability with the real Rust executable and Payload REST API against a
-disposable MongoDB replica-set database (requires the Rust toolchain and initialized Otter submodule):
+Verify controller interoperability with the real Rust executable and Payload REST API (requires the
+Rust toolchain and initialized Otter submodule):
 
 ```bash
-TEST_DATABASE_URL='mongodb://127.0.0.1:27018/otserver-test?replicaSet=rs0&directConnection=true' \
-  pnpm test:otter-client
+pnpm test:otter-client
 ```
 
 This builds the headless client and tests enrollment using bare loopback and explicit HTTP URLs,

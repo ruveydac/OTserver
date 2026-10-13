@@ -13,6 +13,7 @@ import {
   enrollOtter,
   expireOtterLeases,
   finishOtterRun,
+  getOtterScanner,
   heartbeatOtterRun,
   otterOverview,
   pollOtter,
@@ -345,27 +346,38 @@ describe('Otter management controller', () => {
       })
       foreignScannerID = foreignScanner.id
 
-      const enrollmentResponse = await enrollOtter(
-        await request('/otter/v1/enroll', {
-          body: {
-            token: created.enrollmentToken,
-            version: '0.9.0',
-            capabilities: ['scan-v2', 'controller-v1'],
-            interfaces: ['eth0'],
-            computerName: 'otter-host-1',
-            networkAdapters: [
-              {
-                name: 'eth0',
-                friendlyName: 'Ethernet',
-                description: 'Industrial network adapter',
-                macAddress: '00:11:22:33:44:55',
-                ipAddresses: ['192.0.2.10', '2001:db8::10'],
-              },
-            ],
-          },
-          origin: '',
-        }),
+      const enrollmentAttempts = await Promise.all(
+        Array.from({ length: 2 }, () =>
+          request('/otter/v1/enroll', {
+            body: {
+              token: created.enrollmentToken,
+              version: '0.9.0',
+              capabilities: ['scan-v2', 'controller-v1'],
+              interfaces: ['eth0'],
+              computerName: 'otter-host-1',
+              networkAdapters: [
+                {
+                  name: 'eth0',
+                  friendlyName: 'Ethernet',
+                  description: 'Industrial network adapter',
+                  macAddress: '00:11:22:33:44:55',
+                  ipAddresses: ['192.0.2.10', '2001:db8::10'],
+                },
+              ],
+            },
+            origin: '',
+          }),
+        ),
       )
+      const enrollmentResults = await Promise.allSettled(
+        enrollmentAttempts.map((req) => enrollOtter(req)),
+      )
+      const successfulEnrollments = enrollmentResults.filter(
+        (result): result is PromiseFulfilledResult<Response> => result.status === 'fulfilled',
+      )
+      expect(successfulEnrollments).toHaveLength(1)
+      expect(enrollmentResults.filter((result) => result.status === 'rejected')).toHaveLength(1)
+      const enrollmentResponse = successfulEnrollments[0]!.value
       expect(enrollmentResponse.status).toBe(201)
       const enrollment = (await enrollmentResponse.json()) as { credential: string }
       expect(
@@ -383,6 +395,19 @@ describe('Otter management controller', () => {
           },
         ],
       })
+      const scannerDetails = await getOtterScanner(
+        await routeRequest('/otter/v1/scanners', scannerID!, `JWT ${login.token}`),
+      )
+      expect(await scannerDetails.json()).toMatchObject({
+        id: scannerID,
+        computerName: 'otter-host-1',
+        networkAdapters: [expect.objectContaining({ name: 'eth0' })],
+      })
+      await expect(
+        getOtterScanner(
+          await routeRequest('/otter/v1/scanners', scannerID!, `JWT ${readerLogin.token}`),
+        ),
+      ).rejects.toMatchObject({ status: 403 })
       await expect(
         enrollOtter(await request('/otter/v1/enroll', { body: { token: 42 }, origin: '' })),
       ).rejects.toMatchObject({ status: 401 })
@@ -937,6 +962,54 @@ describe('Otter management controller', () => {
         data: { status: 'running', leaseExpiresAt: '2000-01-01T00:00:00.000Z' },
         overrideAccess: true,
       })
+      await expect(
+        startOtterRun(
+          await routeRequest(
+            '/otter/v1/runs/start',
+            expiredRunID,
+            `Otter ${enrollment.credential}`,
+          ),
+        ),
+      ).rejects.toMatchObject({ status: 409 })
+      await expect(
+        heartbeatOtterRun(
+          await routeRequest(
+            '/otter/v1/runs/heartbeat',
+            expiredRunID,
+            `Otter ${enrollment.credential}`,
+            {},
+          ),
+        ),
+      ).rejects.toMatchObject({ status: 409 })
+      await expect(
+        finishOtterRun(
+          await routeRequest(
+            '/otter/v1/runs/finish',
+            expiredRunID,
+            `Otter ${enrollment.credential}`,
+            {
+              status: 'completed',
+            },
+          ),
+        ),
+      ).rejects.toMatchObject({ status: 409 })
+      await expect(
+        payload.create({
+          collection: 'asset-imports',
+          data: { otterRun: expiredRunID, sourceVersion: 'managed-test' } as never,
+          file: {
+            data: file,
+            mimetype: 'application/json',
+            name: 'expired.json',
+            size: file.length,
+          },
+          overrideAccess: false,
+          req: await request('/asset-imports', { token: `Otter ${enrollment.credential}` }),
+        }),
+      ).rejects.toMatchObject({ status: 409 })
+      expect(
+        await payload.findByID({ collection: 'otter-runs', id: expiredRunID, depth: 0 }),
+      ).toMatchObject({ status: 'running', leaseExpiresAt: '2000-01-01T00:00:00.000Z' })
       await expireOtterLeases(payload)
       expect(
         await payload.findByID({ collection: 'otter-runs', id: expiredRunID, depth: 0 }),
@@ -1047,19 +1120,40 @@ describe('Otter management controller', () => {
         data: { nextRunAt: '2000-01-01T00:00:00.000Z' },
         overrideAccess: true,
       })
-      const scheduledPoll = await pollOtter(
-        await request('/otter/v1/poll', {
-          body: { version: '0.9.0', capabilities: ['scan-v2'], interfaces: ['eth0'] },
-          token: `Otter ${enrollment.credential}`,
-          origin: '',
-        }),
+      const scheduledPolls = await Promise.allSettled(
+        Array.from({ length: 2 }, async () =>
+          pollOtter(
+            await request('/otter/v1/poll', {
+              body: { version: '0.9.0', capabilities: ['scan-v2'], interfaces: ['eth0'] },
+              token: `Otter ${enrollment.credential}`,
+              origin: '',
+            }),
+          ),
+        ),
       )
-      const scheduledAssignment = (await scheduledPoll.json()) as {
-        action: string
-        run: { id: string }
-      }
+      const successfulPolls = scheduledPolls.filter(
+        (result): result is PromiseFulfilledResult<Response> => result.status === 'fulfilled',
+      )
+      expect(successfulPolls.length).toBeGreaterThan(0)
+      const scheduledAssignments = await Promise.all(
+        successfulPolls.map(
+          async ({ value }) => (await value.json()) as { action: string; run: { id: string } },
+        ),
+      )
+      const scheduledAssignment = scheduledAssignments[0]!
+      for (const assignment of scheduledAssignments)
+        expect(assignment).toMatchObject({ action: 'run', run: { id: scheduledAssignment.run.id } })
       scheduledRunID = scheduledAssignment.run.id
       expect(scheduledAssignment.action).toBe('run')
+      const scheduledOccurrences = await payload.find({
+        collection: 'otter-runs',
+        depth: 0,
+        limit: 10,
+        overrideAccess: true,
+        where: { schedule: { equals: schedule.id } },
+      })
+      expect(scheduledOccurrences.docs).toHaveLength(1)
+      expect(scheduledOccurrences.docs[0]?.scheduleOccurrenceKey).toEqual(expect.any(String))
       expect(
         await payload.findByID({
           collection: 'otter-runs',
@@ -1093,12 +1187,6 @@ describe('Otter management controller', () => {
         ),
       )
       expect(await cancellation.json()).toMatchObject({ status: 'cancel-requested' })
-      await payload.update({
-        collection: 'otter-runs',
-        id: scheduledAssignment.run.id,
-        data: { leaseExpiresAt: '2000-01-01T00:00:00.000Z' },
-        overrideAccess: true,
-      })
       const cancellationPoll = await pollOtter(
         await request('/otter/v1/poll', {
           body: {},
@@ -1128,21 +1216,6 @@ describe('Otter management controller', () => {
         ),
       )
       expect(await cancelled.json()).toMatchObject({ status: 'cancelled' })
-      await payload.update({
-        collection: 'otter-schedules',
-        id: schedule.id,
-        context: { otterSchedulerUpdate: true },
-        data: { nextRunAt: '2000-01-01T00:00:00.000Z' },
-        overrideAccess: true,
-      })
-      const duplicateOccurrencePoll = await pollOtter(
-        await request('/otter/v1/poll', {
-          body: {},
-          token: `Otter ${enrollment.credential}`,
-          origin: '',
-        }),
-      )
-      expect(await duplicateOccurrencePoll.json()).toMatchObject({ action: 'idle' })
       await payload.update({
         collection: 'otter-schedules',
         id: schedule.id,
@@ -1184,6 +1257,21 @@ describe('Otter management controller', () => {
         ),
       )
       expect(await oneTimeFinish.json()).toMatchObject({ status: 'partial' })
+      await payload.update({
+        collection: 'otter-schedules',
+        id: oneTimeSchedule.id,
+        context: { otterSchedulerUpdate: true },
+        data: { enabled: true, nextRunAt: '2000-01-01T00:00:00.000Z' },
+        overrideAccess: true,
+      })
+      const duplicateOccurrencePoll = await pollOtter(
+        await request('/otter/v1/poll', {
+          body: {},
+          token: `Otter ${enrollment.credential}`,
+          origin: '',
+        }),
+      )
+      expect(await duplicateOccurrencePoll.json()).toMatchObject({ action: 'idle' })
 
       const rotation = await rotateOtterCredential(
         await request('/otter/v1/credentials/rotate', {

@@ -14,11 +14,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      DATABASE_URL: mongodb://127.0.0.1:27017/otserver-ci?replicaSet=rs0&directConnection=true
       OTSERVER_SECRET: ci-only-secret
     steps:
       - uses: actions/checkout@v6
-      - run: docker compose up --detach --wait mongo
+        with:
+          submodules: recursive
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6
         with:
@@ -28,6 +28,6 @@ jobs:
       - run: pnpm check:generated
       - run: pnpm exec prettier --check .
       - run: pnpm lint
-      - run: pnpm test:coverage:app
+      - run: pnpm test:coverage
       - run: pnpm build
       - run: git diff --check

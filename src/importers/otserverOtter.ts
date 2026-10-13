@@ -10,8 +10,12 @@ import {
 } from './types'
 import { normalizeMAC } from '../domain/network'
 import { endpointEvidence, expandPhysicalEvidence, serviceEvidence } from '../identity/evidence'
+import { text } from '../identity/keys'
 
 const macPattern = /^(?:[0-9A-F]{2}:){5}[0-9A-F]{2}$/
+const uuidPattern = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i
+const dateTimePattern =
+  /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/
 const sources: Record<string, DataQuality> = {
   arp: 'medium',
   bacnet: 'medium',
@@ -63,6 +67,12 @@ const record = (value: unknown): Record<string, unknown> =>
     : {}
 
 const array = (value: unknown): unknown[] => (Array.isArray(value) ? value : [])
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value && typeof value === 'object' && !Array.isArray(value))
+const isDateTime = (value: unknown): value is string =>
+  typeof value === 'string' && dateTimePattern.test(value) && !Number.isNaN(Date.parse(value))
+const isStringList = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === 'string')
 
 const rejectSecrets = (value: unknown) => {
   const pending: { path: string; value: unknown }[] = [{ path: '$', value }]
@@ -153,37 +163,91 @@ export const parseOTserverOtter = (input: string): ImportResult => {
   }
   const scanner = record(root.scanner)
   const scan = record(root.scan)
-  if (typeof scanner.version !== 'string' || typeof scan.id !== 'string') {
+  if (
+    typeof scanner.name !== 'string' ||
+    !scanner.name.trim() ||
+    typeof scanner.version !== 'string' ||
+    !scanner.version.trim() ||
+    typeof scan.id !== 'string' ||
+    !uuidPattern.test(scan.id)
+  ) {
     throw new Error('Otter and scan metadata are required.')
   }
+  const selectedInterface = record(scan.interface)
+  if (
+    !isDateTime(scan.startedAt) ||
+    !isDateTime(scan.finishedAt) ||
+    !Array.isArray(scan.targets) ||
+    !scan.targets.length ||
+    scan.targets.some((target) => typeof target !== 'string' || !target.trim()) ||
+    typeof selectedInterface.id !== 'string' ||
+    !selectedInterface.id.trim() ||
+    typeof selectedInterface.name !== 'string' ||
+    !selectedInterface.name.trim() ||
+    (selectedInterface.addresses !== undefined && !isStringList(selectedInterface.addresses))
+  )
+    throw new Error('Otter scan metadata is invalid.')
   if (
     !Array.isArray(root.devices) ||
-    (root.links !== undefined && !Array.isArray(root.links)) ||
-    (root.unresolved !== undefined && !Array.isArray(root.unresolved))
+    !Array.isArray(root.links) ||
+    !Array.isArray(root.unresolved) ||
+    !isStringList(root.warnings) ||
+    !isStringList(root.errors)
   )
-    throw new Error('Otter devices, links, and unresolved observations must be arrays.')
+    throw new Error(
+      'Otter devices, links, unresolved observations, warnings, and errors are invalid.',
+    )
 
   const identities = new Set<string>()
   const assets = array(root.devices).flatMap((entry, index): ImportedAsset[] => {
     const device = record(entry)
     const identity = mac(device.macAddress, `devices[${index}].macAddress`)
+    if (
+      !isStringList(device.macAddresses) ||
+      !isStringList(device.ipAddresses) ||
+      !Array.isArray(device.observations) ||
+      !Array.isArray(device.interfaces) ||
+      !Array.isArray(device.ports)
+    )
+      throw new Error(`devices[${index}] is missing required arrays.`)
+    for (const [macIndex, value] of device.macAddresses.entries())
+      mac(value, `devices[${index}].macAddresses[${macIndex}]`)
+    for (const [field, values] of [
+      ['interfaces', device.interfaces],
+      ['ports', device.ports],
+    ] as const)
+      values.forEach((item, itemIndex) => {
+        const value = record(item)
+        if (
+          !isRecord(item) ||
+          typeof value.key !== 'string' ||
+          !value.key.trim() ||
+          typeof value.source !== 'string' ||
+          !value.source.trim()
+        )
+          throw new Error(`devices[${index}].${field}[${itemIndex}] is invalid.`)
+      })
     if (identities.has(identity)) throw new Error(`Duplicate device MAC address: ${identity}.`)
     identities.add(identity)
     const observations = array(device.observations).map(
       (entry, observationIndex): ImportedObservation => {
         const observation = record(entry)
+        if (
+          !isRecord(entry) ||
+          typeof observation.source !== 'string' ||
+          !isRecord(observation.fields) ||
+          !Object.hasOwn(observation, 'raw') ||
+          !isStringList(observation.warnings)
+        )
+          throw new Error(`devices[${index}].observations[${observationIndex}] is invalid.`)
+        if (!isDateTime(observation.observedAt))
+          throw new Error(
+            `devices[${index}].observations[${observationIndex}].observedAt is invalid.`,
+          )
         const source =
           typeof observation.source === 'string' && observation.source in sources
             ? observation.source
             : 'unknown'
-        if (
-          typeof observation.observedAt !== 'string' ||
-          Number.isNaN(Date.parse(observation.observedAt))
-        ) {
-          throw new Error(
-            `devices[${index}].observations[${observationIndex}].observedAt is invalid.`,
-          )
-        }
         const originalFields = record(observation.fields)
         const fields = { ...originalFields }
         const mergeFields = safeFields(originalFields, identity)
@@ -194,14 +258,27 @@ export const parseOTserverOtter = (input: string): ImportResult => {
         if (fields.macAddress === undefined) fields.macAddress = identity
 
         const raw = record(observation.raw)
-        const serialClaim = record(raw.serialClaim)
+        const serialClaim = source === 'profinet-dcp' ? {} : record(raw.serialClaim)
+        const physicalEntities = array(raw.physicalEntities).map(record)
+        const snmpRoots = physicalEntities.filter(
+          (entity) => !text(entity.parentRef) && ['chassis', 'stack'].includes(text(entity.class)),
+        )
+        const legacySnmpRoots = physicalEntities.filter(
+          (entity) => !text(entity.parentRef) && entity.class === undefined,
+        )
         const primaryEntity =
           source === 'snmp'
-            ? array(raw.physicalEntities)
-                .map(record)
-                .find((entity) => !entity.parentRef)
+            ? snmpRoots.length === 1
+              ? snmpRoots[0]
+              : snmpRoots.length === 0 && legacySnmpRoots.length === 1
+                ? legacySnmpRoots[0]
+                : undefined
             : undefined
         const primarySerialClaim = record(primaryEntity?.serialClaim)
+        if (source === 'profinet-dcp' || source === 'snmp') {
+          delete fields.serialNumber
+          delete mergeFields.serialNumber
+        }
         addTextField(
           fields,
           mergeFields,
@@ -214,7 +291,7 @@ export const parseOTserverOtter = (input: string): ImportResult => {
           fields,
           mergeFields,
           'serialNumber',
-          serialClaim.original,
+          source === 'snmp' ? undefined : serialClaim.original,
           primarySerialClaim.original,
         )
         addTextField(fields, mergeFields, 'name', primaryEntity?.name)
@@ -228,56 +305,41 @@ export const parseOTserverOtter = (input: string): ImportResult => {
           source === 's7' ? raw.basicHardware : undefined,
           serialClaim.catalogNumber,
           primaryEntity?.catalogNumber,
-          source === 'snmp' ? raw['1.3.6.1.4.1.4329.6.3.2.1.1.2.0'] : undefined,
+          source === 'snmp' && primaryEntity ? raw['1.3.6.1.4.1.4329.6.3.2.1.1.2.0'] : undefined,
         )
         addTextField(
           fields,
           mergeFields,
           'hardwareVersion',
           primaryEntity?.hardwareRevision,
-          source === 'snmp' ? raw['1.3.6.1.4.1.4329.6.3.2.1.1.4.0'] : undefined,
+          source === 'snmp' && primaryEntity ? raw['1.3.6.1.4.1.4329.6.3.2.1.1.4.0'] : undefined,
         )
         addTextField(fields, mergeFields, 'firmwareVersion', primaryEntity?.firmwareRevision)
         if (source === 'arp') addTextField(fields, mergeFields, 'vendor', raw.ouiVendor)
         if (source === 'profinet-dcp') {
-          const pnio = array(raw.pnioRecords).map((item) => record(record(item).parsed))
-          const imRecords = pnio.flatMap((parsed) => array(parsed.im5Data).map(record))
+          const primary = array(raw.pnioRecords)
+            .map(record)
+            .find(
+              (item) =>
+                Number(item.api) === 0 &&
+                Number(item.slot) === 0 &&
+                Number(item.subslot) === 1 &&
+                text(item.index).toUpperCase() === '0xAFF0',
+            )
+          const parsed = record(primary?.parsed)
           addTextField(
             fields,
             mergeFields,
             'vendor',
             originalFields.manufacturer,
-            ...pnio.map((item) => item.manufacturerName),
-            ...imRecords.map((item) => item.vendorName),
-          )
-          addTextField(
-            fields,
-            mergeFields,
-            'serialNumber',
-            ...pnio.map((item) => item.serialNumber),
-            ...imRecords.map((item) => item.imSerialNumber),
-          )
-          addTextField(
-            fields,
-            mergeFields,
-            'catalogNumber',
-            ...pnio.map((item) => item.orderId),
-            ...imRecords.map((item) => item.imOrderId),
-          )
-          addTextField(
-            fields,
-            mergeFields,
-            'hardwareVersion',
-            ...pnio.map((item) => item.hardwareRevision),
-            ...imRecords.map((item) => item.imHardwareRevision),
+            parsed.manufacturerName,
           )
           addTextField(
             fields,
             mergeFields,
             'firmwareVersion',
             originalFields.softwareRevision,
-            ...pnio.map((item) => item.softwareRevision),
-            ...imRecords.map((item) => item.imSoftwareRevision),
+            parsed.softwareRevision,
           )
         }
         return {
@@ -289,9 +351,7 @@ export const parseOTserverOtter = (input: string): ImportResult => {
           quality: sources[source],
           raw: observation.raw,
           source,
-          warnings: array(observation.warnings).filter(
-            (item): item is string => typeof item === 'string',
-          ),
+          warnings: observation.warnings as string[],
         }
       },
     )
@@ -311,12 +371,18 @@ export const parseOTserverOtter = (input: string): ImportResult => {
   })
 
   const unresolved: unknown[] = []
-  for (const entry of array(root.unresolved)) {
+  for (const [index, entry] of array(root.unresolved).entries()) {
     const value = record(entry)
-    if (typeof value.observedAt !== 'string' || Number.isNaN(Date.parse(value.observedAt))) {
-      unresolved.push(entry)
-      continue
-    }
+    if (
+      !isRecord(entry) ||
+      typeof value.source !== 'string' ||
+      !isRecord(value.fields) ||
+      !Object.hasOwn(value, 'raw') ||
+      !isStringList(value.warnings)
+    )
+      throw new Error(`unresolved[${index}] is invalid.`)
+    if (!isDateTime(value.observedAt))
+      throw new Error(`unresolved[${index}].observedAt is invalid.`)
     const source =
       typeof value.source === 'string' && value.source in sources ? value.source : 'unknown'
     const evidence = expandPhysicalEvidence({
@@ -328,9 +394,7 @@ export const parseOTserverOtter = (input: string): ImportResult => {
           quality: sources[source],
           source,
           raw: value.raw,
-          warnings: array(value.warnings).filter(
-            (item): item is string => typeof item === 'string',
-          ),
+          warnings: value.warnings as string[],
         },
       ],
     }).filter((asset) => asset.identity)
@@ -344,14 +408,21 @@ export const parseOTserverOtter = (input: string): ImportResult => {
     const remote = record(link.remote)
     local.macAddress = mac(local.macAddress, `links[${index}].local.macAddress`)
     remote.macAddress = mac(remote.macAddress, `links[${index}].remote.macAddress`)
-    if (typeof link.observedAt !== 'string' || Number.isNaN(Date.parse(link.observedAt)))
-      throw new Error(`links[${index}].observedAt is invalid.`)
+    if (
+      !isRecord(entry) ||
+      typeof link.source !== 'string' ||
+      !isRecord(link.local) ||
+      !isRecord(link.remote) ||
+      !Object.hasOwn(link, 'raw')
+    )
+      throw new Error(`links[${index}] is invalid.`)
+    if (!isDateTime(link.observedAt)) throw new Error(`links[${index}].observedAt is invalid.`)
     return {
       local,
       observedAt: link.observedAt,
       raw: link.raw,
       remote,
-      source: typeof link.source === 'string' ? link.source : 'unknown',
+      source: ['lldp', 'profinet-dcp', 'snmp'].includes(link.source) ? link.source : 'unknown',
     }
   })
   return {
@@ -360,8 +431,6 @@ export const parseOTserverOtter = (input: string): ImportResult => {
     scanMetadata: { scan, scanner },
     sourceVersion: scanner.version,
     unresolved,
-    warnings: [...array(root.warnings), ...array(root.errors)].filter(
-      (item): item is string => typeof item === 'string',
-    ),
+    warnings: [...(root.warnings as string[]), ...(root.errors as string[])],
   }
 }

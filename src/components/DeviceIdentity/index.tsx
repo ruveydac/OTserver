@@ -22,53 +22,75 @@ export default async function DeviceIdentity({
 }) {
   const admin = payload.config.routes.admin
   const site = idOf(asset.site)
-  const authorization = await getAuthorization(await createLocalReq({ user }, payload))
-  const writable = authorization.isAdmin || authorization.writableSiteIDs.includes(site)
+  const showNetwork = view === 'all' || view === 'network'
+  const showHardware = view === 'all' || view === 'hardware'
+  const authorization = showHardware
+    ? await getAuthorization(await createLocalReq({ user }, payload))
+    : undefined
+  const writable = Boolean(
+    showHardware &&
+    authorization &&
+    (authorization.isAdmin || authorization.writableSiteIDs.includes(site)),
+  )
+  const isAdmin = authorization?.isAdmin ?? false
+  const writableSiteIDs = authorization?.writableSiteIDs ?? []
+  const emptyPage = { docs: [], hasNextPage: false }
   const [endpoints, services, identifiers, installations, cases, targets, sites] =
     await Promise.all([
-      payload.find({
-        collection: 'network-endpoints',
-        where: { asset: { equals: asset.id } },
-        depth: 1,
-        pagination: false,
-        overrideAccess: false,
-        user,
-      }),
-      payload.find({
-        collection: 'service-bindings',
-        where: { asset: { equals: asset.id } },
-        depth: 0,
-        pagination: false,
-        overrideAccess: false,
-        user,
-      }),
-      payload.find({
-        collection: 'asset-identifiers',
-        where: { asset: { equals: asset.id } },
-        depth: 0,
-        pagination: false,
-        overrideAccess: false,
-        user,
-      }),
-      payload.find({
-        collection: 'asset-installations',
-        where: { or: [{ parent: { equals: asset.id } }, { module: { equals: asset.id } }] },
-        depth: 1,
-        pagination: false,
-        overrideAccess: false,
-        user,
-      }),
-      payload.find({
-        collection: 'identity-cases',
-        where: { or: [{ asset: { equals: asset.id } }, { candidate: { equals: asset.id } }] },
-        depth: 0,
-        pagination: false,
-        overrideAccess: false,
-        user,
-      }),
+      showNetwork
+        ? payload.find({
+            collection: 'network-endpoints',
+            limit: 200,
+            where: { asset: { equals: asset.id } },
+            depth: 1,
+            overrideAccess: false,
+            user,
+          })
+        : Promise.resolve(emptyPage as never),
+      showNetwork
+        ? payload.find({
+            collection: 'service-bindings',
+            limit: 200,
+            where: { asset: { equals: asset.id } },
+            depth: 0,
+            overrideAccess: false,
+            user,
+          })
+        : Promise.resolve(emptyPage as never),
+      showHardware
+        ? payload.find({
+            collection: 'asset-identifiers',
+            limit: 200,
+            where: { asset: { equals: asset.id } },
+            depth: 0,
+            overrideAccess: false,
+            user,
+          })
+        : Promise.resolve(emptyPage as never),
+      showHardware
+        ? payload.find({
+            collection: 'asset-installations',
+            limit: 200,
+            where: { or: [{ parent: { equals: asset.id } }, { module: { equals: asset.id } }] },
+            depth: 1,
+            overrideAccess: false,
+            user,
+          })
+        : Promise.resolve(emptyPage as never),
+      showHardware
+        ? payload.find({
+            collection: 'identity-cases',
+            limit: 200,
+            where: { or: [{ asset: { equals: asset.id } }, { candidate: { equals: asset.id } }] },
+            depth: 0,
+            overrideAccess: false,
+            user,
+          })
+        : Promise.resolve(emptyPage as never),
       writable
         ? payload.find({
             collection: 'assets',
+            limit: 200,
             where: {
               and: [
                 { site: { equals: site } },
@@ -77,27 +99,31 @@ export default async function DeviceIdentity({
               ],
             },
             depth: 0,
-            pagination: false,
             overrideAccess: false,
             user,
           })
-        : Promise.resolve({ docs: [] }),
+        : Promise.resolve(emptyPage as never),
       writable
         ? payload.find({
             collection: 'sites',
-            where: authorization.isAdmin ? {} : { id: { in: authorization.writableSiteIDs } },
+            limit: 200,
+            where: isAdmin ? {} : { id: { in: writableSiteIDs } },
             depth: 0,
-            pagination: false,
             overrideAccess: false,
             user,
           })
-        : Promise.resolve({ docs: [] }),
+        : Promise.resolve(emptyPage as never),
     ])
   const recordLink = (collection: string, id: string, label: string) => (
     <Link href={`${admin}/collections/${collection}/${id}`}>{label}</Link>
   )
-  const showNetwork = view === 'all' || view === 'network'
-  const showHardware = view === 'all' || view === 'hardware'
+  const panelTruncated =
+    endpoints.hasNextPage ||
+    services.hasNextPage ||
+    identifiers.hasNextPage ||
+    installations.hasNextPage ||
+    cases.hasNextPage
+  const actionChoicesTruncated = targets.hasNextPage || sites.hasNextPage
 
   return (
     <section className="asset-view__section asset-view__section--wide device-identity">
@@ -118,6 +144,10 @@ export default async function DeviceIdentity({
       ) : null}
       {asset.replacedBy ? (
         <p>Replaced by {recordLink('assets', idOf(asset.replacedBy), idOf(asset.replacedBy))}.</p>
+      ) : null}
+      {panelTruncated ? <p role="status">Showing the first 200 related identity records.</p> : null}
+      {actionChoicesTruncated ? (
+        <p role="status">Action selectors show the first 200 matching assets or sites.</p>
       ) : null}
       {showHardware ? (
         <>

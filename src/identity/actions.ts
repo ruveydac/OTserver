@@ -389,11 +389,20 @@ export const performIdentityAction = async (
       ...(target ? { relatedAsset: target.id } : {}),
       selection: input,
     }
-    await writeAudit({ action: 'custom', after: event, req, targetCollection: 'assets' })
+    await writeAudit({
+      action: 'custom',
+      after: event,
+      assetID: id,
+      siteID: idOf(source.site),
+      req,
+      targetCollection: 'assets',
+    })
     if (target)
       await writeAudit({
         action: 'custom',
         after: { ...event, id: target.id, asset: target.id, relatedAsset: id },
+        assetID: target.id,
+        siteID: idOf(target.site),
         req,
         targetCollection: 'assets',
       })

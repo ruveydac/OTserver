@@ -26,7 +26,7 @@ import {
   requireSiteWriter,
   retryImport,
 } from '../application/queuedImports'
-import { withRequestContext } from '../integrations/payload/context'
+import { assertCurrentOtterRunLease } from '../otter/runLease'
 export { getAssetOverrides } from '../application/processImport'
 
 const MAX_DIAGNOSTICS_LENGTH = 4_000_000
@@ -52,9 +52,7 @@ const bindOtterUpload: CollectionBeforeValidateHook = ({ data, operation, req })
 const runImport: CollectionAfterChangeHook = async ({ context, doc, req, operation }) => {
   if (context.skipAssetImport || !req.file) return doc
   if (doc.executionMode === 'queued') return operation === 'create' ? queueImport(doc, req) : doc
-  return withRequestContext(req, { importWrite: true }, () =>
-    processImport({ doc, data: req.file!.data, req }),
-  )
+  return processImport({ doc, data: req.file.data, req })
 }
 
 const managed = [
@@ -132,6 +130,13 @@ const protectProcessing: CollectionBeforeChangeHook = async ({
     delete data.assetOverrides
     delete data.customFieldOverrides
     const runID = scannerRunID
+    const scanner = await req.payload.findByID({
+      collection: 'otter-scanners',
+      id: scannerID,
+      depth: 0,
+      overrideAccess: true,
+      req,
+    })
     if (runID) {
       const run = await req.payload.findByID({
         collection: 'otter-runs',
@@ -143,12 +148,13 @@ const protectProcessing: CollectionBeforeChangeHook = async ({
       if (
         String(relationshipID(run.scanner)) !== scannerID ||
         String(relationshipID(run.site)) !== siteID ||
-        !['assigned', 'running', 'cancel-requested'].includes(run.status)
+        !['assigned', 'running'].includes(run.status)
       )
         throw new APIError(
           'The scan run does not belong to this scanner or is no longer active.',
           409,
         )
+      assertCurrentOtterRunLease(run, scanner, new Date())
       data.otterRun = String(runID)
       const snapshot = run.importOverridesSnapshot
       if (snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)) {
@@ -158,13 +164,6 @@ const protectProcessing: CollectionBeforeChangeHook = async ({
     } else {
       delete data.otterRun
     }
-    const scanner = await req.payload.findByID({
-      collection: 'otter-scanners',
-      id: scannerID,
-      depth: 0,
-      overrideAccess: true,
-      req,
-    })
     const site = await req.payload.findByID({
       collection: 'sites',
       id: siteID,
@@ -472,6 +471,6 @@ export const AssetImports: CollectionConfig = {
     bulkUpload: false,
     mimeTypes: ['application/json', 'application/xml', 'text/json', 'text/plain', 'text/xml'],
     pasteURL: false,
-    staticDir: 'import-files',
+    staticDir: process.env.OTSERVER_TEST_UPLOAD_DIR || 'import-files',
   },
 }

@@ -321,31 +321,36 @@ export const validateInstallation: CollectionBeforeChangeHook = async ({
 }
 
 export const assetHistoryScope = async (assetID: string, payload: Payload, user?: TypedUser) => {
+  const limit = 200
   const ids = new Set([assetID])
   let pending = [assetID]
-  while (pending.length) {
+  let truncated = false
+  while (pending.length && ids.size < limit) {
     const aliases = await payload.find({
       collection: 'assets',
       depth: 0,
-      pagination: false,
+      limit: Math.max(1, limit - ids.size),
       overrideAccess: false,
       user,
       where: { mergedInto: { in: pending } },
     })
+    truncated ||= aliases.hasNextPage
     pending = aliases.docs.map(({ id }) => id).filter((id) => !ids.has(id))
     for (const id of pending) ids.add(id)
   }
+  if (pending.length) truncated = true
   const endpoints = await payload.find({
     collection: 'network-endpoints',
     depth: 0,
-    pagination: false,
+    limit,
     overrideAccess: false,
     user,
     where: { asset: { in: [...ids] } },
   })
+  truncated ||= endpoints.hasNextPage
   const assets: Where = { asset: { in: [...ids] } }
   const observations: Where = {
     or: [assets, { endpoint: { in: endpoints.docs.map(({ id }) => id) } }],
   }
-  return { assets, observations }
+  return { assets, observations, truncated }
 }

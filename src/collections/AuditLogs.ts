@@ -22,6 +22,15 @@ type Document = Record<string, unknown>
 
 const ignoredFields = new Set(['collection', 'createdAt', 'id', 'updatedAt'])
 const sensitiveField = /api[-_]?key|community|credential|hash|password|salt|secret|session|token/i
+const assetSubjectFields: Record<string, string[]> = {
+  'asset-identifiers': ['asset'],
+  'asset-installations': ['module', 'parent'],
+  'asset-observations': ['asset'],
+  'identity-cases': ['asset', 'candidate'],
+  'network-endpoints': ['asset'],
+  'service-bindings': ['asset'],
+  'topology-links': ['localAsset', 'remoteAsset'],
+}
 
 const canReadAuditLogs: Access = async ({ req }) => {
   const authorization = await getAuthorization(req)
@@ -69,13 +78,17 @@ export const writeAudit = async ({
   action,
   after,
   before,
+  assetID: explicitAssetID,
   req,
+  siteID: explicitSiteID,
   targetCollection,
 }: {
   action: AuditAction
   after?: unknown
+  assetID?: string
   before?: unknown
   req: PayloadRequest
+  siteID?: string
   targetCollection: string
 }) => {
   const document = clean(after ?? before)
@@ -84,11 +97,17 @@ export const writeAudit = async ({
     typeof req.context.otterScannerID === 'string' ? req.context.otterScannerID : undefined
   const documentID = document.id === undefined ? undefined : String(document.id)
   const documentLabel = labelFor(document)
-  const relatedAsset = relationshipID(
-    document.asset ?? document.localAsset ?? document.module ?? document.parent,
-  )
+  const relatedAsset = assetSubjectFields[targetCollection]
+    ?.map((field) => relationshipID(document[field]))
+    .find(Boolean)
   const assetID =
-    targetCollection === 'assets' ? documentID : relatedAsset ? String(relatedAsset) : undefined
+    explicitAssetID ||
+    (targetCollection === 'assets'
+      ? documentID
+      : relatedAsset === undefined
+        ? undefined
+        : String(relatedAsset))
+  const siteID = explicitSiteID || relationshipID(document.site)
   const forwardedFor = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
   const requestPath = req.url ? new URL(req.url, 'http://local').pathname : undefined
 
@@ -96,7 +115,7 @@ export const writeAudit = async ({
     collection: 'audit-logs',
     data: {
       action,
-      ...(relationshipID(document.site) ? { site: relationshipID(document.site) as string } : {}),
+      ...(siteID ? { site: siteID as string } : {}),
       actorEmail: !scannerID && typeof actor.email === 'string' ? actor.email : undefined,
       actorID: scannerID || (actor.id === undefined ? undefined : String(actor.id)),
       actorName: scannerID
