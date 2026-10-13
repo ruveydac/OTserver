@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   documentID: undefined as string | undefined,
+  documentCanUpdate: true,
   authPermissions: undefined as
     { collections?: Record<string, { read?: boolean; create?: boolean }> } | undefined,
   fieldValue: {} as Record<string, boolean | number | string> | boolean | string,
@@ -16,8 +17,15 @@ const mocks = vi.hoisted(() => ({
     throw new Error('redirect')
   }),
   collectionSlug: undefined as string | undefined,
+  modalOpen: true,
+  pathname: '/admin/otters',
   query: {} as { search?: string; where?: Record<string, unknown> },
   refineListData: vi.fn(),
+  formFields: {} as {
+    name?: { value: unknown }
+    site?: { value: unknown }
+    scanner?: { value: unknown }
+  },
   selection: { count: 0, getQueryParams: vi.fn(() => ''), selectAll: 'none' } as {
     count: number
     getQueryParams: () => string
@@ -91,13 +99,26 @@ vi.mock('@payloadcms/ui', async () => {
     useDocumentInfo: () => ({
       id: mocks.documentID,
       collectionSlug: mocks.collectionSlug,
-      docPermissions: { update: true },
+      docPermissions: { update: mocks.documentCanUpdate },
     }),
     useField: () => ({ setValue: mocks.setValue, value: mocks.fieldValue }),
-    useFormFields: (selector: (state: [{ scanner?: { value: string } }]) => unknown) =>
-      selector([{ scanner: { value: 'scanner-1' } }]),
+    useFormFields: (
+      selector: (
+        state: [
+          {
+            name?: { value: unknown }
+            site?: { value: unknown }
+            scanner?: { value: unknown }
+          },
+        ],
+      ) => unknown,
+    ) => selector([mocks.formFields]),
     useListQuery: () => ({ query: mocks.query, refineListData: mocks.refineListData }),
-    useModal: () => ({ openModal: mocks.openModal, closeModal: vi.fn(), isModalOpen: () => true }),
+    useModal: () => ({
+      openModal: mocks.openModal,
+      closeModal: vi.fn(),
+      isModalOpen: () => mocks.modalOpen,
+    }),
     useSelection: () => mocks.selection,
     useAuth: () => ({ permissions: mocks.authPermissions }),
     useConfig: () => ({ config: { routes: { admin: '/admin' } } }),
@@ -106,7 +127,7 @@ vi.mock('@payloadcms/ui', async () => {
 
 vi.mock('next/navigation', () => ({
   redirect: mocks.redirect,
-  usePathname: () => '/admin/otters',
+  usePathname: () => mocks.pathname,
   useRouter: () => ({ push: mocks.push, refresh: mocks.refresh }),
 }))
 vi.mock('next/link', async () => {
@@ -135,8 +156,10 @@ import OtterInterfaceField from '../../src/components/OtterInterfaceField'
 import OtterManagementView from '../../src/components/OtterManagementView'
 import OtterManagement from '../../src/components/OtterManagementView/view'
 import OtterNavLink from '../../src/components/OtterNavLink'
-import OtterEnrollment from '../../src/components/OtterEnrollment'
+import OtterEnrollment, { otterAction } from '../../src/components/OtterEnrollment'
 import OtterScannerActions from '../../src/components/OtterScannerActions'
+import OtterManagedSettingsField from '../../src/components/OtterManagedSettingsField'
+import TopologyNavLink from '../../src/components/TopologyNavLink'
 
 let container: HTMLDivElement
 let root: Root
@@ -148,16 +171,26 @@ const render = async (component: React.ReactNode) => {
   })
 }
 
+const renderFresh = async (component: React.ReactNode) => {
+  await act(async () => root.unmount())
+  root = createRoot(container)
+  await render(component)
+}
+
 beforeEach(() => {
   ;(
     globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
   ).IS_REACT_ACT_ENVIRONMENT = true
   vi.clearAllMocks()
   mocks.documentID = undefined
+  mocks.documentCanUpdate = true
   mocks.collectionSlug = undefined
   mocks.authPermissions = undefined
   mocks.fieldValue = {}
   mocks.query = {}
+  mocks.formFields = { scanner: { value: 'scanner-1' } }
+  mocks.modalOpen = true
+  mocks.pathname = '/admin/otters'
   mocks.selection = { count: 0, getQueryParams: vi.fn(() => ''), selectAll: 'none' }
   window.localStorage.clear()
   container = document.createElement('div')
@@ -1047,5 +1080,312 @@ describe('Otter management overview', () => {
     await act(async () => new Promise((resolve) => setTimeout(resolve, 0)))
     expect(signal?.aborted).toBe(true)
     expect(container.textContent).not.toContain('AbortError')
+  })
+})
+
+describe('remaining Otter component states', () => {
+  it('renders controller-owned settings for selected and unresolved values', async () => {
+    let overview: {
+      controllerUrl?: string
+      sites?: Array<{ id: string; name: string }>
+      scanners?: Array<{ id: string; enabled: boolean; enrolled: boolean }>
+    } = {
+      controllerUrl: 'https://otserver.example',
+      sites: [{ id: 'site-1', name: 'Plant' }],
+      scanners: [{ id: 'scanner-1', enabled: true, enrolled: true }],
+    }
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => overview }))
+    vi.stubGlobal('fetch', fetchMock)
+    const field = createElement(OtterManagedSettingsField)
+
+    mocks.formFields = {
+      name: { value: 'Production' },
+      site: { value: { value: 'site-1' } },
+      scanner: { value: { value: 'scanner-1' } },
+    }
+    await render(field)
+    expect(container.textContent).toContain('Production')
+    expect(container.textContent).toContain('Plant')
+    expect(container.textContent).toContain('https://otserver.example')
+    expect(container.textContent).toContain('Enrolled machine credential')
+
+    overview = {
+      sites: [],
+      scanners: [{ id: 'scanner-1', enabled: false, enrolled: true }],
+    }
+    mocks.formFields = {
+      name: { value: 3 },
+      site: { value: 'deleted-site' },
+      scanner: { value: 'scanner-1' },
+    }
+    await renderFresh(field)
+    expect(container.textContent).toContain('Enter a profile name')
+    expect(container.textContent).toContain('deleted-site')
+    expect(container.textContent).toContain('Scanner is disabled')
+    expect(container.textContent).toContain('Set OTSERVER_PUBLIC_URL')
+
+    overview = { scanners: [{ id: 'scanner-1', enabled: true, enrolled: false }] }
+    mocks.formFields = { site: { value: '' }, scanner: { value: 'scanner-1' } }
+    await renderFresh(field)
+    expect(container.textContent).toContain('Select a site')
+    expect(container.textContent).toContain('Awaiting enrollment')
+
+    mocks.formFields = {}
+    fetchMock.mockResolvedValueOnce({ ok: false, json: async () => ({}) })
+    await renderFresh(field)
+    expect(container.textContent).toContain('Available after choosing a scanner')
+    expect(container.textContent).toContain('Select a site')
+
+    fetchMock.mockRejectedValueOnce('offline')
+    await renderFresh(field)
+    expect(container.textContent).toContain('Available after choosing a scanner')
+  })
+
+  it('shows adapter fallbacks and keeps manual interface names usable', async () => {
+    mocks.collectionSlug = 'otter-scanners'
+    mocks.documentID = 'scanner-2'
+    mocks.fieldValue = 'eth9'
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }))
+    const field = createElement(OtterInterfaceField, { field: {}, path: 'interface' } as never)
+    await render(field)
+    expect(fetch).toHaveBeenCalledWith('/api/otter/v1/overview', expect.anything())
+    expect(container.textContent).toContain('eth9 · not currently reported')
+    expect(container.textContent).toContain('not currently reported; its name is preserved')
+
+    const input = container.querySelector<HTMLInputElement>('input')!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, 'eth8')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect(mocks.setValue).toHaveBeenCalledWith('eth8')
+
+    const select = container.querySelector('select')!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(select, '')
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(mocks.setValue).toHaveBeenCalledWith('')
+
+    mocks.collectionSlug = undefined
+    mocks.documentID = undefined
+    mocks.formFields = { scanner: { value: { value: 'scanner-3' } } }
+    mocks.fieldValue = 'eth0'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          scanners: [
+            {
+              id: 'scanner-3',
+              networkAdapters: [
+                { name: 'eth0', friendlyName: 'LAN', description: 'Local', ipAddresses: [] },
+              ],
+            },
+          ],
+        }),
+      }),
+    )
+    await renderFresh(field)
+    expect(container.textContent).toContain('LAN · no IP · no MAC')
+    expect(container.textContent).toContain('MAC not reported · No IP addresses')
+  })
+
+  it('shows the topology nav indicator only on its route', async () => {
+    const link = createElement(TopologyNavLink)
+    await render(link)
+    expect(container.querySelector('.nav__link-indicator')).toBeNull()
+
+    mocks.pathname = '/admin/topology'
+    await renderFresh(link)
+    expect(container.querySelector('.nav__link-indicator')).not.toBeNull()
+  })
+
+  it('updates multiple SNMP and OPC UA credential rows independently', async () => {
+    mocks.documentID = 'profile-1'
+    mocks.fieldValue = false
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ credentialsConfigured: true }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    await render(createElement(OtterCredentialsField))
+
+    const click = async (label: string) => {
+      const button = [...container.querySelectorAll('button')].find((entry) =>
+        entry.textContent?.includes(label),
+      )!
+      await act(async () => button.click())
+    }
+    const setLabelInput = async (label: HTMLLabelElement, value: string) => {
+      const input = label.querySelector<HTMLInputElement>('input')!
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(
+          input,
+          value,
+        )
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+    }
+    const setSelect = async (select: HTMLSelectElement, value: string) => {
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(
+          select,
+          value,
+        )
+        select.dispatchEvent(new Event('change', { bubbles: true }))
+      })
+    }
+
+    await click('Add SNMP credential')
+    await click('Add SNMP credential')
+    const snmpSelects = container.querySelectorAll<HTMLSelectElement>(
+      '.otter-credentials__section select',
+    )
+    await setSelect(snmpSelects[0]!, 'auto')
+    await setSelect(snmpSelects[1]!, 'sha256')
+    await setSelect(snmpSelects[2]!, 'aes128')
+    for (const [label, value] of [
+      ['Community', 'private'],
+      ['Username', 'snmp-user'],
+      ['Context name', 'engineering'],
+      ['Authentication password', 'auth-secret'],
+      ['Privacy password', 'privacy-secret'],
+    ]) {
+      const field = [...container.querySelectorAll('label')].find((entry) =>
+        entry.textContent?.trim().startsWith(label),
+      )!
+      await setLabelInput(field, value)
+    }
+
+    await click('Add OPC UA credential')
+    await click('Add OPC UA credential')
+    const opcuaSection = container.querySelectorAll('.otter-credentials__section')[1]!
+    const opcuaUsername = [...opcuaSection.querySelectorAll('label')].find((entry) =>
+      entry.textContent?.trim().startsWith('Username'),
+    )!
+    const opcuaPassword = [...opcuaSection.querySelectorAll('label')].find((entry) =>
+      entry.textContent?.trim().startsWith('Password'),
+    )!
+    await setLabelInput(opcuaUsername, 'operator')
+    await setLabelInput(opcuaPassword, 'opcua-secret')
+
+    for (const label of ['Remove SNMP credential', 'Remove OPC UA credential']) {
+      const remove = [...container.querySelectorAll('button')].filter((entry) =>
+        entry.textContent?.includes(label),
+      )[1]!
+      await act(async () => remove.click())
+    }
+    await click('Encrypt and save credentials')
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      credentials: {
+        snmp: [
+          {
+            version: 'auto',
+            community: 'private',
+            username: 'snmp-user',
+            contextName: 'engineering',
+            authProtocol: 'sha256',
+            authPassword: 'auth-secret',
+            privacyProtocol: 'aes128',
+            privacyPassword: 'privacy-secret',
+          },
+        ],
+        opcuaCredentials: [{ username: 'operator', password: 'opcua-secret' }],
+      },
+    })
+    expect(container.textContent).toContain('Credentials encrypted and saved')
+  })
+
+  it('handles enrollment permission, loading, and response error paths', async () => {
+    const enrollment = createElement(OtterEnrollment)
+    const fetchMock = vi.fn().mockRejectedValue('offline')
+    vi.stubGlobal('fetch', fetchMock)
+    mocks.modalOpen = false
+    await render(enrollment)
+    expect(container.textContent).toBe('')
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    mocks.authPermissions = { collections: { 'otter-profiles': { create: true } } }
+    mocks.modalOpen = false
+    await renderFresh(enrollment)
+    expect(fetchMock).not.toHaveBeenCalled()
+    await act(async () =>
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Create New')!
+        .click(),
+    )
+    expect(mocks.openModal).toHaveBeenCalledWith('otter-scanner-enrollment')
+    mocks.modalOpen = true
+    await renderFresh(enrollment)
+    expect(container.textContent).toContain('Could not load sites.')
+
+    const actions = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ accepted: true }) })
+      .mockResolvedValueOnce({ ok: false, json: async () => ({ message: 'Enrollment rejected.' }) })
+      .mockResolvedValueOnce({ ok: false, json: async () => ({}) })
+    vi.stubGlobal('fetch', actions)
+    await expect(otterAction('/api/ok')).resolves.toEqual({ accepted: true })
+    await expect(otterAction('/api/denied')).rejects.toThrow('Enrollment rejected.')
+    await expect(otterAction('/api/unknown')).rejects.toThrow('The Otter action failed.')
+    expect(actions.mock.calls[0]?.[1]).toMatchObject({ method: 'POST' })
+    expect(actions.mock.calls[0]?.[1]).not.toHaveProperty('body')
+  })
+
+  it('handles scanner re-enrollment, revocation, and non-Error failures', async () => {
+    const actions = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          enrollmentToken: 'new-token',
+          expiresAt: new Date().toISOString(),
+          controllerUrl: 'https://otserver.example',
+        }),
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ status: 'revoked' }) })
+      .mockRejectedValueOnce('offline')
+    vi.stubGlobal('fetch', actions)
+    const component = createElement(OtterScannerActions)
+
+    await render(component)
+    expect(container.textContent).toBe('')
+    mocks.documentID = 'scanner-1'
+    mocks.documentCanUpdate = false
+    await renderFresh(component)
+    expect(container.textContent).toBe('')
+
+    mocks.documentCanUpdate = true
+    mocks.collectionSlug = 'otter-scanners'
+    await renderFresh(component)
+    const click = async (label: string) => {
+      const button = [...container.querySelectorAll('button')].find((entry) =>
+        entry.textContent?.includes(label),
+      )!
+      await act(async () => button.click())
+    }
+    await click('Re-enroll')
+    const confirmation = [...container.querySelectorAll('button')].filter(
+      (entry) => entry.textContent === 'Confirm',
+    )[0]!
+    await act(async () => confirmation.click())
+    expect(container.textContent).toContain('new-token')
+
+    await click('Revoke')
+    const confirmations = [...container.querySelectorAll('button')].filter(
+      (entry) => entry.textContent === 'Confirm',
+    )
+    await act(async () => confirmations[1]!.click())
+    expect(container.textContent).toContain('Scanner credential revoked.')
+
+    await click('Revoke')
+    const retryConfirmations = [...container.querySelectorAll('button')].filter(
+      (entry) => entry.textContent === 'Confirm',
+    )
+    await act(async () => retryConfirmations[1]!.click())
+    expect(container.textContent).toContain('The action failed.')
+    expect(mocks.refresh).toHaveBeenCalled()
   })
 })
