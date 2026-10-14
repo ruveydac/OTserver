@@ -305,10 +305,13 @@ describe.skipIf(!process.env.OTTER_CLIENT_BIN)('Rust controller interoperability
           status: 'failed',
           message: 'The selected network interface is not available on this scanner.',
         })
-      expect(requests).toContainEqual({
-        path: `/api/otter/v1/runs/${failedRun.id}/finish`,
-        status: 200,
-      })
+      // The run update can become visible before the finish handler returns its response.
+      await expect
+        .poll(() => requests, { timeout: 15_000 })
+        .toContainEqual({
+          path: `/api/otter/v1/runs/${failedRun.id}/finish`,
+          status: 200,
+        })
       expect(requests.filter(({ path }) => path === '/api/asset-imports')).toHaveLength(1)
       expect(output).not.toContain(scanner.enrollmentToken)
       expect(output).not.toContain(saved.fileCredential!.credential)
