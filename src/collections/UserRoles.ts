@@ -43,6 +43,8 @@ export const ensureAdminRole = async (payload: Payload, req?: PayloadRequest) =>
     depth: 0,
     limit: 1,
     overrideAccess: true,
+    // This can be the first migration transaction command; do not race a pagination count.
+    pagination: false,
     req,
     where: {
       or: [{ isAdmin: { equals: true } }, { name: { equals: ADMIN_ROLE_NAME } }],

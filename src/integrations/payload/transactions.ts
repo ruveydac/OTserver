@@ -17,6 +17,7 @@ export const primeTransaction = async (req: PayloadRequest) => {
     collection: 'audit-logs',
     limit: 1,
     depth: 0,
+    pagination: false,
     select: { action: true },
     overrideAccess: true,
     req,

@@ -114,6 +114,7 @@ export const ensureAssetClass = async (payload: Payload, key: string, req?: Payl
     depth: 0,
     limit: 1,
     overrideAccess: true,
+    pagination: false,
     req,
     where: { legacyKey: { equals: definition.key } },
   })
