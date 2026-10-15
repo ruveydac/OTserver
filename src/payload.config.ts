@@ -13,6 +13,7 @@ import { initializeAuthorization, UserRoles } from './collections/UserRoles'
 import { Users } from './collections/Users'
 import { TopologyLinks } from './collections/TopologyLinks'
 import { Vulnerabilities, VulnerabilityFeeds } from './collections/Vulnerabilities'
+import { VulnerabilityFeedUploads } from './collections/VulnerabilityFeedUploads'
 import { MAX_IMPORT_FILE_SIZE } from './importers/proneta'
 import { MAX_OTTER_IMPORT_FILE_SIZE } from './importers/otserverOtter'
 import { jobs } from './jobs/config'
@@ -106,6 +107,7 @@ export default buildConfig({
     TopologyLinks,
     Vulnerabilities,
     VulnerabilityFeeds,
+    VulnerabilityFeedUploads,
     AuditLogs,
     WorkerLeases,
     WorkerHeartbeats,

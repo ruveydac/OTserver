@@ -1,13 +1,15 @@
 import type { Payload } from 'payload'
 import { syncVulnerabilityFeeds, SYNC_INTERVAL_MS } from '../vulnerabilities/feeds'
 import { systemRequest } from '../integrations/payload/requests'
+import { removeExpiredFeedUploads } from '../vulnerabilities/offline'
 
 export { SYNC_INTERVAL_MS }
 export const TRASH_RETENTION_DAYS = 90
 
 export const runMaintenance = async (payload: Payload) => {
+  await removeExpiredFeedUploads(payload)
   if (process.env.OTSERVER_VULNERABILITY_FEEDS !== 'off') {
-    await syncVulnerabilityFeeds(payload, { force: true, failOnSourceError: true })
+    await syncVulnerabilityFeeds(payload, { failOnSourceError: true })
   }
   const cutoff = new Date(Date.now() - TRASH_RETENTION_DAYS * 86_400_000).toISOString()
   for (;;) {

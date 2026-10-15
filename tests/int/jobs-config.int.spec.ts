@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   executeImport: vi.fn(),
   maintenance: vi.fn(),
   reapplyAssetClasses: vi.fn(),
+  feeds: vi.fn(),
   worker: undefined as undefined | { queue: string },
 }))
 
@@ -19,6 +20,8 @@ vi.mock('../../src/jobs/maintenance', () => ({
 vi.mock('../../src/collections/AssetClasses', () => ({
   reapplyAssetClassRules: mocks.reapplyAssetClasses,
 }))
+
+vi.mock('../../src/vulnerabilities/actions', () => ({ executeFeedUpdate: mocks.feeds }))
 
 vi.mock('../../src/integrations/payload/workerContext', () => ({
   currentWorker: () => mocks.worker,
@@ -36,7 +39,10 @@ const request = () => ({
   payload: { logger: { info: vi.fn(), warn: vi.fn() } },
 })
 
-const handler = (index: number) => jobs.tasks![index]!.handler as unknown as Handler
+const handler = (index: number) =>
+  jobs.tasks!.find(
+    (task) => task.slug === ['import-v1', 'maintenance-v1', 'reapply-asset-classes-v1'][index],
+  )!.handler as unknown as Handler
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -47,6 +53,28 @@ beforeEach(() => {
 })
 
 describe('Payload job configuration', () => {
+  it('runs feed work only on the versioned maintenance task and preserves transient retries', async () => {
+    const run = jobs.tasks!.find((task) => task.slug === 'vulnerability-feed-sync-v1')!
+      .handler as unknown as Handler
+    const req = request()
+    const args = {
+      input: { version: 1, method: 'online', submittedBy: 'admin' },
+      job: { id: 'feed-job' },
+      req,
+    }
+    await expect(run(args)).rejects.toBeInstanceOf(JobCancelledError)
+    mocks.worker = { queue: 'maintenance' }
+    await expect(run({ ...args, input: { ...args.input, version: 2 } })).rejects.toBeInstanceOf(
+      JobCancelledError,
+    )
+    expect(await run(args)).toEqual({ output: {} })
+    expect(mocks.feeds).toHaveBeenCalledWith(req.payload, args.input)
+    const transient = Object.assign(new Error('Connection reset'), { code: 'ECONNRESET' })
+    mocks.feeds.mockRejectedValueOnce(transient)
+    await expect(run(args)).rejects.toBe(transient)
+    mocks.feeds.mockRejectedValueOnce(Object.assign(new Error('Invalid feed'), { status: 400 }))
+    await expect(run(args)).rejects.toBeInstanceOf(JobCancelledError)
+  })
   it('keeps the raw queue operations private and audits its collection', async () => {
     expect(await jobs.access!.run!({} as never)).toBe(false)
     expect(await jobs.access!.queue!({} as never)).toBe(false)

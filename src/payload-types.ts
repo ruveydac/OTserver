@@ -87,6 +87,7 @@ export interface Config {
     'topology-links': TopologyLink;
     vulnerabilities: Vulnerability;
     'vulnerability-feeds': VulnerabilityFeed;
+    'vulnerability-feed-uploads': VulnerabilityFeedUpload;
     'audit-logs': AuditLog;
     'worker-leases': WorkerLease;
     'worker-heartbeats': WorkerHeartbeat;
@@ -118,6 +119,7 @@ export interface Config {
     'topology-links': TopologyLinksSelect<false> | TopologyLinksSelect<true>;
     vulnerabilities: VulnerabilitiesSelect<false> | VulnerabilitiesSelect<true>;
     'vulnerability-feeds': VulnerabilityFeedsSelect<false> | VulnerabilityFeedsSelect<true>;
+    'vulnerability-feed-uploads': VulnerabilityFeedUploadsSelect<false> | VulnerabilityFeedUploadsSelect<true>;
     'audit-logs': AuditLogsSelect<false> | AuditLogsSelect<true>;
     'worker-leases': WorkerLeasesSelect<false> | WorkerLeasesSelect<true>;
     'worker-heartbeats': WorkerHeartbeatsSelect<false> | WorkerHeartbeatsSelect<true>;
@@ -140,6 +142,7 @@ export interface Config {
   user: User;
   jobs: {
     tasks: {
+      'vulnerability-feed-sync-v1': TaskVulnerabilityFeedSyncV1;
       'import-v1': TaskImportV1;
       'maintenance-v1': TaskMaintenanceV1;
       'reapply-asset-classes-v1': TaskReapplyAssetClassesV1;
@@ -1010,7 +1013,7 @@ export interface Vulnerability {
   createdAt: string;
 }
 /**
- * Synchronization state of the downloaded vulnerability catalogs.
+ * Update the local vulnerability catalogs online or import original files transferred from a connected computer.
  *
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "vulnerability-feeds".
@@ -1018,7 +1021,7 @@ export interface Vulnerability {
 export interface VulnerabilityFeed {
   id: string;
   source: string;
-  status: 'idle' | 'running' | 'ready' | 'partial' | 'failed';
+  status: 'idle' | 'queued' | 'running' | 'ready' | 'partial' | 'failed';
   lastSyncedAt?: string | null;
   documentCount?: number | null;
   catalogVersion?: string | null;
@@ -1033,8 +1036,35 @@ export interface VulnerabilityFeed {
     | number
     | boolean
     | null;
+  jobID?: string | null;
+  lastImportMethod?: ('online' | 'offline') | null;
+  operationRevision?: number | null;
   updatedAt: string;
   createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "vulnerability-feed-uploads".
+ */
+export interface VulnerabilityFeedUpload {
+  id: string;
+  source: 'cisa-kev' | 'nvd' | 'ics-advisories' | 'csaf';
+  batchID: string;
+  relativePath: string;
+  sourceURL?: string | null;
+  originalName: string;
+  digest: string;
+  updatedAt: string;
+  createdAt: string;
+  url?: string | null;
+  thumbnailURL?: string | null;
+  filename?: string | null;
+  mimeType?: string | null;
+  filesize?: number | null;
+  width?: number | null;
+  height?: number | null;
+  focalX?: number | null;
+  focalY?: number | null;
 }
 /**
  * Immutable history of inventory, configuration, and authentication changes.
@@ -1167,7 +1197,7 @@ export interface PayloadJob {
     | {
         executedAt: string;
         completedAt: string;
-        taskSlug: 'inline' | 'import-v1' | 'maintenance-v1' | 'reapply-asset-classes-v1';
+        taskSlug: 'inline' | 'vulnerability-feed-sync-v1' | 'import-v1' | 'maintenance-v1' | 'reapply-asset-classes-v1';
         taskID: string;
         input?:
           | {
@@ -1200,7 +1230,8 @@ export interface PayloadJob {
         id?: string | null;
       }[]
     | null;
-  taskSlug?: ('inline' | 'import-v1' | 'maintenance-v1' | 'reapply-asset-classes-v1') | null;
+  taskSlug?:
+    ('inline' | 'vulnerability-feed-sync-v1' | 'import-v1' | 'maintenance-v1' | 'reapply-asset-classes-v1') | null;
   queue?: string | null;
   waitUntil?: string | null;
   processing?: boolean | null;
@@ -1261,6 +1292,10 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'users';
         value: string | User;
+      } | null)
+    | ({
+        relationTo: 'vulnerability-feed-uploads';
+        value: string | VulnerabilityFeedUpload;
       } | null)
     | ({
         relationTo: 'worker-leases';
@@ -1826,8 +1861,34 @@ export interface VulnerabilityFeedsSelect<T extends boolean = true> {
   dateReleased?: T;
   error?: T;
   state?: T;
+  jobID?: T;
+  lastImportMethod?: T;
+  operationRevision?: T;
   updatedAt?: T;
   createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "vulnerability-feed-uploads_select".
+ */
+export interface VulnerabilityFeedUploadsSelect<T extends boolean = true> {
+  source?: T;
+  batchID?: T;
+  relativePath?: T;
+  sourceURL?: T;
+  originalName?: T;
+  digest?: T;
+  updatedAt?: T;
+  createdAt?: T;
+  url?: T;
+  thumbnailURL?: T;
+  filename?: T;
+  mimeType?: T;
+  filesize?: T;
+  width?: T;
+  height?: T;
+  focalX?: T;
+  focalY?: T;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -1958,6 +2019,29 @@ export interface CollectionsWidget {
     [k: string]: unknown;
   };
   width: 'full';
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskVulnerability-feed-sync-v1".
+ */
+export interface TaskVulnerabilityFeedSyncV1 {
+  input: {
+    version: number;
+    method: 'online' | 'offline';
+    submittedBy: string;
+    source?: ('cisa-kev' | 'nvd' | 'ics-advisories' | 'csaf') | null;
+    batchID?: string | null;
+    uploadIDs?:
+      | {
+          [k: string]: unknown;
+        }
+      | unknown[]
+      | string
+      | number
+      | boolean
+      | null;
+  };
+  output?: unknown;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema

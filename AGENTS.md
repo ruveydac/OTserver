@@ -178,6 +178,19 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
 - Catalog bulk writes use the MongoDB collection for scale and are represented by one explicit
   `writeAudit` synchronization event. Asset count changes still use Payload and remain individually
   audited.
+- Feed management belongs to the administrator-only Vulnerability Feeds page. Keep automatic weekly
+  maintenance updates and the on-demand button on the fenced maintenance queue. An on-demand request
+  bypasses freshness, not NVD checksum reuse. `OTSERVER_VULNERABILITY_FEEDS=off` disables server-side
+  online updates in both web and worker processes but must leave original-file offline imports usable.
+- Offline selections use immutable `vulnerability-feed-uploads` under the shared `import-files` volume.
+  Jobs snapshot upload IDs and reload the initiating administrator; verify stored digests and preflight
+  all selected contents before catalog writes. Never fetch a missing offline file. NVD imports require
+  matching `.meta` checksums of the uncompressed JSON and preserve unselected years. CSAF replaces only
+  complete snapshots; distinguish repeated filenames by mirrored hostname/path or explicit source URL.
+  Preserve publisher filenames in upload metadata; multipart sanitization changes dots and extensions,
+  so source lookup must never depend on Payload's physical storage filename.
+  Usable CSAF-only catalogs must enable derived counts. Seven-day staging cleanup retains active job
+  files; catalog failures must not make previously loaded data unusable.
 
 ## Importer Development
 

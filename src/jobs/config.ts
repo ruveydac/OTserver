@@ -6,6 +6,8 @@ import { runMaintenance } from './maintenance'
 import { safeFailure, transientFailure } from './errors'
 import { currentWorker } from '../integrations/payload/workerContext'
 import { reapplyAssetClassRules } from '../collections/AssetClasses'
+import { executeFeedUpdate } from '../vulnerabilities/actions'
+import { feedSources } from '../vulnerabilities/sources'
 
 export const jobs: JobsConfig = {
   access: { run: () => false, queue: () => false, cancel: () => false },
@@ -27,6 +29,33 @@ export const jobs: JobsConfig = {
       ],
     }),
   tasks: [
+    {
+      slug: 'vulnerability-feed-sync-v1',
+      retries: { attempts: 2, backoff: { type: 'exponential', delay: 30_000 } },
+      inputSchema: [
+        { name: 'version', type: 'number', required: true },
+        { name: 'method', type: 'select', options: ['online', 'offline'], required: true },
+        { name: 'submittedBy', type: 'text', required: true },
+        {
+          name: 'source',
+          type: 'select',
+          options: feedSources.map(({ value, label }) => ({ value, label })),
+        },
+        { name: 'batchID', type: 'text' },
+        { name: 'uploadIDs', type: 'json' },
+      ],
+      handler: async ({ input, req }) => {
+        if (input.version !== 1 || currentWorker()?.queue !== 'maintenance')
+          throw new JobCancelledError('Unsupported worker input or execution context.')
+        try {
+          await executeFeedUpdate(req.payload, input)
+        } catch (error) {
+          if (!transientFailure(error)) throw new JobCancelledError(safeFailure(error))
+          throw error
+        }
+        return { output: {} }
+      },
+    },
     {
       slug: 'import-v1',
       retries: { attempts: 2, backoff: { type: 'exponential', delay: 5000 } },

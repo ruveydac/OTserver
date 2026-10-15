@@ -13,6 +13,7 @@ import { default as default_c1520f8119081daafc04e2023c3ef070 } from '@/component
 import { default as default_1cf71388346ca687235889e34b2c8889 } from '@/components/OtterInterfaceField'
 import { default as default_75fff05379f2361cc5722c257b69b4b9 } from '@/components/OtterManagedSettingsField'
 import { default as default_d5e71aff688bb616206a98b246bfeca0 } from '@/components/OtterCredentialsField'
+import { default as default_f508ae1f898cb663ee56d6eff90b66ad } from '@/components/VulnerabilityFeedActions'
 import { default as default_db9ac62598c46d0f1db201f6af05442e } from '@/components/LogoutButton'
 import { Icon as Icon_ea112afe978e228c434ec2fb66c71b02 } from '@/components/Brand'
 import { Logo as Logo_ea112afe978e228c434ec2fb66c71b02 } from '@/components/Brand'
@@ -39,6 +40,7 @@ export const importMap = {
   '@/components/OtterInterfaceField#default': default_1cf71388346ca687235889e34b2c8889,
   '@/components/OtterManagedSettingsField#default': default_75fff05379f2361cc5722c257b69b4b9,
   '@/components/OtterCredentialsField#default': default_d5e71aff688bb616206a98b246bfeca0,
+  '@/components/VulnerabilityFeedActions#default': default_f508ae1f898cb663ee56d6eff90b66ad,
   '@/components/LogoutButton#default': default_db9ac62598c46d0f1db201f6af05442e,
   '@/components/Brand#Icon': Icon_ea112afe978e228c434ec2fb66c71b02,
   '@/components/Brand#Logo': Logo_ea112afe978e228c434ec2fb66c71b02,
