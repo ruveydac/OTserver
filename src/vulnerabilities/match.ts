@@ -144,16 +144,17 @@ export const catalogIsLoaded = async (payload: Payload, req?: PayloadRequest): P
   const result = await payload.find({
     collection: 'vulnerability-feeds',
     depth: 0,
-    limit: 1,
+    limit: 2,
     overrideAccess: true,
     req,
-    select: { state: true, status: true },
-    where: { source: { equals: 'nvd' } },
+    select: { state: true, documentCount: true, source: true },
+    where: { source: { in: ['nvd', 'csaf'] } },
   })
-  const feed = result.docs[0]
-  const loaded =
-    (feed?.status === 'ready' || feed?.status === 'partial') &&
-    Object.keys(record(feed.state)).length > 0
+  const loaded = result.docs.some((feed) =>
+    feed.source === 'nvd'
+      ? Object.keys(record(feed.state)).length > 0
+      : (feed.documentCount ?? 0) > 0,
+  )
   if (req) req.context.vulnerabilityCatalogReady = loaded
   return loaded
 }
@@ -181,7 +182,10 @@ export const assignVulnerabilityCount: CollectionBeforeChangeHook = async ({
 }
 
 /** Recomputes every asset count after the catalog changed; writes only real differences. */
-export const recountAssetVulnerabilities = async (payload: Payload): Promise<number> => {
+export const recountAssetVulnerabilities = async (
+  payload: Payload,
+  req?: PayloadRequest,
+): Promise<number> => {
   const counts = new Map<string, number>()
   let after: string | undefined
   let updated = 0
@@ -222,6 +226,7 @@ export const recountAssetVulnerabilities = async (payload: Payload): Promise<num
         data: { vulnerabilityCount: count },
         id: asset.id,
         overrideAccess: true,
+        req,
       })
       updated += 1
     }

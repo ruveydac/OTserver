@@ -244,14 +244,55 @@ are recorded as human provenance and survive future imports.
 
 OTserver downloads the CISA Known Exploited Vulnerabilities catalog, NVD JSON 2.0 feeds, the
 CERT@VDE CSAF 2.0 aggregator, CISA's OT and IT CSAF ROLIE feeds, and the ICS Advisory Project master
-CSV in the background when the application starts. Each start first checks when the catalogs were
-last pulled and downloads nothing until they are seven days old, so restarts are cheap. Set
-`OTSERVER_VULNERABILITY_FEEDS=off` for an air-gapped installation.
+CSV through the background maintenance worker. Automatic updates remain on a seven-day schedule.
+Administrators can also open **Vulnerabilities > Vulnerability Feeds** and press **Update feeds now**
+to check immediately. Unchanged NVD years are skipped using their published checksums. The page
+shows queued/running work and each source's results; closing the browser does not stop the worker.
+
+For an isolated installation, set `OTSERVER_VULNERABILITY_FEEDS=off` in both the application and any
+external maintenance worker. This disables automatic and button-triggered internet downloads while
+keeping **Upload downloaded feeds** available. Uploaded files are processed without network access.
 
 The first import is the expensive one: NVD publishes one file per year from 2002 onward, roughly
 600 MB compressed and a dozen minutes of work, with a peak heap near 880 MB for the largest year.
 Each year is recorded as it lands, so an interrupted import resumes where it stopped instead of
 starting over.
+
+#### Transfer original feeds into an isolated installation
+
+1. Open **Vulnerabilities > Vulnerability Feeds > Upload downloaded feeds** and choose a source.
+2. Save the download instructions, take them to an internet-connected computer, and download the
+   original publisher files. Keep their original filenames.
+3. Transfer the files to the isolated computer and select **Choose files** or **Choose folder**.
+   Files upload individually, with progress. Keep the selection ID to resume a staged upload.
+4. Use **Check uploaded files** to review coverage, publisher dates, and any missing-file links.
+5. Press **Import uploaded … files**. The maintenance worker verifies file digests, NVD checksums,
+   and every selected file's contents before changing the catalog. Results appear on the feed page.
+
+| Source               | Original files to transfer                                                                                                                        |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CISA KEV             | `known_exploited_vulnerabilities.json`                                                                                                            |
+| NVD                  | Each selected `nvdcve-2.0-YYYY.json.gz` (or `.json`) and matching `.meta` file                                                                    |
+| ICS Advisory Project | `CISA_ICS_ADV_Master.csv`                                                                                                                         |
+| CSAF                 | The CERT@VDE aggregator, every referenced provider metadata/index/advisory file, and both CISA OT/IT indexes with all their referenced advisories |
+
+NVD years can be imported in batches; unselected years and other sources remain intact. The feed
+shows **partial** until all annual years have been loaded. NVD's `.meta` checksum covers the
+**uncompressed JSON**, including when the transferred file is `.json.gz`.
+
+For CSAF, start with the aggregator and the two CISA indexes shown in the guide. Checking those
+files discovers further provider metadata, indexes, and advisory URLs. Save the missing-file links,
+download them on the connected computer, transfer them, and check again until the snapshot is
+complete. When filenames repeat, preserve `hostname/path/to/file.json` directories inside the
+selected folder, or use **Upload this file** beside the specific missing URL. Offline processing
+never follows those links over the network. An incomplete or malformed snapshot leaves the previous
+CSAF catalog in place.
+
+Each upload is limited to 500 MiB, each selection to 8 GiB, and decompressed feeds to 2 GiB. Use NVD's
+compressed files for large years. Staged files expire after seven days and are removed by maintenance;
+files needed by queued/running imports are retained. With external workers, the application and worker
+must share the existing `import-files` volume. Successful imports recalculate asset vulnerability counts
+and record the initiating administrator in the audit trail.
 
 Assets store only a derived vulnerability count. A CVE is counted only when its NVD or CSAF vendor
 and product match the recorded asset data and the asset reports a version satisfying the affected

@@ -1,6 +1,7 @@
 import type { CollectionConfig } from 'payload'
 
 import { adminOnly, hideFromNonAdmins } from '../access/authorization'
+import { checkOffline, feedControl, importOffline, refreshFeeds } from '../vulnerabilities/actions'
 
 export const Vulnerabilities: CollectionConfig = {
   slug: 'vulnerabilities',
@@ -70,6 +71,12 @@ export const Vulnerabilities: CollectionConfig = {
 
 export const VulnerabilityFeeds: CollectionConfig = {
   slug: 'vulnerability-feeds',
+  endpoints: [
+    { path: '/control', method: 'get', handler: feedControl },
+    { path: '/refresh', method: 'post', handler: refreshFeeds },
+    { path: '/offline/check', method: 'post', handler: checkOffline },
+    { path: '/offline/import', method: 'post', handler: importOffline },
+  ],
   access: {
     create: () => false,
     delete: () => false,
@@ -77,8 +84,10 @@ export const VulnerabilityFeeds: CollectionConfig = {
     update: () => false,
   },
   admin: {
+    components: { beforeList: ['@/components/VulnerabilityFeedActions'] },
     defaultColumns: ['source', 'status', 'lastSyncedAt', 'documentCount', 'error'],
-    description: 'Synchronization state of the downloaded vulnerability catalogs.',
+    description:
+      'Update the local vulnerability catalogs online or import original files transferred from a connected computer.',
     group: 'Vulnerabilities',
     hidden: hideFromNonAdmins,
     useAsTitle: 'source',
@@ -93,7 +102,7 @@ export const VulnerabilityFeeds: CollectionConfig = {
       type: 'select',
       defaultValue: 'idle',
       index: true,
-      options: ['idle', 'running', 'ready', 'partial', 'failed'],
+      options: ['idle', 'queued', 'running', 'ready', 'partial', 'failed'],
       required: true,
     },
     { name: 'lastSyncedAt', type: 'date', label: 'Last synchronized' },
@@ -102,6 +111,14 @@ export const VulnerabilityFeeds: CollectionConfig = {
     { name: 'dateReleased', type: 'date', label: 'Catalog released' },
     { name: 'error', type: 'textarea' },
     { name: 'state', type: 'json', admin: { hidden: true } },
+    { name: 'jobID', type: 'text', admin: { readOnly: true } },
+    {
+      name: 'lastImportMethod',
+      type: 'select',
+      options: ['online', 'offline'],
+      admin: { readOnly: true },
+    },
+    { name: 'operationRevision', type: 'number', admin: { hidden: true } },
   ],
   lockDocuments: false,
 }

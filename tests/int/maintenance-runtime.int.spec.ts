@@ -14,6 +14,8 @@ vi.mock('../../src/integrations/payload/requests', () => ({
   systemRequest: mocks.systemRequest,
 }))
 
+vi.mock('../../src/vulnerabilities/offline', () => ({ removeExpiredFeedUploads: vi.fn() }))
+
 import { runMaintenance, TRASH_RETENTION_DAYS } from '../../src/jobs/maintenance'
 
 describe('maintenance task', () => {
@@ -63,7 +65,6 @@ describe('maintenance task', () => {
 
     expect(mocks.sync).toHaveBeenCalledWith(payload, {
       failOnSourceError: true,
-      force: true,
     })
   })
 })
