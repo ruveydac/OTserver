@@ -83,6 +83,7 @@ services:
       OTSERVER_QUEUED_IMPORTS: ${OTSERVER_QUEUED_IMPORTS:-off}
       OTSERVER_VULNERABILITY_FEEDS: ${OTSERVER_VULNERABILITY_FEEDS:-on}
       OTSERVER_WORKER_MODE: ${OTSERVER_WORKER_MODE:-standalone}
+      NODE_OPTIONS: ${NODE_OPTIONS:---max-old-space-size=2048}
     volumes:
       - import-files:/app/import-files
     depends_on:
@@ -98,6 +99,7 @@ services:
       DATABASE_URL: mongodb://mongo:27017/otserver?replicaSet=rs0
       OTSERVER_SECRET: ${OTSERVER_SECRET:?Set OTSERVER_SECRET in .env}
       OTSERVER_WORKER_MODE: external
+      NODE_OPTIONS: ${NODE_OPTIONS:---max-old-space-size=2048}
     volumes:
       - import-files:/app/import-files:ro
     depends_on:
@@ -114,6 +116,9 @@ services:
       OTSERVER_SECRET: ${OTSERVER_SECRET:?Set OTSERVER_SECRET in .env}
       OTSERVER_VULNERABILITY_FEEDS: ${OTSERVER_VULNERABILITY_FEEDS:-on}
       OTSERVER_WORKER_MODE: external
+      NODE_OPTIONS: ${NODE_OPTIONS:---max-old-space-size=2048}
+    volumes:
+      - import-files:/app/import-files
     depends_on:
       otserver:
         condition: service_healthy
@@ -184,6 +189,50 @@ with workers stopped and before accepting new imports. It requires a replica set
 legacy unique MAC index.
 For database upgrades, worker operation, backup, and restore, follow the [operations guide](docs/operations.md).
 
+### Kubernetes memory and Node heap
+
+The production image defaults to `NODE_OPTIONS=--max-old-space-size=2048` (MiB).
+Override this environment variable on each web or worker container to fit its memory budget.
+The pnpm commands preserve `NODE_OPTIONS` too. Set it before Node starts; loading it later from
+the application's `.env` cannot resize an already-running heap.
+
+A starting configuration for a container with a 4 GiB memory limit:
+
+```yaml
+env:
+  - name: NODE_OPTIONS
+    value: '--max-old-space-size=2048'
+resources:
+  requests:
+    memory: 1Gi
+  limits:
+    memory: 4Gi
+```
+
+V8 heap is only part of process memory. Leave room for upload buffers, native allocations, and
+the application runtime; do not set the heap equal to the container limit. A V8
+`JavaScript heap out of memory` error and Kubernetes `OOMKilled` are different failures.
+Changing resource limits alone does not override an explicit Node heap setting. Roll out new pods
+after changing either setting, and remove conflicting `--max-old-space-size` command arguments.
+
+NVD processing uses a temporary on-disk file, up to 2 GiB for one decompressed annual feed, under
+`TMPDIR` (default `/tmp`). Give the maintenance process writable disk-backed temporary storage,
+including when using a read-only root filesystem. Avoid a memory-backed `emptyDir` for this path:
+it charges the staged feed to the pod's memory budget. Allow at least 3 GiB of free temporary disk
+space and enough ephemeral-storage capacity for the image, logs, and this file. Staging is removed
+on success or a handled failure; after a forced process kill, remove abandoned `otserver-nvd-*`
+directories only while the maintenance process is stopped. External maintenance workers also
+need the shared `import-files` volume for offline selections and staging cleanup.
+
+To inspect the environment and default heap for a fresh Node process in the container:
+
+```bash
+kubectl exec <pod> -c <container> -- node -e 'console.log({NODE_OPTIONS:process.env.NODE_OPTIONS,heapLimitMiB:require("node:v8").getHeapStatistics().heap_size_limit/1024/1024,constrainedMemoryMiB:process.constrainedMemory()/1024/1024})'
+```
+
+This diagnostic inherits the container environment; explicit arguments on the application command
+can still give that process a different limit.
+
 ### Local development
 
 Requirements: Node.js 22, pnpm 10, and a MongoDB 8 replica set.
@@ -253,10 +302,12 @@ For an isolated installation, set `OTSERVER_VULNERABILITY_FEEDS=off` in both the
 external maintenance worker. This disables automatic and button-triggered internet downloads while
 keeping **Upload downloaded feeds** available. Uploaded files are processed without network access.
 
-The first import is the expensive one: NVD publishes one file per year from 2002 onward, roughly
-600 MB compressed and a dozen minutes of work, with a peak heap near 880 MB for the largest year.
-Each year is recorded as it lands, so an interrupted import resumes where it stopped instead of
-starting over.
+The first import processes NVD's annual files from 2002 onward. Both online and offline NVD imports
+stream decompression and checksum verification, validate the complete JSON before writing, and
+upsert at most 100 records per batch. Large batches also flush at roughly 4 MiB of serialized data.
+The annual file stays on temporary disk rather than in JavaScript heap. Offline jobs preflight all
+selected years before any catalog writes. Each completed year is recorded, so a retry skips unchanged
+years. Asset matching reads candidates in pages of 100 rather than loading thousands at once.
 
 #### Transfer original feeds into an isolated installation
 

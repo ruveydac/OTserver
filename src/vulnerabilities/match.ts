@@ -43,23 +43,33 @@ export const findAssetVulnerabilities = async (
   if (!where) return []
 
   const user = access.req?.user ?? access.user
-  const result = await payload.find({
-    collection: 'vulnerabilities',
-    depth: 0,
-    limit: MAX_CANDIDATES,
-    ...(user ? { overrideAccess: false, user } : { overrideAccess: true }),
-    pagination: false,
-    ...(access.req ? { req: access.req } : {}),
-    select: {
-      affected: true,
-      cve: true,
-      cvssScore: true,
-      cvssSeverity: true,
-      knownExploited: true,
-    },
-    where,
-  })
-  return matchAssetVulnerabilities(asset, result.docs as VulnerabilityCandidate[])
+  const matches: VulnerabilityMatch[] = []
+  let after: string | undefined
+  for (let scanned = 0; scanned < MAX_CANDIDATES;) {
+    const limit = Math.min(100, MAX_CANDIDATES - scanned)
+    const result = await payload.find({
+      collection: 'vulnerabilities',
+      depth: 0,
+      limit,
+      ...(user ? { overrideAccess: false, user } : { overrideAccess: true }),
+      pagination: false,
+      ...(access.req ? { req: access.req } : {}),
+      select: {
+        affected: true,
+        cve: true,
+        cvssScore: true,
+        cvssSeverity: true,
+        knownExploited: true,
+      },
+      sort: 'id',
+      where: after ? { and: [where, { id: { greater_than: after } }] } : where,
+    })
+    matches.push(...matchAssetVulnerabilities(asset, result.docs as VulnerabilityCandidate[]))
+    scanned += result.docs.length
+    if (result.docs.length < limit) break
+    after = result.docs.at(-1)!.id
+  }
+  return matches
 }
 
 /** Distinct CVEs for the installed physical assembly; each match retains its module/version. */

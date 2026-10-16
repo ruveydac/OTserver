@@ -175,6 +175,9 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
   `size` field is the uncompressed length too). Hash while gunzipping. Hashing the compressed bytes
   fails every year, which silently empties the NVD state, marks the catalog unloaded, and makes each
   restart re-download all annual feeds.
+- NVD online and offline processing must stream decompression, hashes, and record parsing. Validate
+  the entire annual file before catalog writes; stage it on disk under `TMPDIR`, clean up in `finally`,
+  and keep write batches and matching query pages bounded. Never restore whole-year `JSON.parse`.
 - Catalog bulk writes use the MongoDB collection for scale and are represented by one explicit
   `writeAudit` synchronization event. Asset count changes still use Payload and remain individually
   audited.
@@ -256,6 +259,11 @@ nested queries must continue to fail with a clear HTTP 400 error.
 Requirements: Node.js 22, pnpm 10, and a MongoDB 8 replica set. Copy `.env.example` to `.env` and use
 a long random `OTSERVER_SECRET`. `docker compose up` provides the standalone OTserver and MongoDB;
 the optional `workers` profile is only for separate high-throughput workers.
+
+Runtime commands must preserve operator-supplied `NODE_OPTIONS`. The production image defaults to
+`--max-old-space-size=2048`; container memory must also cover native allocations and upload buffers.
+NVD maintenance needs writable, disk-backed temporary storage for one decompressed annual file
+(up to 2 GiB). Kubernetes memory and temporary-storage settings are documented in `README.md`.
 
 Test commands own a disposable MongoDB 8 replica set and a unique upload directory. Use Docker or
 Podman; direct Vitest invocations stop before loading Payload unless an owning test harness supplies

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import { readFile, stat } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import { APIError, type Payload, type PayloadRequest } from 'payload'
 
@@ -14,11 +15,12 @@ import {
   parseCsafAggregator,
   parseCsafProviderMetadata,
   parseIcsAdvisories,
-  parseNvdFeed,
   parseNvdMeta,
   parseRolieFeed,
   type DownloadFeed,
 } from './feeds'
+import { feedText, readFeed, verifyFeed } from './feedIO'
+import { nvdDocuments } from './nvd'
 import {
   CISA_KEV_URL,
   CSAF_AGGREGATOR_URL,
@@ -129,7 +131,7 @@ export const inspectOffline = async (
   const directory = path.resolve(
     req.payload.collections['vulnerability-feed-uploads'].config.upload.staticDir!,
   )
-  const read = async (url: string, limit = MAX_DOWNLOAD_BYTES) => {
+  const open = async (url: string, limit = MAX_DOWNLOAD_BYTES) => {
     const file = find(url)
     if (!file) {
       missing.add(url)
@@ -140,16 +142,17 @@ export const inspectOffline = async (
     const filename = path.join(directory, file.filename)
     if ((await stat(filename)).size > limit)
       throw new APIError(`${file.originalName} exceeds its file size limit.`, 400)
-    const body = await readFile(filename)
-    if (digest(body) !== file.digest)
-      throw new APIError(`${file.originalName} changed after upload. Upload it again.`, 400)
-    return body
+    return verifyFeed(createReadStream(filename), limit, file.digest, file.originalName)
+  }
+  const read = async (url: string, limit = MAX_DOWNLOAD_BYTES) => {
+    const body = await open(url, limit)
+    return body ? readFeed(body, limit) : undefined
   }
   const download: DownloadFeed = async (url, options = {}) => {
     // Original uncompressed NVD JSON is also accepted; the checksum still covers those exact bytes.
     const actual =
       url.endsWith('.json.gz') && !find(url) && find(url.slice(0, -3)) ? url.slice(0, -3) : url
-    const body = await read(actual)
+    const body = await open(actual)
     if (!body) throw new APIError(`Missing offline file: ${url}`, 400)
     return decodeFeed(body, { ...options, gzip: options.gzip && actual.endsWith('.gz') }, actual)
   }
@@ -213,7 +216,7 @@ export const inspectOffline = async (
     const url = source === 'cisa-kev' ? CISA_KEV_URL : ICS_ADVISORY_URL
     if (!find(url)) missing.add(url)
     else {
-      const body = (await download(url)).toString('utf8')
+      const body = await feedText(download, url)
       const parsed =
         source === 'cisa-kev' ? parseCisaCatalog(JSON.parse(body)) : parseIcsAdvisories(body)
       if (parsed.dateReleased)
@@ -243,19 +246,18 @@ export const validateOfflineContents = async ({
   if (selection.missing.length)
     throw new APIError('The offline selection is incomplete. Check the missing-file list.', 400)
   if (selection.source === 'cisa-kev')
-    parseCisaCatalog(JSON.parse((await download(CISA_KEV_URL)).toString('utf8')))
+    parseCisaCatalog(JSON.parse(await feedText(download, CISA_KEV_URL)))
   if (selection.source === 'ics-advisories')
-    parseIcsAdvisories((await download(ICS_ADVISORY_URL)).toString('utf8'))
+    parseIcsAdvisories(await feedText(download, ICS_ADVISORY_URL))
   if (selection.source === 'csaf') await loadCsafSnapshot(download, {})
   if (selection.source === 'nvd')
     for (const year of selection.years) {
       const base = `${NVD_FEED_BASE_URL}/nvdcve-2.0-${year}`
-      const meta = parseNvdMeta((await download(`${base}.meta`)).toString('utf8'))
-      parseNvdFeed(
-        JSON.parse(
-          (await download(`${base}.json.gz`, { gzip: true, sha256: meta.sha256 })).toString('utf8'),
-        ),
-      )
+      const meta = parseNvdMeta(await feedText(download, `${base}.meta`))
+      for await (const document of nvdDocuments(
+        await download(`${base}.json.gz`, { gzip: true, sha256: meta.sha256 }),
+      ))
+        void document
     }
 }
 

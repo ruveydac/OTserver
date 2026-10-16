@@ -16,6 +16,7 @@ services:
       OTSERVER_QUEUED_IMPORTS: ${OTSERVER_QUEUED_IMPORTS:-off}
       OTSERVER_VULNERABILITY_FEEDS: ${OTSERVER_VULNERABILITY_FEEDS:-on}
       OTSERVER_WORKER_MODE: ${OTSERVER_WORKER_MODE:-standalone}
+      NODE_OPTIONS: ${NODE_OPTIONS:---max-old-space-size=2048}
     volumes:
       - import-files:/app/import-files
 
@@ -31,6 +32,7 @@ services:
       DATABASE_URL: mongodb://mongo:27017/otserver?replicaSet=rs0
       OTSERVER_SECRET: ${OTSERVER_SECRET:?Set OTSERVER_SECRET in .env}
       OTSERVER_WORKER_MODE: external
+      NODE_OPTIONS: ${NODE_OPTIONS:---max-old-space-size=2048}
     volumes:
       - import-files:/app/import-files:ro
 
@@ -47,6 +49,9 @@ services:
       OTSERVER_SECRET: ${OTSERVER_SECRET:?Set OTSERVER_SECRET in .env}
       OTSERVER_VULNERABILITY_FEEDS: ${OTSERVER_VULNERABILITY_FEEDS:-on}
       OTSERVER_WORKER_MODE: external
+      NODE_OPTIONS: ${NODE_OPTIONS:---max-old-space-size=2048}
+    volumes:
+      - import-files:/app/import-files
 
   mongo:
     image: mongo:8

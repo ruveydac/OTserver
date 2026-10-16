@@ -15,6 +15,7 @@ RUN corepack enable && OTSERVER_SECRET=build-only-placeholder pnpm build
 FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0
+ENV NODE_OPTIONS=--max-old-space-size=2048
 RUN addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 nextjs \
   && mkdir .next import-files \

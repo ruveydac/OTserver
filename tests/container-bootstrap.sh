@@ -58,6 +58,10 @@ trap 'exit 1' INT TERM
 
 echo "Building the production image with $RUNTIME..."
 "$RUNTIME" build --tag "$IMAGE" "$ROOT"
+"$RUNTIME" run --rm "$IMAGE" node -e \
+  'const assert = require("node:assert/strict"); assert.equal(process.env.NODE_OPTIONS, "--max-old-space-size=2048"); assert.ok(require("node:v8").getHeapStatistics().heap_size_limit >= 2048 * 1024 ** 2)'
+"$RUNTIME" run --rm --env NODE_OPTIONS=--max-old-space-size=768 "$IMAGE" node -e \
+  'const assert = require("node:assert/strict"); const heap = require("node:v8").getHeapStatistics().heap_size_limit / 1024 ** 2; assert.ok(heap >= 768 && heap < 900)'
 "$RUNTIME" network create "$NETWORK" >/dev/null
 "$RUNTIME" volume create "$UPLOADS" >/dev/null
 "$RUNTIME" run --detach \

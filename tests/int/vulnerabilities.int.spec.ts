@@ -16,6 +16,7 @@ import {
   CISA_KEV_URL,
   CSAF_AGGREGATOR_URL,
   downloadFeed,
+  readFeed,
   FIRST_NVD_YEAR,
   ICS_ADVISORY_URL,
   initializeVulnerabilityFeeds,
@@ -891,21 +892,27 @@ describe('downloadFeed', () => {
     const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`
 
     try {
-      expect((await downloadFeed(`${base}/feed.json`)).toString()).toBe(body.toString())
-      expect((await downloadFeed(`${base}/feed.json.gz`, { gzip: true, sha256 })).toString()).toBe(
+      expect((await readFeed(await downloadFeed(`${base}/feed.json`))).toString()).toBe(
         body.toString(),
       )
+      expect(
+        (
+          await readFeed(await downloadFeed(`${base}/feed.json.gz`, { gzip: true, sha256 }))
+        ).toString(),
+      ).toBe(body.toString())
       await expect(
-        downloadFeed(`${base}/feed.json.gz`, { gzip: true, sha256: 'deadbeef' }),
+        downloadFeed(`${base}/feed.json.gz`, { gzip: true, sha256: 'deadbeef' }).then(readFeed),
       ).rejects.toThrow('SHA-256')
       // Hashing the compressed bytes instead is the bug this contract pins shut.
       expect(compressedSha256).not.toBe(sha256)
       await expect(
-        downloadFeed(`${base}/feed.json.gz`, { gzip: true, sha256: compressedSha256 }),
+        downloadFeed(`${base}/feed.json.gz`, { gzip: true, sha256: compressedSha256 }).then(
+          readFeed,
+        ),
       ).rejects.toThrow('SHA-256')
-      expect((await downloadFeed(`${base}/feed.json.gz`, { gzip: true })).toString()).toBe(
-        body.toString(),
-      )
+      expect(
+        (await readFeed(await downloadFeed(`${base}/feed.json.gz`, { gzip: true }))).toString(),
+      ).toBe(body.toString())
       await expect(downloadFeed(`${base}/missing`)).rejects.toThrow('responded with 404')
     } finally {
       await new Promise((resolve) => server.close(resolve))
@@ -1188,6 +1195,48 @@ describe('vulnerability catalog', () => {
           asset === affected ? 1 : 0,
         )
       }
+    }
+  })
+
+  it('matches across bounded candidate pages with the original access context', async () => {
+    const documents = Array.from({ length: 205 }, (_, index) => ({
+      cve: `CVE-2098-${10000 + index}`,
+      set: {
+        products: ['batchcontroller'],
+        productTokens: ['batchcontroller'],
+        affected: [
+          { part: 'a', vendor: 'batchvendor', product: 'batchcontroller', version: '1.0' },
+        ],
+      },
+    }))
+    await upsertVulnerabilities(payload, documents)
+    const req = await createLocalReq({ user: adminUser }, payload)
+    const find = vi.spyOn(payload, 'find')
+    try {
+      const matches = await findAssetVulnerabilities(
+        payload,
+        {
+          vendor: 'batchvendor',
+          model: 'batchcontroller',
+          firmwareVersion: '1.0',
+        },
+        { req },
+      )
+      expect(new Set(matches.map(({ cve }) => cve))).toEqual(
+        new Set(documents.map(({ cve }) => cve)),
+      )
+      const calls = find.mock.calls.filter(([args]) => args.collection === 'vulnerabilities')
+      expect(calls).toHaveLength(3)
+      for (const [args] of calls) {
+        expect(args).toMatchObject({ limit: 100, overrideAccess: false })
+        expect(args.req).toBe(req)
+      }
+    } finally {
+      find.mockRestore()
+      await payload.delete({
+        collection: 'vulnerabilities',
+        where: { cve: { in: documents.map(({ cve }) => cve) } },
+      })
     }
   })
 

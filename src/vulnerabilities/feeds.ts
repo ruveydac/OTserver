@@ -1,6 +1,3 @@
-import { createHash } from 'node:crypto'
-import { createGunzip } from 'node:zlib'
-
 import { type Payload, type PayloadRequest, type RequiredDataFromCollectionSlug } from 'payload'
 
 import { writeAudit } from '../collections/AuditLogs'
@@ -9,8 +6,11 @@ import { recountAssetVulnerabilities } from './match'
 import { rawCollection } from '../integrations/payload/catalog'
 import { systemRequest } from '../integrations/payload/requests'
 import { MAX_DESCRIPTION } from './parsers'
+import { downloadFeed, feedText, type DownloadFeed } from './feedIO'
+import { importNvdFeed } from './nvd'
 export * from './parsers'
 export * from './sources'
+export * from './feedIO'
 import {
   CISA_KEV_URL,
   CSAF_AGGREGATOR_URL,
@@ -23,7 +23,6 @@ import {
 import {
   type FeedDocument,
   parseNvdMeta,
-  parseNvdFeed,
   parseCisaCatalog,
   parseCsafAggregator,
   parseCsafProviderMetadata,
@@ -34,18 +33,10 @@ import {
 } from './parsers'
 
 export const SYNC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000
-export const MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024
-export const MAX_FEED_BYTES = 2 * 1024 * 1024 * 1024
 
 const BATCH_SIZE = 500
-const DOWNLOAD_TIMEOUT_MS = 15 * 60 * 1000
 export const MAX_CSAF_FEEDS = 500
 export const MAX_CSAF_DOCUMENTS = 50_000
-
-export type DownloadFeed = (
-  url: string,
-  options?: { gzip?: boolean; sha256?: string },
-) => Promise<Buffer>
 
 export type SyncResult = {
   documentCount: number
@@ -55,65 +46,6 @@ export type SyncResult = {
 }
 
 const message = (error: unknown): string => (error instanceof Error ? error.message : String(error))
-
-/**
- * Downloads a feed, verifies the checksum NVD publishes next to it, and caps the payload size so a
- * hostile or corrupt mirror cannot exhaust memory. NVD's `.meta` `sha256` covers the *uncompressed*
- * JSON (its `size` field is the uncompressed length too), so the digest is taken while gunzipping
- * rather than over the downloaded `.gz` bytes.
- */
-export const downloadFeed: DownloadFeed = async (url, { gzip, sha256 } = {}) => {
-  const response = await fetch(url, {
-    headers: { 'user-agent': 'OTserver vulnerability catalog sync' },
-    signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
-  })
-  if (!response.ok || !response.body) throw new Error(`${url} responded with ${response.status}.`)
-
-  const compressed: Buffer[] = []
-  let compressedSize = 0
-  for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
-    const buffer = Buffer.from(chunk)
-    compressedSize += buffer.length
-    if (compressedSize > MAX_DOWNLOAD_BYTES) {
-      throw new Error(`${url} exceeded the ${MAX_DOWNLOAD_BYTES} byte download limit.`)
-    }
-    compressed.push(buffer)
-  }
-
-  return decodeFeed(Buffer.concat(compressed), { gzip, sha256 }, url)
-}
-
-export const decodeFeed = async (
-  body: Buffer,
-  { gzip, sha256 }: { gzip?: boolean; sha256?: string } = {},
-  label = 'The feed',
-): Promise<Buffer> => {
-  const expected = sha256?.toLowerCase()
-  if (!gzip) {
-    if (body.length > MAX_FEED_BYTES) throw new Error(`${label} exceeded the feed size limit.`)
-    if (expected && createHash('sha256').update(body).digest('hex') !== expected)
-      throw new Error(`${label} did not match its published SHA-256 checksum.`)
-    return body
-  }
-  const hash = expected ? createHash('sha256') : undefined
-  // ponytail: whole feed held in memory. The largest NVD year (2024, 278 MB gzipped) peaks near
-  // 880 MB of heap across the decompressed buffer, its UTF-8 string, and the parsed object graph;
-  // switch to the paginated NVD API 2.0 if the annual files outgrow the heap.
-  const decompressed: Buffer[] = []
-  let size = 0
-  for await (const chunk of createGunzip().end(body)) {
-    const buffer = chunk as Buffer
-    size += buffer.length
-    if (size > MAX_FEED_BYTES)
-      throw new Error(`${label} exceeded the ${MAX_FEED_BYTES} byte limit.`)
-    hash?.update(buffer)
-    decompressed.push(buffer)
-  }
-  if (expected && hash?.digest('hex') !== expected) {
-    throw new Error(`${label} did not match its published SHA-256 checksum.`)
-  }
-  return Buffer.concat(decompressed)
-}
 
 const replaceCsafVulnerabilities = async (
   payload: Payload,
@@ -141,7 +73,6 @@ const replaceCsafVulnerabilities = async (
   await collection.deleteMany({ cve: { $nin: documents.map(({ cve }) => cve) }, status: 'CSAF' })
 }
 
-/** Minimal RFC 4180 reader; quoted fields may contain commas, quotes, and newlines. */
 export const upsertVulnerabilities = async (
   payload: Payload,
   documents: FeedDocument[],
@@ -272,14 +203,10 @@ export const loadCsafSnapshot = async (
   download: DownloadFeed,
   previousState: Record<string, unknown>,
 ): Promise<{ documents?: FeedDocument[]; state: Record<string, string> }> => {
-  const aggregator = parseCsafAggregator(
-    JSON.parse((await download(CSAF_AGGREGATOR_URL)).toString('utf8')),
-  )
+  const aggregator = parseCsafAggregator(JSON.parse(await feedText(download, CSAF_AGGREGATOR_URL)))
   const feedURLs = new Set<string>(CISA_CSAF_FEED_URLS)
   for (const metadataURL of aggregator) {
-    const feeds = parseCsafProviderMetadata(
-      JSON.parse((await download(metadataURL)).toString('utf8')),
-    )
+    const feeds = parseCsafProviderMetadata(JSON.parse(await feedText(download, metadataURL)))
     for (const url of feeds) feedURLs.add(url)
   }
   if (feedURLs.size > MAX_CSAF_FEEDS) throw new Error('The CSAF feed limit was exceeded.')
@@ -287,7 +214,7 @@ export const loadCsafSnapshot = async (
   const entries = new Map<string, string>()
   const state: Record<string, string> = {}
   for (const feedURL of feedURLs) {
-    const feed = parseRolieFeed(JSON.parse((await download(feedURL)).toString('utf8')))
+    const feed = parseRolieFeed(JSON.parse(await feedText(download, feedURL)))
     state[feedURL] = feed.updated
     for (const entry of feed.entries) entries.set(entry.url, entry.updated)
     if (entries.size > MAX_CSAF_DOCUMENTS) throw new Error('The CSAF document limit was exceeded.')
@@ -305,7 +232,7 @@ export const loadCsafSnapshot = async (
     const parsed = await Promise.all(
       urls
         .slice(index, index + 10)
-        .map(async (url) => parseCsafDocument(JSON.parse((await download(url)).toString('utf8')))),
+        .map(async (url) => parseCsafDocument(JSON.parse(await feedText(download, url)))),
     )
     documents.push(...parsed.flat())
   }
@@ -359,7 +286,7 @@ const runSync = async (
 
   if (!source || source === 'cisa-kev')
     try {
-      const catalog = parseCisaCatalog(JSON.parse((await download(CISA_KEV_URL)).toString('utf8')))
+      const catalog = parseCisaCatalog(JSON.parse(await feedText(download, CISA_KEV_URL)))
       await upsertVulnerabilities(payload, catalog.documents)
       await clearRemovedKevEntries(
         payload,
@@ -409,7 +336,7 @@ const runSync = async (
   // Runs after CSAF so the advisory context lands on records CSAF already created.
   if (!source || source === 'ics-advisories')
     try {
-      const advisories = parseIcsAdvisories((await download(ICS_ADVISORY_URL)).toString('utf8'))
+      const advisories = parseIcsAdvisories(await feedText(download, ICS_ADVISORY_URL))
       await upsertVulnerabilities(payload, advisories.documents)
       await clearRemovedIcsEntries(
         payload,
@@ -445,21 +372,17 @@ const runSync = async (
     for (const year of nvdYears ?? allYears) {
       try {
         const meta = parseNvdMeta(
-          (await download(`${NVD_FEED_BASE_URL}/nvdcve-2.0-${year}.meta`)).toString('utf8'),
+          await feedText(download, `${NVD_FEED_BASE_URL}/nvdcve-2.0-${year}.meta`),
         )
         if (!meta.sha256 || state[year]?.sha256 === meta.sha256) continue
 
-        const feed = JSON.parse(
-          (
-            await download(`${NVD_FEED_BASE_URL}/nvdcve-2.0-${year}.json.gz`, {
-              gzip: true,
-              sha256: meta.sha256,
-            })
-          ).toString('utf8'),
+        loaded += await importNvdFeed(
+          await download(`${NVD_FEED_BASE_URL}/nvdcve-2.0-${year}.json.gz`, {
+            gzip: true,
+            sha256: meta.sha256,
+          }),
+          (documents) => upsertVulnerabilities(payload, documents),
         )
-        const documents = parseNvdFeed(feed)
-        await upsertVulnerabilities(payload, documents)
-        loaded += documents.length
         state[year] = { sha256: meta.sha256 }
         // Persist each year as it lands. The initial 2002-onward import takes many minutes, and
         // without this an interrupted run would restart from the first year on the next boot.
