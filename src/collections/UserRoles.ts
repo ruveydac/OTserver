@@ -78,6 +78,7 @@ export const initializeAuthorization = async (payload: Payload) => {
 
 export const UserRoles: CollectionConfig = {
   slug: 'user-roles',
+  labels: { singular: 'User role', plural: 'User roles' },
   access: {
     create: adminOnly,
     delete: adminOnly,
@@ -87,7 +88,7 @@ export const UserRoles: CollectionConfig = {
   admin: {
     defaultColumns: ['name', 'isAdmin', 'updatedAt'],
     description: 'Assign read or write access to a site and every site underneath it.',
-    group: 'Access Control',
+    group: 'Access control',
     hidden: hideFromNonAdmins,
     useAsTitle: 'name',
   },
@@ -118,7 +119,7 @@ export const UserRoles: CollectionConfig = {
         description: 'Manage Otter scanners, configuration, and schedules within permitted sites.',
       },
       defaultValue: false,
-      label: 'Otter Config',
+      label: 'Otter configuration access',
     },
     {
       name: 'permissions',

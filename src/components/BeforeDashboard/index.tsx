@@ -1,21 +1,24 @@
 import Link from 'next/link'
+import { Button } from '@payloadcms/ui'
 import type { Payload, SanitizedPermissions } from 'payload'
 
 import { Brand } from '@/components/Brand'
-import { statusLabels } from '@/components/labels'
+import { formatDateTime, statusLabels } from '@/components/labels'
 import type { User } from '@/payload-types'
+import { authenticatedAdminUser } from '@/integrations/payload/adminUser'
 
 import './index.scss'
 
 const BeforeDashboard = async ({
   payload,
   permissions,
-  user,
 }: {
   payload: Payload
   permissions?: SanitizedPermissions
   user?: User
 }) => {
+  const user = await authenticatedAdminUser(payload)
+  const admin = payload.config.routes.admin
   const [total, online, offline, sites, recent] = await Promise.all([
     payload.count({ collection: 'assets', overrideAccess: false, user }),
     payload.count({
@@ -71,30 +74,28 @@ const BeforeDashboard = async ({
         {canReadSites || canCreateImports || canCreateAssets || canManageOtters ? (
           <div className="before-dashboard__actions">
             {canReadSites ? (
-              <Link
-                className="before-dashboard__button before-dashboard__button--secondary"
-                href="/admin/collections/sites"
-              >
+              <Button buttonStyle="secondary" el="link" url={`${admin}/collections/sites`}>
                 Manage sites
-              </Link>
+              </Button>
             ) : null}
             {canCreateImports ? (
-              <Link
-                className="before-dashboard__button before-dashboard__button--secondary"
-                href="/admin/collections/asset-imports/create"
+              <Button
+                buttonStyle="secondary"
+                el="link"
+                url={`${admin}/collections/asset-imports/create`}
               >
-                Import discovery XML
-              </Link>
+                Import discovery file
+              </Button>
             ) : null}
             {canCreateAssets ? (
-              <Link className="before-dashboard__button" href="/admin/collections/assets/create">
-                Add asset
-              </Link>
+              <Button el="link" url={`${admin}/collections/assets/create`}>
+                Create asset
+              </Button>
             ) : null}
             {canManageOtters ? (
-              <Link className="before-dashboard__button" href="/admin/collections/otter-scanners">
-                Manage Otters
-              </Link>
+              <Button buttonStyle="secondary" el="link" url={`${admin}/collections/otter-scanners`}>
+                Manage Otter scanners
+              </Button>
             ) : null}
           </div>
         ) : null}
@@ -115,7 +116,7 @@ const BeforeDashboard = async ({
             <h2>Recently updated</h2>
             <p>Your latest inventory changes.</p>
           </div>
-          <Link href="/admin/collections/assets">All assets →</Link>
+          <Link href={`${admin}/collections/assets`}>All assets</Link>
         </div>
 
         {recent.docs.length ? (
@@ -138,7 +139,7 @@ const BeforeDashboard = async ({
                   return (
                     <tr key={asset.id}>
                       <td>
-                        <Link href={`/admin/collections/assets/${asset.id}`}>{asset.name}</Link>
+                        <Link href={`${admin}/collections/assets/${asset.id}`}>{asset.name}</Link>
                       </td>
                       <td>
                         <span
@@ -150,12 +151,12 @@ const BeforeDashboard = async ({
                       <td>{asset.ipAddress}</td>
                       <td>
                         {site ? (
-                          <Link href={`/admin/collections/sites/${site.id}`}>{site.name}</Link>
+                          <Link href={`${admin}/collections/sites/${site.id}`}>{site.name}</Link>
                         ) : (
                           '—'
                         )}
                       </td>
-                      <td>{new Date(asset.updatedAt).toLocaleDateString()}</td>
+                      <td>{formatDateTime(asset.updatedAt)}</td>
                     </tr>
                   )
                 })}
@@ -165,9 +166,9 @@ const BeforeDashboard = async ({
         ) : (
           <div className="before-dashboard__empty">
             <strong>No assets yet</strong>
-            <p>Add your first device to start the OT inventory.</p>
+            <p>Create your first asset to start the OT inventory.</p>
             {canCreateAssets ? (
-              <Link href="/admin/collections/assets/create">Add first asset</Link>
+              <Link href={`${admin}/collections/assets/create`}>Create asset</Link>
             ) : null}
           </div>
         )}

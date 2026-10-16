@@ -16,7 +16,9 @@ const AssetVulnerabilitiesView = async (props: DocumentViewServerProps) => {
   const page = Math.max(1, Number(props.searchParams?.page) || 1)
 
   const matches = (
-    await findAssemblyVulnerabilities(props.payload, asset, { user: props.user })
+    await findAssemblyVulnerabilities(props.payload, asset, {
+      user: props.initPageResult.req.user ?? undefined,
+    })
   ).sort(bySeverity)
   const pages = Math.max(1, Math.ceil(matches.length / PAGE_SIZE))
   const visible = matches.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
@@ -28,7 +30,7 @@ const AssetVulnerabilitiesView = async (props: DocumentViewServerProps) => {
       disableErrors: true,
       overrideAccess: false,
       pagination: false,
-      user: props.user,
+      user: props.initPageResult.req.user,
     }),
     visible.length
       ? props.payload.find({
@@ -36,7 +38,7 @@ const AssetVulnerabilitiesView = async (props: DocumentViewServerProps) => {
           depth: 0,
           overrideAccess: false,
           pagination: false,
-          user: props.user,
+          user: props.initPageResult.req.user,
           where: { cve: { in: visible.map((match) => match.cve) } },
         })
       : Promise.resolve(undefined),
@@ -54,7 +56,7 @@ const AssetVulnerabilitiesView = async (props: DocumentViewServerProps) => {
         <div className="asset-view__header-main">
           <div>
             <p className="asset-view__eyebrow">Vulnerability lookup</p>
-            <h1>{matches.length} potential vulnerabilities</h1>
+            <h1>{matches.length} potential vulnerability matches</h1>
             <p>
               Matched against downloaded CSAF and NVD advisories, enriched with CISA KEV and ICS
               Advisory Project context, using the vendor, model, operating system, and version data
@@ -71,7 +73,7 @@ const AssetVulnerabilitiesView = async (props: DocumentViewServerProps) => {
 
       <p className="asset-view__warning" role="note">
         These entries are <strong>not validated</strong>. They were found by comparing catalog
-        product and version data with the recorded asset data — no vulnerability check was run
+        product and version data with the recorded asset data. No vulnerability check was run
         against the device.
       </p>
 

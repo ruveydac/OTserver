@@ -71,6 +71,7 @@ export const Vulnerabilities: CollectionConfig = {
 
 export const VulnerabilityFeeds: CollectionConfig = {
   slug: 'vulnerability-feeds',
+  labels: { singular: 'Vulnerability feed', plural: 'Vulnerability feeds' },
   endpoints: [
     { path: '/control', method: 'get', handler: feedControl },
     { path: '/refresh', method: 'post', handler: refreshFeeds },

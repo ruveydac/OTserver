@@ -28,6 +28,11 @@ export const criticalityLabels: Record<string, string> = {
 }
 
 const dateFormatter = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
+const dateOnlyFormatter = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'UTC' })
 
 export const formatDateTime = (value?: null | string) =>
-  value ? dateFormatter.format(new Date(value)) : '—'
+  value
+    ? (/^\d{4}-\d{2}-\d{2}$/.test(value) ? dateOnlyFormatter : dateFormatter).format(
+        new Date(value),
+      )
+    : '—'

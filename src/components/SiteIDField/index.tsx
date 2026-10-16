@@ -12,11 +12,11 @@ const SiteIDField = () => {
 
   return (
     <div className="site-id-field">
-      <label>Site ID</label>
+      <span>Site ID</span>
       <div className="site-id-field__value">
         <code>{siteID}</code>
         <CopyToClipboard
-          defaultMessage="Copy Site ID"
+          defaultMessage="Copy site ID"
           successMessage="Site ID copied"
           value={siteID}
         />

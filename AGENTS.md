@@ -194,6 +194,51 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
   so source lookup must never depend on Payload's physical storage filename.
   Usable CSAF-only catalogs must enable derived counts. Seven-day staging cleanup retains active job
   files; catalog failures must not make previously loaded data unusable.
+- The asset detail view shows the five most severe potential matches, known-exploited first and then
+  highest CVSS, with a paginated view for all matches and their evidence. These are unvalidated
+  metadata matches, not confirmation that a device is vulnerable.
+
+### Vulnerability-feed operator reference
+
+Administrators use **Vulnerabilities > Vulnerability Feeds > Update feeds now** for an on-demand
+refresh. Work continues in the maintenance queue after the browser closes. For isolated installations,
+set `OTSERVER_VULNERABILITY_FEEDS=off` in the application and any external maintenance worker;
+**Upload downloaded feeds** remains available without network access.
+
+Offline transfer workflow:
+
+1. Open **Upload downloaded feeds**, choose a source, and save its download instructions.
+2. Download the original publisher files on an internet-connected computer, retaining their filenames.
+3. Transfer them to the isolated computer and use **Choose files** or **Choose folder**. Retain the
+   selection ID to resume staged uploads.
+4. Use **Check uploaded files** to review coverage, publisher dates, and missing-file links.
+5. Select **Import uploaded … files** and review the results on the feed page.
+
+Required files:
+
+- CISA KEV: `known_exploited_vulnerabilities.json`.
+- NVD: each selected `nvdcve-2.0-YYYY.json.gz` (or `.json`) with its matching `.meta` file.
+- ICS Advisory Project: `CISA_ICS_ADV_Master.csv`.
+- CSAF: the CERT@VDE aggregator, every referenced provider metadata/index/advisory file, and both
+  CISA OT/IT indexes with their referenced advisories.
+
+NVD years can be imported in batches; unselected years and other sources remain intact. Coverage
+stays partial until all annual years from 2002 onward have been loaded. For CSAF, check the initial
+aggregator and CISA indexes, transfer files from the resulting missing-file links, and repeat until
+the snapshot is complete. Preserve `hostname/path/to/file.json` directories for repeated filenames,
+or use **Upload this file** beside the specific missing URL.
+
+Each upload is limited to 500 MiB, each selection to 8 GiB, and decompressed feeds to 2 GiB. Prefer
+compressed NVD files for large years. Staged files expire after seven days, except those needed by
+active jobs. External maintenance workers need the shared `import-files` volume. Successful imports
+recalculate asset counts and audit the initiating administrator.
+
+NVD catalog writes are bounded to 100 records per batch and also flush at roughly 4 MiB of serialized
+data. Asset matching pages candidates in groups of 100.
+
+For a GUI smoke test, import `tests/otserver_otter_files/OTserver-Otter-known-vulnerability.json` as
+Otter JSON. Its Siemens S7-1500 CPU with firmware `V2.8.0` matches `CVE-2020-15782` when the NVD
+catalog is loaded.
 
 ## Importer Development
 
@@ -229,6 +274,11 @@ inventory. Exact file/site/source/override replays do not duplicate evidence. In
 chunking when larger scans justify it. v2 lacks adequate negative coverage for automatic offline
 inference; do not interpret a missing/partial observation as proof that a device is offline.
 
+Deleting an import does not release asset identity bindings. To retry a previously applied upload
+after asset cleanup, delete its import record and upload it again; otherwise exact-file replay
+protection skips processing. The Assets CSV is a schema-dependent diagnostic export, whose columns
+may change with the stored asset schema.
+
 Queued imports retain the same 2000-record atomic limit and call the shared `processImport` service.
 Workers must reload the executing user, recheck current site permissions, verify upload digests, and
 run under the database fence. Never put credentials or serialized requests in job inputs. The web
@@ -260,10 +310,71 @@ Requirements: Node.js 22, pnpm 10, and a MongoDB 8 replica set. Copy `.env.examp
 a long random `OTSERVER_SECRET`. `docker compose up` provides the standalone OTserver and MongoDB;
 the optional `workers` profile is only for separate high-throughput workers.
 
+Use `docker compose up -d mongo` for only the local development database, or
+`docker compose up -d --build` for the complete application. Open `http://localhost:3000/admin`;
+the first account receives the protected Admin role.
+
+### Deployment and worker configuration
+
+- Prebuilt images are published as `ghcr.io/ruveydac/otserver:latest`, `X.Y.Z`, and `X.Y`. Use an exact
+  version tag for pinned deployments. The repository Compose file builds `otserver:local`.
+- Standalone mode runs the web application and both fenced queues. To use separate workers, set
+  `OTSERVER_WORKER_MODE=external` and `OTSERVER_QUEUED_IMPORTS=on`, then run
+  `docker compose --profile workers up -d`. Confirm both worker heartbeats in the administrator
+  operations endpoint before relying on external mode.
+- For a custom Compose deployment, pass the optional settings from `.env` into container
+  `environment` explicitly: `OTSERVER_PUBLIC_URL`, `OTSERVER_OTTER_ENCRYPTION_KEY`,
+  `OTSERVER_QUEUED_IMPORTS`, `OTSERVER_VULNERABILITY_FEEDS`, `OTSERVER_WORKER_MODE`, and `NODE_OPTIONS`.
+  The minimal README deployment passes only the database URL and application secret.
+- External workers use the same database and `OTSERVER_SECRET` as the web application. Import workers
+  need read access to `import-files`; maintenance workers need read/write access and the same online
+  feed setting as the web process. The existing Compose `workers` profile defines these services.
+- Managed Otter requires `OTSERVER_PUBLIC_URL` and a stable, backed-up encryption key generated with
+  `openssl rand -hex 32`. For same-host development, use `http://localhost:3000`; remote controllers
+  require HTTPS. See `otter_management.md` for enrollment, configuration, and protocol details.
+- Standalone Otter uploads use a user's Payload API key and current site permissions. Managed
+  uploads use scanner credentials instead. Standalone SNMP/OPC UA credentials remain in
+  executable-adjacent `otter.json`; never include them in logs or scan exports.
+
+### Container memory and temporary storage
+
 Runtime commands must preserve operator-supplied `NODE_OPTIONS`. The production image defaults to
 `--max-old-space-size=2048`; container memory must also cover native allocations and upload buffers.
 NVD maintenance needs writable, disk-backed temporary storage for one decompressed annual file
-(up to 2 GiB). Kubernetes memory and temporary-storage settings are documented in `README.md`.
+(up to 2 GiB).
+
+For a Kubernetes container with a 4 GiB memory limit, a starting point is:
+
+```yaml
+env:
+  - name: NODE_OPTIONS
+    value: '--max-old-space-size=2048'
+resources:
+  requests:
+    memory: 1Gi
+  limits:
+    memory: 4Gi
+```
+
+Set `NODE_OPTIONS` before Node starts; loading it from the application's `.env` cannot resize a
+running heap. Do not equate the V8 heap with the container memory limit. A JavaScript heap exhaustion
+and Kubernetes `OOMKilled` are different failures. Roll out new pods after changing either limit,
+and remove conflicting `--max-old-space-size` application arguments.
+
+NVD staging uses `TMPDIR` (default `/tmp`). Give maintenance writable disk-backed storage even with
+a read-only root filesystem; avoid memory-backed `emptyDir`. Allow at least 3 GiB of free temporary
+disk space plus ephemeral-storage capacity for the image and logs. Handled failures clean up staging;
+after a forced kill, remove abandoned `otserver-nvd-*` directories only while maintenance is stopped.
+
+Inspect the environment and heap limit for a fresh Node process with:
+
+```bash
+kubectl exec <pod> -c <container> -- node -e 'console.log({NODE_OPTIONS:process.env.NODE_OPTIONS,heapLimitMiB:require("node:v8").getHeapStatistics().heap_size_limit/1024/1024,constrainedMemoryMiB:process.constrainedMemory()/1024/1024})'
+```
+
+Explicit arguments on the application command can still give that process a different limit.
+
+### Test checks
 
 Test commands own a disposable MongoDB 8 replica set and a unique upload directory. Use Docker or
 Podman; direct Vitest invocations stop before loading Payload unless an owning test harness supplies
@@ -280,6 +391,7 @@ Run `pnpm test:container` after changing the Dockerfile or startup/bootstrap beh
 Docker or Podman, builds the production image, starts an isolated MongoDB replica set, verifies the
 fresh-database seeds, external workers without `.env`, queue processing, first-user registration,
 and a database/upload/secret restore, then removes its containers and network.
+Set `CONTAINER_RUNTIME=docker` or `CONTAINER_RUNTIME=podman` to select the runtime explicitly.
 
 `vitest.config.mts` sets 60s per-test and hook timeouts because these tests boot Payload against a real
 MongoDB. A cold container makes the first run slower than later ones.
@@ -319,5 +431,11 @@ origin policy separate from this home-network development exception.
 - Prefer existing helpers and standard-library behavior over new abstractions or dependencies.
 - Fix invariants at their shared boundary rather than patching individual callers.
 - Keep admin UI components free of server functions and other non-serializable Payload/Next objects.
+- Use `initPageResult.req.user` for custom-view authorization and server-side queries; top-level
+  `user` props are read-filtered and may omit roles. List/dashboard slots without a request use
+  `authenticatedAdminUser` from `src/integrations/payload/adminUser.ts`. Keep principals server-only.
+- Admin copy uses sentence case and “Otter configuration” (the API retains `otter-profiles`).
+  Passive catalog results are “Potential vulnerability matches”; use “Create” for documents,
+  “Enroll” for scanners, and “Select” for choices. Reuse Payload controls and theme tokens.
 - Do not weaken validation, access control, auditing, or Otter safety to make a test pass.
 - Update this file only for durable guidance, not temporary status or implementation notes.

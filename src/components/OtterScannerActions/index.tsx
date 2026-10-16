@@ -1,22 +1,37 @@
 'use client'
 
-import { Button, ConfirmationModal, useDocumentInfo, useFormFields, useModal } from '@payloadcms/ui'
+import {
+  Banner,
+  Button,
+  ConfirmationModal,
+  useConfig,
+  useDocumentInfo,
+  useFormFields,
+  useModal,
+} from '@payloadcms/ui'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useState } from 'react'
 import { EnrollmentInstructions, otterAction, type Enrollment } from '../OtterEnrollment'
 
 export default function OtterScannerActions() {
+  const {
+    config: {
+      routes: { api, admin },
+    },
+  } = useConfig()
   const { id, collectionSlug, docPermissions } = useDocumentInfo()
   const scanner = useFormFields(([fields]) => fields.scanner?.value)
   const { openModal } = useModal()
   const router = useRouter()
   const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [enrollment, setEnrollment] = useState<Enrollment>()
   const act = async (path: string, data?: unknown) => {
     setBusy(true)
     setMessage('')
+    setError('')
     try {
       const result = await otterAction(path, data)
       if (result.enrollmentToken) {
@@ -30,7 +45,7 @@ export default function OtterScannerActions() {
         )
       router.refresh()
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'The action failed.')
+      setError(error instanceof Error ? error.message : 'The action failed.')
     } finally {
       setBusy(false)
     }
@@ -54,7 +69,7 @@ export default function OtterScannerActions() {
           confirmLabel="Yes"
           cancelLabel="No"
           onConfirm={() =>
-            act('/api/otter/v1/runs', {
+            act(`${api}/otter/v1/runs`, {
               scannerID:
                 typeof scanner === 'string'
                   ? scanner
@@ -66,13 +81,18 @@ export default function OtterScannerActions() {
           }
         />
         {message ? <p role="status">{message}</p> : null}
+        {error ? (
+          <div role="alert">
+            <Banner type="error">{error}</Banner>
+          </div>
+        ) : null}
       </section>
     )
   return (
     <section>
       <p>
         Configure and run scans from{' '}
-        <Link href="/admin/collections/otter-profiles">Otter Configurations</Link>.
+        <Link href={`${admin}/collections/otter-profiles`}>Otter configurations</Link>.
       </p>
       <Button
         disabled={busy}
@@ -91,17 +111,22 @@ export default function OtterScannerActions() {
         Revoke
       </Button>
       {message ? <p role="status">{message}</p> : null}
+      {error ? (
+        <div role="alert">
+          <Banner type="error">{error}</Banner>
+        </div>
+      ) : null}
       <ConfirmationModal
         modalSlug="otter-reenroll-confirm"
         heading="Re-enroll scanner?"
         body="This revokes the existing credential and generates a new single-use enrollment token."
-        onConfirm={() => act(`/api/otter/v1/scanners/${id}/reenroll`)}
+        onConfirm={() => act(`${api}/otter/v1/scanners/${id}/reenroll`)}
       />
       <ConfirmationModal
         modalSlug="otter-revoke-confirm"
         heading="Revoke scanner?"
         body="This disables the scanner and revokes its credential. Re-enroll it to connect again."
-        onConfirm={() => act(`/api/otter/v1/scanners/${id}/revoke`)}
+        onConfirm={() => act(`${api}/otter/v1/scanners/${id}/revoke`)}
       />
       <ConfirmationModal
         modalSlug="otter-reenrollment-token"

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import {
   APIError,
   type CollectionAfterChangeHook,
@@ -103,6 +104,13 @@ export const syncEndpointProjection: CollectionAfterChangeHook = async ({
   return doc
 }
 
+const identityValue = (field: string, value: unknown) => {
+  if (field === 'mergedInto' || field === 'replacedBy') return idOf(value)
+  if (field === 'networkAddresses' || field === 'networkMACs')
+    return (Array.isArray(value) ? value : []).map((item) => record(item).address).sort()
+  return value
+}
+
 export const protectAssetIdentity: CollectionBeforeChangeHook = async ({
   data,
   originalDoc,
@@ -129,12 +137,15 @@ export const protectAssetIdentity: CollectionBeforeChangeHook = async ({
   if (originalDoc?.id && Object.hasOwn(data, 'site') && idOf(data.site) !== idOf(originalDoc.site))
     throw new APIError('Use the Transfer identity action to move hardware between sites.', 400)
   for (const field of ['uuid', 'mergedInto', 'replacedBy', 'networkAddresses', 'networkMACs']) {
+    if (!originalDoc?.id || !Object.hasOwn(data, field)) continue
     if (
-      originalDoc?.id &&
-      Object.hasOwn(data, field) &&
-      JSON.stringify(data[field]) !== JSON.stringify(originalDoc[field])
+      !isDeepStrictEqual(
+        identityValue(field, data[field]),
+        identityValue(field, originalDoc[field]),
+      )
     )
       throw new APIError(`${field} is managed by device identity actions.`, 400)
+    delete data[field]
   }
   if (
     originalDoc?.id &&

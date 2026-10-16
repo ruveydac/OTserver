@@ -7,6 +7,8 @@ const ui = vi.hoisted(() => ({
   setValue: vi.fn(),
 }))
 
+vi.mock('next/headers', () => ({ headers: async () => new Headers() }))
+
 vi.mock('@payloadcms/ui', async () => {
   const { createElement } = await import('react')
   return {
@@ -21,6 +23,7 @@ vi.mock('@payloadcms/ui', async () => {
     useDocumentInfo: () => ({}),
     useField: () => ({ setValue: ui.setValue, value: 'nmap' }),
     useModal: () => ({ openModal: ui.openModal }),
+    useConfig: () => ({ config: { routes: { admin: '/admin', api: '/api' } } }),
   }
 })
 
@@ -863,6 +866,8 @@ describe('collection safety hooks', () => {
 describe('admin presentation', () => {
   it('renders dashboard metrics, actions, and recent assets', async () => {
     const payload = {
+      config: { routes: { admin: '/admin' } },
+      auth: vi.fn().mockResolvedValue({ user: null }),
       count: vi
         .fn()
         .mockResolvedValueOnce({ totalDocs: 4 })
@@ -896,13 +901,14 @@ describe('admin presentation', () => {
     const html = renderToStaticMarkup(view)
     expect(html).toContain('Total assets</span><strong>4')
     expect(html).toContain('Manage sites')
-    expect(html).toContain('Manage Otters')
+    expect(html).toContain('Manage Otter scanners')
     expect(html).toContain('PLC')
     expect(html).toContain('Plant')
   })
 
   it('renders empty dashboard and both site-list modes', async () => {
     const payload = {
+      auth: vi.fn().mockResolvedValue({ user: null }),
       config: { routes: { admin: '/admin' } },
       count: vi.fn().mockResolvedValue({ totalDocs: 0 }),
       find: vi.fn().mockResolvedValue({ docs: [] }),
@@ -941,12 +947,13 @@ describe('admin presentation', () => {
       hasCreatePermission: true,
       newDocumentURL: '/admin/collections/sites/create',
       payload: {
+        auth: vi.fn().mockResolvedValue({ user: null }),
         config: { routes: { admin: '/admin' } },
         find: vi.fn().mockResolvedValue({ docs: sites }),
       },
     } as never)
     const html = renderToStaticMarkup(view)
-    expect(html).toContain('Add site')
+    expect(html).toContain('Create site')
     expect(html).toContain('Plant / Line 2')
     expect(html).toContain('View assets')
     expect(html).toContain('where%5Bsite%5D%5Bequals%5D=root')

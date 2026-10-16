@@ -247,7 +247,7 @@ export const AssetImports: CollectionConfig = {
       'skippedAssets',
     ],
     description: 'Import physical identity and network evidence into a selected site.',
-    group: 'OT Inventory',
+    group: 'OT inventory',
     useAsTitle: 'name',
   },
   fields: [
@@ -371,7 +371,7 @@ export const AssetImports: CollectionConfig = {
       name: 'sourceVersion',
       type: 'text',
       defaultValue: 'unknown',
-      label: 'Otter version',
+      label: 'Source version',
       required: true,
     },
     {

@@ -1,4 +1,4 @@
-import { DefaultListView } from '@payloadcms/ui'
+import { Button, DefaultListView } from '@payloadcms/ui'
 import Link from 'next/link'
 import type { ListViewServerProps } from 'payload'
 
@@ -6,6 +6,8 @@ import { forwardListViewProps } from '@/components/forwardListViewProps'
 import type { Site } from '@/payload-types'
 
 import { assetListURL } from '@/components/assetListURL'
+import { authenticatedAdminUser } from '@/integrations/payload/adminUser'
+import { formatDateTime } from '@/components/labels'
 
 import './index.scss'
 
@@ -60,7 +62,7 @@ const SiteTreeView = async (props: ListViewServerProps) => {
     overrideAccess: false,
     pagination: false,
     sort: 'name',
-    user: props.user,
+    user: await authenticatedAdminUser(props.payload),
   })
   const rows = buildSiteTree(result.docs)
   const adminRoute = props.payload.config.routes.admin
@@ -73,9 +75,9 @@ const SiteTreeView = async (props: ListViewServerProps) => {
           <p>Sites are sorted by hierarchy and alphabetically within each parent.</p>
         </div>
         {props.hasCreatePermission ? (
-          <Link className="table-view__create" href={props.newDocumentURL}>
-            Add site
-          </Link>
+          <Button el="link" url={props.newDocumentURL}>
+            Create site
+          </Button>
         ) : null}
       </header>
 
@@ -113,7 +115,7 @@ const SiteTreeView = async (props: ListViewServerProps) => {
                   <td>
                     <Link href={assetListURL(adminRoute, 'site', site.id)}>View assets</Link>
                   </td>
-                  <td>{new Date(site.updatedAt).toLocaleDateString()}</td>
+                  <td>{formatDateTime(site.updatedAt)}</td>
                 </tr>
               ))}
             </tbody>
@@ -122,7 +124,7 @@ const SiteTreeView = async (props: ListViewServerProps) => {
       ) : (
         <div className="table-view__empty">
           <h2>No sites yet</h2>
-          <p>Add the first site before creating or importing assets.</p>
+          <p>Create the first site before creating or importing assets.</p>
         </div>
       )}
     </main>

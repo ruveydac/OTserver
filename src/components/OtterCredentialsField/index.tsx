@@ -1,8 +1,9 @@
 'use client'
 
-import { Button, useDocumentInfo, useField } from '@payloadcms/ui'
+import { Banner, Button, useConfig, useDocumentInfo, useField } from '@payloadcms/ui'
 import { useState } from 'react'
 import type { UIFieldClientComponent } from 'payload'
+import './index.scss'
 
 type SnmpEntry = {
   version: string
@@ -39,6 +40,11 @@ const input = (label: string, value: string, onChange: (value: string) => void, 
 )
 
 const OtterCredentialsField: UIFieldClientComponent = ({ readOnly }) => {
+  const {
+    config: {
+      routes: { api },
+    },
+  } = useConfig()
   const { id } = useDocumentInfo()
   const { value: configured } = useField<boolean>({ path: 'credentialsConfigured' })
   const [savedConfigured, setSavedConfigured] = useState<boolean>()
@@ -48,10 +54,13 @@ const OtterCredentialsField: UIFieldClientComponent = ({ readOnly }) => {
   const [opcuaUsername, setOpcuaUsername] = useState('')
   const [opcuaPassword, setOpcuaPassword] = useState('')
   const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
   const save = async (clear = false) => {
-    if (!id) return setMessage('Save the profile before configuring credentials.')
+    if (readOnly) return
+    setError('')
+    if (!id) return setError('Save the configuration before adding credentials.')
     const settings = snmp
       .map((entry) =>
         Object.fromEntries(
@@ -67,13 +76,13 @@ const OtterCredentialsField: UIFieldClientComponent = ({ readOnly }) => {
       ...(opcuaPassword ? { opcuaPassword } : {}),
     }
     if (!clear && !Object.keys(credentials).length)
-      return setMessage('Add at least one SNMP or OPC UA credential before saving.')
+      return setError('Add at least one SNMP or OPC UA credential before saving.')
 
     setBusy(true)
     setMessage('')
     try {
       const response = await fetch(
-        `/api/otter/v1/profiles/${encodeURIComponent(String(id))}/credentials`,
+        `${api}/otter/v1/profiles/${encodeURIComponent(String(id))}/credentials`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -96,7 +105,7 @@ const OtterCredentialsField: UIFieldClientComponent = ({ readOnly }) => {
           : 'Credentials encrypted and saved. Submitted secret values were cleared from this form.',
       )
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not save Otter credentials.')
+      setError(error instanceof Error ? error.message : 'Could not save Otter credentials.')
     } finally {
       setBusy(false)
     }
@@ -110,7 +119,7 @@ const OtterCredentialsField: UIFieldClientComponent = ({ readOnly }) => {
           ? 'New configurations automatically start with SNMP v2c community public. Save the configuration to replace or clear these defaults.'
           : hasCredentials
             ? 'Credentials are configured and encrypted at rest. Existing values cannot be read.'
-            : 'No credentials are stored for this profile.'}
+            : 'No credentials are stored for this configuration.'}
       </p>
       {!readOnly ? (
         <>
@@ -294,6 +303,11 @@ const OtterCredentialsField: UIFieldClientComponent = ({ readOnly }) => {
             ) : null}
           </div>
         </>
+      ) : null}
+      {error ? (
+        <div role="alert">
+          <Banner type="error">{error}</Banner>
+        </div>
       ) : null}
       {message ? (
         <p aria-live="polite" role="status">

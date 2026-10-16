@@ -1,0 +1,57 @@
+.otter-credentials {
+  border: 1px solid var(--theme-elevation-300);
+  border-radius: var(--style-radius-s);
+  display: grid;
+  gap: var(--base);
+  margin: var(--base) 0;
+  padding: var(--base);
+
+  p {
+    margin: 0;
+  }
+
+  &__section {
+    border-top: 1px solid var(--theme-elevation-200);
+    display: grid;
+    gap: var(--base);
+    padding-top: var(--base);
+  }
+
+  &__entry {
+    align-items: end;
+    border-bottom: 1px solid var(--theme-elevation-200);
+    display: grid;
+    gap: var(--base);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: var(--base) 0;
+  }
+
+  &__field {
+    display: grid;
+    gap: calc(var(--base) / 4);
+    min-width: 0;
+  }
+
+  input,
+  select {
+    background: var(--theme-input-bg);
+    border: 1px solid var(--theme-elevation-400);
+    border-radius: var(--style-radius-s);
+    color: var(--theme-text);
+    min-height: 44px;
+    min-width: 0;
+    padding: calc(var(--base) / 2);
+  }
+
+  &__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--base);
+  }
+
+  @media (max-width: 900px) {
+    &__entry {
+      grid-template-columns: 1fr;
+    }
+  }
+}

@@ -1,13 +1,13 @@
 'use client'
 
 import {
-  FieldError,
-  FieldLabel,
+  Banner,
   ReactSelect,
   TextInput,
   useDocumentInfo,
   useField,
   useFormFields,
+  useConfig,
 } from '@payloadcms/ui'
 import { useEffect, useState } from 'react'
 import type { ChangeEvent } from 'react'
@@ -21,7 +21,12 @@ type Adapter = {
   ipAddresses: string[]
 }
 
-const OtterInterfaceField: TextFieldClientComponent = ({ field, path }) => {
+const OtterInterfaceField: TextFieldClientComponent = ({ field, path, readOnly }) => {
+  const {
+    config: {
+      routes: { api },
+    },
+  } = useConfig()
   const { setValue, value } = useField<string>({ path })
   const { id, collectionSlug } = useDocumentInfo()
   const scanner = useFormFields(([fields]) => fields.scanner?.value)
@@ -33,27 +38,45 @@ const OtterInterfaceField: TextFieldClientComponent = ({ field, path }) => {
         : scanner && typeof scanner === 'object' && 'value' in scanner
           ? String(scanner.value)
           : ''
-  const [inventory, setInventory] = useState<{ scannerID: string; adapters: Adapter[] }>()
+  const [inventory, setInventory] = useState<{
+    scannerID: string
+    adapters: Adapter[]
+    error?: string
+  }>()
+  const inventoryError = inventory?.scannerID === scannerID ? inventory.error : undefined
 
   useEffect(() => {
     if (!scannerID) return
     const abort = new AbortController()
-    void fetch(`/api/otter/v1/scanners/${encodeURIComponent(scannerID)}`, {
+    void fetch(`${api}/otter/v1/scanners/${encodeURIComponent(scannerID)}`, {
       cache: 'no-store',
       signal: abort.signal,
     })
-      .then((response) =>
-        response.ok ? (response.json() as Promise<{ networkAdapters?: Adapter[] }>) : null,
-      )
+      .then((response) => {
+        if (!response.ok)
+          throw new Error(
+            'Could not load scanner adapters. Enter the technical name or reload this page to try again.',
+          )
+        return response.json() as Promise<{ networkAdapters?: Adapter[] }>
+      })
       .then((scanner) =>
         setInventory({
           scannerID,
           adapters: scanner?.networkAdapters || [],
         }),
       )
-      .catch(() => setInventory({ scannerID, adapters: [] }))
+      .catch(() => {
+        if (!abort.signal.aborted) {
+          setInventory({
+            scannerID,
+            adapters: [],
+            error:
+              'Could not load scanner adapters. Enter the technical name or reload this page to try again.',
+          })
+        }
+      })
     return () => abort.abort()
-  }, [scannerID])
+  }, [api, scannerID])
 
   const adapters = inventory?.scannerID === scannerID ? inventory.adapters : []
   const options = adapters.map((adapter) => ({
@@ -67,13 +90,19 @@ const OtterInterfaceField: TextFieldClientComponent = ({ field, path }) => {
 
   return (
     <div className="field-type text otter-interface-field">
-      <FieldLabel
-        label={field.label || 'Network interface'}
-        path={path}
-        required={field.required}
-      />
+      {scannerID && inventory?.scannerID !== scannerID ? (
+        <p role="status">Loading scanner adapters…</p>
+      ) : null}
+      {inventoryError ? (
+        <div role="alert">
+          <Banner type="error">{inventoryError}</Banner>
+        </div>
+      ) : null}
       {options.length ? (
         <ReactSelect
+          disabled={readOnly}
+          inputId={`${path}-adapter`}
+          aria-label="Reported network adapter"
           isClearable
           onChange={(option) =>
             setValue(
@@ -85,30 +114,34 @@ const OtterInterfaceField: TextFieldClientComponent = ({ field, path }) => {
             )
           }
           options={options}
-          placeholder="Choose a reported network adapter"
+          placeholder="Select a reported network adapter"
           value={selected}
         />
       ) : null}
       <TextInput
+        label={field.label || 'Network interface'}
+        required={field.required}
+        readOnly={readOnly}
         path={path}
         placeholder="e.g. eth0 or Ethernet adapter identifier"
         value={value || ''}
         onChange={(event: ChangeEvent<HTMLInputElement>) => setValue(event.target.value)}
       />
-      <FieldError path={path} />
       {selectedAdapter ? (
         <p className="field-description">
           {selectedAdapter.description} · {selectedAdapter.name} ·{' '}
           {selectedAdapter.macAddress || 'MAC not reported'} ·{' '}
           {selectedAdapter.ipAddresses.join(', ') || 'No IP addresses'}
         </p>
-      ) : (
+      ) : inventoryError || (scannerID && inventory?.scannerID !== scannerID) ? null : (
         <p className="field-description">
           {value
             ? 'The selected adapter is not currently reported; its name is preserved.'
             : options.length
-              ? 'Choose a reported adapter or enter its technical name.'
-              : 'Enroll the scanner to select a reported adapter, or enter its technical name.'}
+              ? 'Select a reported adapter or enter its technical name.'
+              : scannerID
+                ? 'No adapters have been reported. Enter the adapter’s technical name or wait for the scanner to report its inventory.'
+                : 'Select a scanner to load its reported adapters, or enter a technical name.'}
         </p>
       )}
       <p className="field-description">
