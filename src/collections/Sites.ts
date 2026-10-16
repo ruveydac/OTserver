@@ -161,6 +161,7 @@ const preventDeletingUsedSites: CollectionBeforeDeleteHook = async ({ id, req })
 
 export const Sites: CollectionConfig = {
   slug: 'sites',
+  labels: { singular: 'Site', plural: 'Sites' },
   access: {
     create: canCreateSite,
     delete: canWriteSites,
@@ -173,7 +174,7 @@ export const Sites: CollectionConfig = {
     },
     defaultColumns: ['name', 'type', 'parent', 'updatedAt'],
     description: 'Organize assets with your own site types and hierarchy.',
-    group: 'OT Inventory',
+    group: 'OT inventory',
     listSearchableFields: ['name', 'type', 'description'],
     useAsTitle: 'path',
   },

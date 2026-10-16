@@ -1,6 +1,6 @@
 'use client'
 
-import { Button, useListQuery, useSelection } from '@payloadcms/ui'
+import { Banner, Button, useConfig, useListQuery, useSelection } from '@payloadcms/ui'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -9,6 +9,13 @@ import { whereToLucene } from '@/search/whereToLucene'
 
 const AssetListInteractions = () => {
   const router = useRouter()
+  const {
+    config: {
+      routes: { api, admin },
+    },
+  } = useConfig()
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState('')
   const { query, refineListData } = useListQuery()
   const { count, getQueryParams, selectAll } = useSelection()
   const [actionsTarget, setActionsTarget] = useState<HTMLElement | null>(null)
@@ -16,20 +23,31 @@ const AssetListInteractions = () => {
   const hasGraphicalFilters = Boolean(query?.where && Object.keys(query.where).length)
 
   const downloadCSV = async () => {
-    // getQueryParams() loses a typed Lucene search when selecting everything, so
-    // send it directly; the placeholder where would mask the search hook instead.
-    const params =
-      selectAll === 'allAvailable' && !hasGraphicalFilters && query?.search
-        ? `?search=${encodeURIComponent(query.search)}`
-        : getQueryParams()
-    const response = await fetch(`/api/assets/export-csv${params}`)
-    if (!response.ok) return
-    const url = URL.createObjectURL(await response.blob())
-    const link = document.createElement('a')
-    link.download = 'assets.csv'
-    link.href = url
-    link.click()
-    URL.revokeObjectURL(url)
+    setExporting(true)
+    setExportError('')
+    try {
+      // getQueryParams() loses a typed Lucene search when selecting everything, so
+      // send it directly; the placeholder where would mask the search hook instead.
+      const params =
+        selectAll === 'allAvailable' && !hasGraphicalFilters && query?.search
+          ? `?search=${encodeURIComponent(query.search)}`
+          : getQueryParams()
+      const response = await fetch(`${api}/assets/export-csv${params}`)
+      if (!response.ok) throw new Error('Export failed')
+      const url = URL.createObjectURL(await response.blob())
+      try {
+        const link = document.createElement('a')
+        link.download = 'assets.csv'
+        link.href = url
+        link.click()
+      } finally {
+        URL.revokeObjectURL(url)
+      }
+    } catch {
+      setExportError('Could not export assets. Check your connection and try again.')
+    } finally {
+      setExporting(false)
+    }
   }
 
   useEffect(() => {
@@ -55,12 +73,12 @@ const AssetListInteractions = () => {
         '.collection-list--assets tbody tr[data-id]',
       )
       if (row?.dataset.id)
-        router.push(`/admin/collections/assets/${encodeURIComponent(row.dataset.id)}`)
+        router.push(`${admin}/collections/assets/${encodeURIComponent(row.dataset.id)}`)
     }
 
     document.addEventListener('dblclick', openAsset)
     return () => document.removeEventListener('dblclick', openAsset)
-  }, [router])
+  }, [admin, router])
 
   // ponytail: Payload exposes no slot for custom selection-bar actions; portal into
   // the native bar and re-resolve the target when the bar appears or disappears.
@@ -81,11 +99,17 @@ const AssetListInteractions = () => {
             buttonStyle="none"
             className="list-selection__button asset-export-csv"
             onClick={() => void downloadCSV()}
+            disabled={exporting}
           >
-            Download diagnostic CSV
+            {exporting ? 'Exporting…' : 'Export diagnostic CSV'}
           </Button>,
           actionsTarget,
         )}
+      {exportError ? (
+        <div role="alert">
+          <Banner type="error">{exportError}</Banner>
+        </div>
+      ) : null}
       <p className="asset-search-help">
         Type Lucene directly or use <strong>Filters</strong> to build it graphically. Examples:{' '}
         <code>status:online AND vendor:Siemens</code>, <code>class:PLC</code>, or{' '}

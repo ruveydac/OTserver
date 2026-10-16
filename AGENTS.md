@@ -319,5 +319,11 @@ origin policy separate from this home-network development exception.
 - Prefer existing helpers and standard-library behavior over new abstractions or dependencies.
 - Fix invariants at their shared boundary rather than patching individual callers.
 - Keep admin UI components free of server functions and other non-serializable Payload/Next objects.
+- Use `initPageResult.req.user` for custom-view authorization and server-side queries; top-level
+  `user` props are read-filtered and may omit roles. List/dashboard slots without a request use
+  `authenticatedAdminUser` from `src/integrations/payload/adminUser.ts`. Keep principals server-only.
+- Admin copy uses sentence case and “Otter configuration” (the API retains `otter-profiles`).
+  Passive catalog results are “Potential vulnerability matches”; use “Create” for documents,
+  “Enroll” for scanners, and “Select” for choices. Reuse Payload controls and theme tokens.
 - Do not weaken validation, access control, auditing, or Otter safety to make a test pass.
 - Update this file only for durable guidance, not temporary status or implementation notes.

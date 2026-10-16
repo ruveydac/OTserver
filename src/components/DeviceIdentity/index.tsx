@@ -37,7 +37,7 @@ export default async function DeviceIdentity({
   const emptyPage = { docs: [], hasNextPage: false }
   const [endpoints, services, identifiers, installations, cases, targets, sites] =
     await Promise.all([
-      showNetwork
+      showNetwork || writable
         ? payload.find({
             collection: 'network-endpoints',
             limit: 200,

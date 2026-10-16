@@ -10,7 +10,7 @@ import './index.scss'
 
 const TopologyView = async (props: AdminViewServerProps) => {
   const { payload } = props
-  const user = props.user ?? props.initPageResult?.req?.user
+  const user = props.initPageResult.req.user
   const adminRoute = payload.config.routes.admin
 
   const templateProps = {
@@ -21,7 +21,7 @@ const TopologyView = async (props: AdminViewServerProps) => {
     permissions: props.initPageResult?.permissions,
     req: props.initPageResult?.req,
     searchParams: props.searchParams,
-    user,
+    user: props.user,
     viewType: props.viewType,
     visibleEntities: props.initPageResult?.visibleEntities ?? { collections: [], globals: [] },
   } as DefaultTemplateProps

@@ -5,6 +5,22 @@ import { getPayload, type Payload } from 'payload'
 
 import { ensureAssetClass } from '../../src/collections/AssetClasses'
 import { loadAssetPanel } from '../../src/application/assetPanel'
+import SiteTreeView from '../../src/components/SiteTreeView'
+import BeforeDashboard from '../../src/components/BeforeDashboard'
+import { renderToStaticMarkup } from 'react-dom/server'
+
+const requestHeaders = vi.hoisted(() => ({ authorization: '' }))
+vi.mock('next/headers', () => ({
+  headers: async () => new Headers({ authorization: requestHeaders.authorization }),
+}))
+vi.mock('@payloadcms/ui', async () => {
+  const { createElement } = await import('react')
+  return {
+    DefaultListView: () => createElement('div', null, 'Payload list'),
+    Button: ({ children, url }: { children: React.ReactNode; url?: string }) =>
+      createElement('a', { href: url }, children),
+  }
+})
 
 let payload: Payload
 let assetClassID: string
@@ -81,16 +97,38 @@ describe('asset panel read interface', () => {
         },
       })
       roleID = role.id
+      const password = randomUUID()
       const user = await payload.create({
         collection: 'users',
         data: {
           email: `asset-panel-${randomUUID()}@example.test`,
           name: 'Asset panel reader',
-          password: randomUUID(),
+          password,
           role: role.id,
         },
       })
       userID = user.id
+      const login = await payload.login({
+        collection: 'users',
+        data: { email: user.email, password },
+      })
+      requestHeaders.authorization = `JWT ${login.token}`
+      const filteredUser = await payload.findByID({
+        collection: 'users',
+        id: user.id,
+        user,
+        overrideAccess: false,
+      })
+      expect(filteredUser.role).toBeUndefined()
+      const sitesHTML = renderToStaticMarkup(
+        await SiteTreeView({
+          enableRowSelections: true,
+          payload,
+          user: filteredUser,
+        } as never),
+      )
+      expect(sitesHTML).toContain(site.name)
+      expect(sitesHTML).not.toContain(otherSite.name)
       const asset = await payload.create({
         collection: 'assets',
         data: {
@@ -115,6 +153,11 @@ describe('asset panel read interface', () => {
         },
       })
       assetIDs.push(foreign.id)
+      const dashboardHTML = renderToStaticMarkup(
+        await BeforeDashboard({ payload, user: filteredUser }),
+      )
+      expect(dashboardHTML).toContain('Panel asset')
+      expect(dashboardHTML).not.toContain('Foreign panel asset')
       await payload.update({ collection: 'assets', id: asset.id, data: { status: 'online' } })
       const readerAsset = await payload.findByID({
         collection: 'assets',
@@ -156,6 +199,7 @@ describe('asset panel read interface', () => {
       ).toBe(true)
       expect(firstPage.historyScopeTruncated).toBe(false)
     } finally {
+      requestHeaders.authorization = ''
       for (const assetID of assetIDs)
         await payload.delete({ collection: 'assets', id: assetID }).catch(() => {})
       for (const site of [siteID, otherSiteID])

@@ -65,6 +65,7 @@ const keepTypeStable: CollectionBeforeChangeHook = ({ data, originalDoc }) => {
 
 export const AssetFields: CollectionConfig = {
   slug: 'asset-fields',
+  labels: { singular: 'Custom asset field', plural: 'Custom asset fields' },
   access: {
     create: adminOnly,
     delete: adminOnly,

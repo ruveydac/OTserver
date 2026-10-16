@@ -41,6 +41,7 @@ const firstUserAdminRoleDefault = async ({ req }: { req: PayloadRequest }) => {
 
 export const Users: CollectionConfig = {
   slug: 'users',
+  labels: { singular: 'User', plural: 'Users' },
   access: {
     admin: ({ req }) => Boolean(req.user),
     create: canCreateUser,
@@ -50,7 +51,7 @@ export const Users: CollectionConfig = {
   },
   admin: {
     defaultColumns: ['name', 'email', 'role'],
-    group: 'Access Control',
+    group: 'Access control',
     hidden: hideFromNonAdmins,
     useAsTitle: 'name',
   },

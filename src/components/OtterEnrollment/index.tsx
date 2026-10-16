@@ -61,7 +61,7 @@ export default function OtterEnrollment() {
   const { permissions } = useAuth()
   const {
     config: {
-      routes: { admin },
+      routes: { admin, api },
     },
   } = useConfig()
   const { openModal, isModalOpen } = useModal()
@@ -72,13 +72,14 @@ export default function OtterEnrollment() {
   const [enrollment, setEnrollment] = useState<Enrollment>()
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [loadingSites, setLoadingSites] = useState(true)
   const slug = 'otter-scanner-enrollment'
   const opened = isModalOpen(slug)
 
   useEffect(() => {
     if (!opened) return
     const abort = new AbortController()
-    void fetch('/api/otter/v1/overview', { cache: 'no-store', signal: abort.signal })
+    void fetch(`${api}/otter/v1/overview`, { cache: 'no-store', signal: abort.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error('Could not load enrollment sites.')
         return response.json() as Promise<{ writableSites: Array<{ id: string; name: string }> }>
@@ -91,10 +92,16 @@ export default function OtterEnrollment() {
         if (!abort.signal.aborted)
           setError(error instanceof Error ? error.message : 'Could not load sites.')
       })
+      .finally(() => {
+        if (!abort.signal.aborted) setLoadingSites(false)
+      })
     return () => abort.abort()
-  }, [opened])
+  }, [api, opened])
 
   const clear = () => {
+    setLoadingSites(true)
+    setSites([])
+    setSite('')
     setEnrollment(undefined)
     setName('')
     setError('')
@@ -111,7 +118,7 @@ export default function OtterEnrollment() {
         }}
         type="button"
       >
-        Create New
+        Enroll scanner
       </Button>
       <ConfirmationModal
         className="otter-enrollment"
@@ -146,7 +153,7 @@ export default function OtterEnrollment() {
                   event.preventDefault()
                   setBusy(true)
                   setError('')
-                  void otterAction('/api/otter/v1/scanners', { name, site })
+                  void otterAction(`${api}/otter/v1/scanners`, { name, site })
                     .then((result: Enrollment) => setEnrollment(result))
                     .catch((error: unknown) =>
                       setError(error instanceof Error ? error.message : 'Enrollment failed.'),
@@ -154,6 +161,11 @@ export default function OtterEnrollment() {
                     .finally(() => setBusy(false))
                 }}
               >
+                {loadingSites ? (
+                  <p role="status">Loading sites…</p>
+                ) : !error && !sites.length ? (
+                  <p>No writable sites are available. Ask an administrator for site access.</p>
+                ) : null}
                 <label>
                   Scanner name
                   <input

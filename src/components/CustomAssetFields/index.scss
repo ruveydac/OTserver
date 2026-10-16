@@ -1,6 +1,6 @@
 .custom-asset-fields {
   border: 1px solid var(--theme-elevation-150);
-  border-radius: 4px;
+  border-radius: var(--style-radius-s);
   margin: 1.5rem 0;
   padding: 1rem;
 
@@ -39,7 +39,7 @@
     textarea {
       background: var(--theme-input-bg);
       border: 1px solid var(--theme-elevation-250);
-      border-radius: 4px;
+      border-radius: var(--style-radius-s);
       color: var(--theme-text);
       font: inherit;
       padding: 0.7rem;
@@ -59,10 +59,6 @@
     align-items: center;
     display: flex;
     gap: 0.5rem;
-  }
-
-  &__error {
-    color: var(--theme-error-500) !important;
   }
 
   @media (max-width: 700px) {
