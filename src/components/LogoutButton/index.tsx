@@ -1,11 +1,16 @@
-import './index.scss'
+'use client'
 
-import Link from 'next/link'
+import { Button, useConfig } from '@payloadcms/ui'
 
 export default function LogoutButton() {
+  const {
+    config: {
+      routes: { admin },
+    },
+  } = useConfig()
   return (
-    <Link className="logout-button" href="/admin/logout" prefetch={false}>
+    <Button buttonStyle="secondary" el="link" url={`${admin}/logout`}>
       Log out
-    </Link>
+    </Button>
   )
 }

@@ -359,7 +359,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
   } = await loadAssetPanel({
     asset,
     payload: props.payload,
-    user: props.user,
+    user: props.initPageResult.req.user ?? undefined,
     historyPage,
     discoveryPage,
     topologyPage,
@@ -450,7 +450,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
             value: fieldValue(asset, 'operatingSystem', asset.operatingSystem),
           },
           {
-            label: 'OS confidence',
+            label: 'OS detection confidence (%)',
             value:
               asset.osAccuracy === null || asset.osAccuracy === undefined
                 ? undefined
@@ -474,7 +474,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
           },
           { label: 'Last seen', value: formatDateTime(asset.lastSeen) },
           {
-            label: 'Potential vulnerabilities',
+            label: 'Potential vulnerability matches',
             value: <VulnerabilityList assetURL={assetURL} matches={matches} />,
             wide: true,
           },
@@ -501,7 +501,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
         />
       ) : null}
       {definitions.hasNextPage ? (
-        <p role="status">Only the first 200 custom field definitions are shown.</p>
+        <p role="status">Only the first {definitions.limit} custom field definitions are shown.</p>
       ) : null}
       <Section
         details={
@@ -531,7 +531,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
         details={[
           { label: 'Primary IP address', value: copyValue(asset.ipAddress) },
           { label: 'Network mask', value: copyValue(asset.networkMask) },
-          { label: 'Gateway', value: copyValue(asset.gatewayAddress) },
+          { label: 'Gateway address', value: copyValue(asset.gatewayAddress) },
           { label: 'Primary MAC address', value: copyValue(asset.macAddress) },
           {
             label: 'Protocols',
@@ -541,8 +541,13 @@ const AssetView = async (props: DocumentViewServerProps) => {
         ]}
         title="Network parameters"
       />
-      {props.user ? (
-        <DeviceIdentity asset={asset} payload={props.payload} user={props.user} view="network" />
+      {props.initPageResult.req.user ? (
+        <DeviceIdentity
+          asset={asset}
+          payload={props.payload}
+          user={props.initPageResult.req.user}
+          view="network"
+        />
       ) : null}
       <Section
         details={
@@ -586,7 +591,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
             value: fieldValue(asset, 'operatingSystem', asset.operatingSystem),
           },
           {
-            label: 'OS confidence',
+            label: 'OS detection confidence (%)',
             value: asset.osAccuracy == null ? undefined : `${asset.osAccuracy}%`,
           },
           { label: 'Physical kind', value: asset.physicalKind },
@@ -596,8 +601,13 @@ const AssetView = async (props: DocumentViewServerProps) => {
         ]}
         title="Hardware record"
       />
-      {props.user ? (
-        <DeviceIdentity asset={asset} payload={props.payload} user={props.user} view="hardware" />
+      {props.initPageResult.req.user ? (
+        <DeviceIdentity
+          asset={asset}
+          payload={props.payload}
+          user={props.initPageResult.req.user}
+          view="hardware"
+        />
       ) : null}
       <Section
         details={[
@@ -841,7 +851,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
           <small>{endpointTotal === 1 ? 'active binding' : 'active bindings'}</small>
         </Link>
         <Link className="asset-view__metric" href={tabURL('security')}>
-          <span>Potential vulnerabilities</span>
+          <span>Potential vulnerability matches</span>
           <strong>{asset.vulnerabilityCount == null ? '—' : matches.length}</strong>
           <small>{asset.vulnerabilityCount == null ? 'Not evaluated' : 'Catalog matches'}</small>
         </Link>

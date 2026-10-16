@@ -6,13 +6,16 @@ import { describe, expect, it, vi } from 'vitest'
 import { normalizeMAC, validateIPAddress, validateMACAddress } from '../../src/collections/Assets'
 import { findMatchingAssetClass, validateAssignmentRegex } from '../../src/collections/AssetClasses'
 import AssetClassListView from '../../src/components/AssetClassListView'
+import AssetClassAssetsCell from '../../src/components/AssetClassAssetsCell'
 import AssetView from '../../src/components/AssetView'
 import { assetListURL } from '../../src/components/assetListURL'
+import { formatDateTime } from '../../src/components/labels'
 
 vi.mock('@payloadcms/ui', async () => {
   const { createElement } = await import('react')
 
   return {
+    CopyToClipboard: () => createElement('span', null, 'Copy value'),
     DefaultEditView: (props: Record<string, unknown>) => {
       if ('payload' in props || 'initPageResult' in props) {
         throw new Error('Server-only props reached the client edit view.')
@@ -24,6 +27,10 @@ vi.mock('@payloadcms/ui', async () => {
 })
 
 describe('asset network fields', () => {
+  it('renders date-only custom values without inventing a time', () => {
+    expect(formatDateTime('2026-08-08')).toBe('8 Aug 2026')
+    expect(formatDateTime('2026-08-08T10:30:00Z')).toContain(':30')
+  })
   it('builds scoped links and renders asset classes as collection documents', async () => {
     expect(assetListURL('/admin', 'site', 'site-1')).toBe(
       '/admin/collections/assets?where%5Bsite%5D%5Bequals%5D=site-1',
@@ -58,13 +65,14 @@ describe('asset network fields', () => {
     } as never)
     const html = renderToStaticMarkup(createElement(() => view))
 
-    expect(html).toContain('Asset Classes')
-    expect(html).toContain('Add asset class')
-    expect(html).toContain('PLC')
-    expect(html).toContain('Programmable controllers')
-    expect(html).toContain('Rules')
-    expect(html).toContain('Priority')
-    expect(html).toContain('where%5BassetClass%5D%5Bequals%5D=class-1')
+    expect(html).toContain('Payload list')
+    const cell = AssetClassAssetsCell({
+      payload: { config: { routes: { admin: '/manage' } } },
+      rowData: { id: 'class-1' },
+    } as never)
+    expect(renderToStaticMarkup(cell)).toContain(
+      '/manage/collections/assets?where%5BassetClass%5D%5Bequals%5D=class-1',
+    )
   })
 
   it('renders the default list and empty asset-class state', async () => {
@@ -80,7 +88,7 @@ describe('asset network fields', () => {
       },
       user: { id: 'user-1' },
     } as never)
-    expect(renderToStaticMarkup(createElement(() => emptyView))).toContain('No asset classes yet')
+    expect(renderToStaticMarkup(createElement(() => emptyView))).toContain('Payload list')
   })
 
   it('matches safe manufacturer and model regular expressions together', async () => {
@@ -207,6 +215,7 @@ describe('asset network fields', () => {
           })
         }),
       },
+      initPageResult: { req: { user: null } },
       routeSegments: ['collections', 'assets', 'asset-1'],
     } as unknown as DocumentViewServerProps
     const view = await AssetView(props)
@@ -341,6 +350,7 @@ describe('asset network fields', () => {
           return Promise.resolve({ docs: [] })
         }),
       },
+      initPageResult: { req: { user: null } },
       routeSegments: ['collections', 'assets', 'asset-2'],
     } as unknown as DocumentViewServerProps
     const view = await AssetView(props)
@@ -460,6 +470,7 @@ describe('asset network fields', () => {
           return Promise.resolve({ docs: [] })
         }),
       },
+      initPageResult: { req: { user: null } },
       routeSegments: ['collections', 'assets', 'asset-3'],
     } as unknown as DocumentViewServerProps
     const view = await AssetView(props)

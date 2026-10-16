@@ -463,6 +463,55 @@ describe('device identity', () => {
     expect(observations.totalDocs).toBe(2)
   })
 
+  it('allows unchanged identity projections in asset edits but rejects changed projections', async () => {
+    const siteID = await site()
+    await upload(
+      siteID,
+      scan(serial(), [
+        [mac(), '192.0.2.1'],
+        [mac(), '198.51.100.1'],
+      ]),
+    )
+    const device = (
+      await payload.find({
+        collection: 'assets',
+        depth: 0,
+        where: { site: { equals: siteID } },
+      })
+    ).docs[0]
+    expect(device.networkAddresses).toHaveLength(2)
+    const networkAddresses = [...device.networkAddresses!]
+      .reverse()
+      .map(({ address }) => ({ address }))
+    const networkMACs = device.networkMACs!.map(({ address }) => ({ address }))
+
+    const updated = await payload.update({
+      collection: 'assets',
+      id: device.id,
+      data: {
+        name: 'Updated from the details page',
+        networkAddresses,
+        networkMACs,
+      },
+      user,
+      overrideAccess: false,
+    })
+    expect(updated).toMatchObject({
+      name: 'Updated from the details page',
+      networkAddresses: device.networkAddresses,
+      networkMACs: device.networkMACs,
+    })
+    await expect(
+      payload.update({
+        collection: 'assets',
+        id: device.id,
+        data: { networkAddresses: [{ address: '203.0.113.10' }] },
+        user,
+        overrideAccess: false,
+      }),
+    ).rejects.toThrow('networkAddresses is managed by device identity actions.')
+  })
+
   it('converges dual-homed hardware, replays safely, preserves human fields and old observations, and records replacement', async () => {
     const siteID = await site()
     const hardwareSerial = serial()
@@ -1661,13 +1710,16 @@ describe('device identity', () => {
     const networkPanel = renderToStaticMarkup(
       await DeviceIdentity({ asset: newCPU, payload, user, view: 'network' }),
     )
-    const hardwarePanel = renderToStaticMarkup(
-      await DeviceIdentity({ asset: newCPU, payload, user, view: 'hardware' }),
-    )
+    const hardwareView = await DeviceIdentity({ asset: newCPU, payload, user, view: 'hardware' })
+    const hardwarePanel = renderToStaticMarkup(hardwareView)
     expect(networkPanel).toContain('Network identity')
     expect(networkPanel).not.toContain('Hardware identifiers')
     expect(hardwarePanel).toContain('Hardware identifiers')
     expect(hardwarePanel).not.toContain('Current endpoints')
+    const actions = hardwareView.props.children.at(-1).props.children.at(-1)
+    expect(actions.props.endpoints).toEqual(
+      expect.arrayContaining([expect.objectContaining({ label: 'ifIndex:1' })]),
+    )
     expect(
       renderToStaticMarkup(
         await DeviceIdentity({

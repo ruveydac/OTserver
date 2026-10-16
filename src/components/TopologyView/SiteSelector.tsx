@@ -1,6 +1,7 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
+import { Button } from '@payloadcms/ui'
 
 export const SiteSelector = ({
   adminRoute,
@@ -30,7 +31,7 @@ export const SiteSelector = ({
           )
         }}
       >
-        <option value="">Choose a site…</option>
+        <option value="">Select a site</option>
         {sites.map((site) => (
           <option key={site.id} value={site.id}>
             {site.name}
@@ -48,7 +49,7 @@ export const SiteSelector = ({
             placeholder="Name, IP, or MAC"
             type="search"
           />
-          <button type="submit">Apply</button>
+          <Button type="submit">Apply filter</Button>
         </form>
       ) : null}
     </div>

@@ -330,6 +330,7 @@ const preventDeletingUsedClass: CollectionBeforeDeleteHook = async ({ id, req })
 
 export const AssetClasses: CollectionConfig = {
   slug: 'asset-classes',
+  labels: { singular: 'Asset class', plural: 'Asset classes' },
   access: {
     create: adminOnly,
     delete: adminOnly,
@@ -340,14 +341,27 @@ export const AssetClasses: CollectionConfig = {
     components: {
       views: { list: { Component: '@/components/AssetClassListView' } },
     },
-    defaultColumns: ['name', 'description', 'updatedAt'],
+    defaultColumns: [
+      'name',
+      'description',
+      'assignmentRules',
+      'assignmentPriority',
+      'assetsLink',
+      'updatedAt',
+    ],
     description: 'Define the classes assigned to OT assets.',
-    group: 'OT Inventory',
+    group: 'OT inventory',
     listSearchableFields: ['name', 'description'],
     useAsTitle: 'name',
   },
   defaultSort: 'name',
   fields: [
+    {
+      name: 'assetsLink',
+      type: 'ui',
+      label: 'Assets',
+      admin: { components: { Cell: '@/components/AssetClassAssetsCell' } },
+    },
     { name: 'name', type: 'text', index: true, required: true, unique: true },
     { name: 'description', type: 'textarea' },
     {

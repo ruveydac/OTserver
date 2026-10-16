@@ -56,6 +56,7 @@ const recordHumanChanges: CollectionBeforeChangeHook = ({ context, data, origina
 
 export const Assets: CollectionConfig = {
   slug: 'assets',
+  labels: { singular: 'Asset', plural: 'Assets' },
   trash: true,
   access: {
     create: canCreateSiteDocument,
@@ -79,7 +80,7 @@ export const Assets: CollectionConfig = {
     },
     defaultColumns: ['name', 'site', 'status', 'ipAddress', 'macAddress', 'assetClass'],
     description: 'Industrial devices, network endpoints, and control-system equipment.',
-    group: 'OT Inventory',
+    group: 'OT inventory',
     listSearchableFields: [],
     useAsTitle: 'name',
   },
@@ -379,7 +380,7 @@ export const Assets: CollectionConfig = {
         readOnly: true,
       },
       index: true,
-      label: 'Known vulnerabilities',
+      label: 'Potential vulnerability matches',
     },
     {
       name: 'lastSeen',

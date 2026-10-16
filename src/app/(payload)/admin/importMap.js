@@ -1,5 +1,6 @@
 import { default as default_1bd814bbeb1f2e089fcf3d8859fcb6f3 } from '@/components/SiteIDField'
 import { default as default_e4eda90535596a882064b1deac0ab4f0 } from '@/components/SiteTreeView'
+import { default as default_2e07829097744f37849fa311510e1aee } from '@/components/AssetClassAssetsCell'
 import { default as default_73aa8a55bcc57156906af3c0f8537645 } from '@/components/AssetClassListView'
 import { default as default_f020c52e6ea8cb54738a31fe010f551d } from '@/components/CustomAssetFields'
 import { default as default_8c78f84184d3f470067b66c225a03900 } from '@/components/AssetListInteractions'
@@ -27,6 +28,7 @@ import { CollectionCards as CollectionCards_f9c02e79a4aed9a3924487c0cd4cafb1 } f
 export const importMap = {
   '@/components/SiteIDField#default': default_1bd814bbeb1f2e089fcf3d8859fcb6f3,
   '@/components/SiteTreeView#default': default_e4eda90535596a882064b1deac0ab4f0,
+  '@/components/AssetClassAssetsCell#default': default_2e07829097744f37849fa311510e1aee,
   '@/components/AssetClassListView#default': default_73aa8a55bcc57156906af3c0f8537645,
   '@/components/CustomAssetFields#default': default_f020c52e6ea8cb54738a31fe010f551d,
   '@/components/AssetListInteractions#default': default_8c78f84184d3f470067b66c225a03900,

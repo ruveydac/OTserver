@@ -1,7 +1,8 @@
 .topology-view {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - var(--app-header-height, 64px));
+  height: calc(100dvh - var(--app-header-height, 64px));
+  min-height: 40rem;
   padding: 0 var(--gutter-h);
 
   &__header {
@@ -20,6 +21,8 @@
   &__selector {
     align-items: center;
     display: flex;
+    flex-wrap: wrap;
+    min-width: 0;
     gap: 0.5rem;
 
     label {
@@ -30,9 +33,31 @@
     select {
       background: var(--theme-elevation-0);
       border: 1px solid var(--theme-elevation-150);
-      border-radius: 4px;
-      min-width: 200px;
+      border-radius: var(--style-radius-s);
+      min-width: 0;
+      max-width: 100%;
+      min-height: 44px;
+      color: var(--theme-text);
       padding: 0.5rem 0.75rem;
+    }
+
+    form {
+      align-items: center;
+      display: flex;
+      flex-wrap: wrap;
+      gap: calc(var(--base) / 2);
+      min-width: 0;
+    }
+
+    input {
+      background: var(--theme-input-bg);
+      border: 1px solid var(--theme-elevation-400);
+      border-radius: var(--style-radius-s);
+      color: var(--theme-text);
+      min-height: 44px;
+      min-width: 0;
+      max-width: 100%;
+      padding: calc(var(--base) / 2);
     }
   }
 
@@ -44,7 +69,7 @@
   &__canvas {
     background: var(--theme-elevation-0);
     border: 1px solid var(--theme-elevation-150);
-    border-radius: 6px;
+    border-radius: var(--style-radius-s);
     display: flex;
     flex-direction: column;
     flex: 1;
@@ -106,7 +131,7 @@
     align-items: center;
     background: var(--theme-elevation-0);
     border: 1px solid var(--theme-elevation-150);
-    border-radius: 6px;
+    border-radius: var(--style-radius-s);
     color: var(--theme-elevation-500);
     display: flex;
     flex: 1;
@@ -125,10 +150,15 @@
   text-align: center;
 
   &__label {
+    display: block;
     font-weight: 600;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    &:focus-visible {
+      outline: 2px solid var(--theme-text);
+      outline-offset: 3px;
+    }
   }
 
   &__ip {
@@ -137,7 +167,7 @@
   }
 
   &__symbol {
-    color: #00658b;
+    color: var(--theme-text);
     margin: 0 auto 0.4rem;
     position: relative;
     width: 64px;

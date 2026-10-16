@@ -45,7 +45,7 @@ const serverReadOnly = { create: () => false, update: () => false }
 const validateScannerSettings: CollectionBeforeChangeHook = async ({ data, req }) => {
   if (!req.user || req.context.otterScannerUpdate) return data
   if (Object.hasOwn(data, 'profile') || Object.hasOwn(data, 'network'))
-    throw new APIError('Scan settings must be changed in Otter Configurations.', 400)
+    throw new APIError('Scan settings must be changed in Otter configurations.', 400)
   return data
 }
 
@@ -219,6 +219,7 @@ const preventDeletingReferencedOtterConfig: CollectionBeforeDeleteHook = async (
 
 export const OtterScanners: CollectionConfig = {
   slug: 'otter-scanners',
+  labels: { singular: 'Otter scanner', plural: 'Otter scanners' },
   access: {
     create: () => false,
     delete: () => false,
@@ -304,7 +305,7 @@ export const OtterScanners: CollectionConfig = {
 
 export const OtterProfiles: CollectionConfig = {
   slug: 'otter-profiles',
-  labels: { singular: 'Otter Configuration', plural: 'Otter Configurations' },
+  labels: { singular: 'Otter configuration', plural: 'Otter configurations' },
   access: {
     create: canCreateOtter,
     delete: canWriteOtter,
@@ -374,6 +375,7 @@ export const OtterProfiles: CollectionConfig = {
         },
         {
           name: 'sourceMac',
+          label: 'Source MAC address',
           type: 'text',
           admin: {
             description:
@@ -443,6 +445,7 @@ export const OtterProfiles: CollectionConfig = {
             { name: 'noLldp', type: 'checkbox', defaultValue: false, label: 'Disable LLDP' },
             {
               name: 'opcuaPorts',
+              label: 'OPC UA ports',
               type: 'number',
               hasMany: true,
               defaultValue: [],
@@ -520,6 +523,7 @@ export const OtterProfiles: CollectionConfig = {
 
 export const OtterSchedules: CollectionConfig = {
   slug: 'otter-schedules',
+  labels: { singular: 'Otter schedule', plural: 'Otter schedules' },
   access: {
     create: canCreateSchedule,
     delete: canWriteOtter,
@@ -601,6 +605,7 @@ export const OtterSchedules: CollectionConfig = {
     },
     {
       name: 'timezone',
+      label: 'Time zone',
       type: 'text',
       defaultValue: 'UTC',
       admin: { description: 'IANA time zone, for example Europe/Berlin.' },
@@ -620,6 +625,7 @@ export const OtterSchedules: CollectionConfig = {
 
 export const OtterRuns: CollectionConfig = {
   slug: 'otter-runs',
+  labels: { singular: 'Otter run', plural: 'Otter runs' },
   access: {
     create: () => false,
     delete: () => false,
@@ -654,7 +660,12 @@ export const OtterRuns: CollectionConfig = {
       required: true,
       index: true,
     },
-    { name: 'profile', type: 'relationship', relationTo: 'otter-profiles' },
+    {
+      name: 'profile',
+      label: 'Otter configuration',
+      type: 'relationship',
+      relationTo: 'otter-profiles',
+    },
     { name: 'schedule', type: 'relationship', relationTo: 'otter-schedules' },
     { name: 'scheduleOccurrenceKey', type: 'text', access: internal, admin: { hidden: true } },
     {

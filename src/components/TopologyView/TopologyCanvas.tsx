@@ -1,6 +1,7 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import {
   Background,
@@ -53,7 +54,9 @@ const AssetNode = ({ data }: NodeProps) => (
     className={`topology-node topology-node--asset topology-node--${(data.status as string) ?? 'unknown'}`}
   >
     <NodeHandles />
-    <div className="topology-node__label">{data.label as string}</div>
+    <Link className="topology-node__label nodrag" href={data.href as string}>
+      {data.label as string}
+    </Link>
     {data.ipAddress ? <div className="topology-node__ip">{data.ipAddress as string}</div> : null}
   </div>
 )
@@ -64,7 +67,9 @@ const SwitchNode = ({ data }: NodeProps) => (
       <NodeHandles />
       <Layer3SwitchIcon />
     </div>
-    <div className="topology-node__label">{data.label as string}</div>
+    <Link className="topology-node__label nodrag" href={data.href as string}>
+      {data.label as string}
+    </Link>
   </div>
 )
 
@@ -74,7 +79,9 @@ const RouterNode = ({ data }: NodeProps) => (
       <NodeHandles />
       <RouterIcon />
     </div>
-    <div className="topology-node__label">{data.label as string}</div>
+    <Link className="topology-node__label nodrag" href={data.href as string}>
+      {data.label as string}
+    </Link>
   </div>
 )
 
@@ -198,7 +205,12 @@ export const TopologyCanvas = ({
     const positions = layoutNodes(visibleNodes, visibleEdges)
 
     const nodes: Node[] = visibleNodes.map((node) => ({
-      data: { ipAddress: node.ipAddress, label: node.label, status: node.status },
+      data: {
+        ipAddress: node.ipAddress,
+        label: node.label,
+        status: node.status,
+        href: `${adminRoute}/collections/assets/${encodeURIComponent(node.id)}`,
+      },
       id: node.id,
       position: positions.get(node.id) ?? { x: 0, y: 0 },
       type: node.type,
@@ -239,7 +251,7 @@ export const TopologyCanvas = ({
     })
 
     return { edges, nodes }
-  }, [graphEdges, graphNodes, showAllInferred])
+  }, [adminRoute, graphEdges, graphNodes, showAllInferred])
 
   const redundantCount = graphEdges.filter((edge) => edge.redundant).length
 

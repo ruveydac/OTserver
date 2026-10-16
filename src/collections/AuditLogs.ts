@@ -202,7 +202,7 @@ export const withAudit = (collection: CollectionConfig): CollectionConfig => {
 
 export const AuditLogs: CollectionConfig = {
   slug: 'audit-logs',
-  labels: { plural: 'Audit Log', singular: 'Audit Entry' },
+  labels: { plural: 'Audit entries', singular: 'Audit entry' },
   access: {
     create: () => false,
     delete: () => false,

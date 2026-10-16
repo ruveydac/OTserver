@@ -1489,6 +1489,7 @@ describe('vulnerability catalog', () => {
     const html = renderToStaticMarkup(
       await AssetVulnerabilitiesView({
         doc: asset,
+        initPageResult: { req: { user: adminUser } },
         payload,
         routeSegments: ['collections', 'assets', asset.id, 'vulnerabilities'],
         searchParams: {},
@@ -1496,8 +1497,8 @@ describe('vulnerability catalog', () => {
       } as never),
     )
     expect(html).toContain('not validated')
-    expect(html).toContain('no vulnerability check was run')
-    expect(html).toContain('1 potential vulnerabilities')
+    expect(html).toContain('No vulnerability check was run')
+    expect(html).toContain('1 potential vulnerability matches')
     expect(html).toContain('CVE-2099-0002')
     expect(html).toContain('firmware version')
     expect(html).toContain('satisfies')
@@ -1515,6 +1516,7 @@ describe('vulnerability catalog', () => {
     const enrichedHTML = renderToStaticMarkup(
       await AssetVulnerabilitiesView({
         doc: enriched,
+        initPageResult: { req: { user: adminUser } },
         payload,
         routeSegments: ['collections', 'assets', enriched.id, 'vulnerabilities'],
         searchParams: {},
@@ -1536,6 +1538,7 @@ describe('vulnerability catalog', () => {
     const empty = renderToStaticMarkup(
       await AssetVulnerabilitiesView({
         doc: bare,
+        initPageResult: { req: { user: adminUser } },
         payload,
         routeSegments: ['collections', 'assets', bare.id, 'vulnerabilities'],
         searchParams: {},
@@ -1547,6 +1550,7 @@ describe('vulnerability catalog', () => {
     const unauthenticated = renderToStaticMarkup(
       await AssetVulnerabilitiesView({
         doc: asset,
+        initPageResult: { req: { user: null } },
         payload,
         routeSegments: ['collections', 'assets', asset.id, 'vulnerabilities'],
         searchParams: { page: '9' },
