@@ -1,12 +1,28 @@
+<div align="center">
+
 # OTserver
+
+### Self-hosted OT inventory with automatic discovery
+
+Native OT discovery · Quality-aware inventory · Site-scoped access · Immutable history
+
+[![Website](https://img.shields.io/badge/otserver.org-111111?logo=firefoxbrowser&logoColor=white)](https://otserver.org)
+[![Next.js](https://img.shields.io/badge/Next.js-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
+[![MongoDB](https://img.shields.io/badge/MongoDB-001E2B?logo=mongodb&logoColor=47A248)](https://www.mongodb.com/)
+[![Rust](https://img.shields.io/badge/Otter-Rust-000000?logo=rust&logoColor=white)](https://github.com/ruveydac/otserver-otter)
+[![AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENCE.md)
+
+[Quick start](#quick-start) · [Features](#what-you-can-do) · [Otter](#discovery-with-otserver-otter) · [Development](#development-and-technical-guidance)
+
+</div>
+
+---
 
 Self-hosted asset management for operational technology (OT) networks.
 
 OTserver helps you keep track of industrial devices, where they are installed, and how they
 change over time. Add assets manually or import discovery results from
 [OTserver Otter](https://github.com/ruveydac/otserver-otter), Siemens PRONETA, or Nmap.
-
-[Website](https://otserver.org) · [Quick start](#quick-start) · [Discovery](#discovery-with-otserver-otter) · [License](#license)
 
 ![OTserver asset management dashboard](public/otserver-dashboard.png)
 
