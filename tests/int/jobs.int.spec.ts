@@ -1,4 +1,5 @@
 import config from '@/payload.config'
+import { siteTypeID } from '../siteType'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -32,7 +33,7 @@ const createFixture = async (payload: Payload) => {
   })
   const site = await payload.create({
     collection: 'sites',
-    data: { name: `Queued site ${randomUUID()}`, type: 'Test' },
+    data: { name: `Queued site ${randomUUID()}`, type: await siteTypeID(payload) },
     overrideAccess: false,
     user,
   })
@@ -43,6 +44,7 @@ describe('durable workers and queued imports', () => {
   it('rejects an old worker write after another worker takes over its expired lease', async () => {
     const payload = await getPayload({ config })
     const name = `Fenced worker write ${randomUUID()}`
+    const type = await siteTypeID(payload)
     let currentFence: Awaited<ReturnType<typeof acquireWorker>> = null
     let staleFence: Awaited<ReturnType<typeof acquireWorker>> = null
 
@@ -59,7 +61,7 @@ describe('durable workers and queued imports', () => {
         withWorkerFence(staleFence!, () =>
           payload.create({
             collection: 'sites',
-            data: { name, type: 'Test' },
+            data: { name, type },
             overrideAccess: true,
             req,
           }),

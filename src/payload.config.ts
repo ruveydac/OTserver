@@ -9,6 +9,7 @@ import { AssetFields } from './collections/AssetFields'
 import { AssetObservations } from './collections/AssetObservations'
 import { AuditLogs, withAudit } from './collections/AuditLogs'
 import { Sites } from './collections/Sites'
+import { SiteTypes, initializeSiteTypes } from './collections/SiteTypes'
 import { initializeAuthorization, UserRoles } from './collections/UserRoles'
 import { Users } from './collections/Users'
 import { TopologyLinks } from './collections/TopologyLinks'
@@ -34,6 +35,7 @@ import { OtterProfiles, OtterRuns, OtterScanners, OtterSchedules } from './colle
 const dirname = import.meta.dirname || path.resolve('src')
 
 const initializeApplication = async (payload: Payload) => {
+  await initializeSiteTypes(payload)
   await initializeAssetClasses(payload)
   await initializeAuthorization(payload)
 
@@ -66,6 +68,10 @@ export default buildConfig({
         Button: '@/components/LogoutButton',
       },
       views: {
+        purdue: {
+          Component: '@/components/PurdueView',
+          path: '/purdue',
+        },
         custom: {
           Component: '@/components/TopologyView',
           path: '/topology',
@@ -87,6 +93,7 @@ export default buildConfig({
     user: Users.slug,
   },
   collections: [
+    SiteTypes,
     Sites,
     AssetClasses,
     Assets,

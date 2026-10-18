@@ -18,6 +18,7 @@ import {
   getSiteAndDescendantIDs,
   relationshipID,
 } from '../access/authorization'
+import { enforceSiteType, siteTypeField } from './SiteTypes'
 
 export const filterSiteParents = async ({
   id,
@@ -122,6 +123,7 @@ const preventDeletingUsedSites: CollectionBeforeDeleteHook = async ({ id, req })
   })
   const assets = await req.payload.count({
     collection: 'assets',
+    trash: true,
     overrideAccess: true,
     req,
     where: { site: { equals: id } },
@@ -153,7 +155,7 @@ const preventDeletingUsedSites: CollectionBeforeDeleteHook = async ({ id, req })
     otters.totalDocs
   ) {
     throw new APIError(
-      'Move or delete this site’s child sites, assets, imports, Otter scanners, and role permissions before deleting it.',
+      'Move or delete this site’s child sites, assets (including Trash), imports, Otter scanners, and role permissions before deleting it.',
       400,
     )
   }
@@ -173,9 +175,10 @@ export const Sites: CollectionConfig = {
       views: { list: { Component: '@/components/SiteTreeView' } },
     },
     defaultColumns: ['name', 'type', 'parent', 'updatedAt'],
-    description: 'Organize assets with your own site types and hierarchy.',
+    description:
+      'Organize geographic and production sites in one hierarchy using your own site types.',
     group: 'OT inventory',
-    listSearchableFields: ['name', 'type', 'description'],
+    listSearchableFields: ['name', 'description'],
     useAsTitle: 'path',
   },
   defaultSort: 'path',
@@ -197,13 +200,7 @@ export const Sites: CollectionConfig = {
       type: 'ui',
       admin: { components: { Field: '@/components/SiteIDField' } },
     },
-    {
-      name: 'type',
-      type: 'text',
-      admin: { placeholder: 'Continent, country, plant, area…' },
-      label: 'Site type',
-      required: true,
-    },
+    siteTypeField,
     {
       name: 'parent',
       type: 'relationship',
@@ -221,7 +218,7 @@ export const Sites: CollectionConfig = {
   hooks: {
     afterChange: [updateDescendantPaths],
     beforeValidate: [setSitePath],
-    beforeChange: [enforceWritableParent, preventHierarchyCycles],
+    beforeChange: [enforceWritableParent, preventHierarchyCycles, enforceSiteType],
     beforeDelete: [preventDeletingUsedSites],
   },
 }

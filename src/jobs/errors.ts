@@ -1,3 +1,5 @@
+import { IMPORTS_BLOCKED_MESSAGE } from '../application/importSites'
+
 export const transientFailure = (error: unknown): boolean => {
   const value = error as {
     code?: number | string
@@ -32,6 +34,11 @@ export const safeFailure = (error: unknown): string => {
   if (transientFailure(error))
     return 'A temporary database or network failure interrupted processing.'
   const status = (error as { status?: number })?.status
+  if (
+    status === 403 &&
+    (error as { data?: { code?: string } })?.data?.code === 'SITE_IMPORTS_BLOCKED'
+  )
+    return IMPORTS_BLOCKED_MESSAGE
   if (status === 403 || status === 401)
     return 'The executing user no longer has write permission for this site.'
   if (status === 404) return 'The submitting user, upload, or required record is missing.'

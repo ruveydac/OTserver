@@ -56,29 +56,37 @@ const SiteTreeView = async (props: ListViewServerProps) => {
   }
 
   // ponytail: the hierarchy is rendered in memory; add pagination only if site counts reach thousands.
+  const user = await authenticatedAdminUser(props.payload)
   const result = await props.payload.find({
     collection: 'sites',
-    depth: 0,
+    depth: 1,
     overrideAccess: false,
     pagination: false,
     sort: 'name',
-    user: await authenticatedAdminUser(props.payload),
+    user,
   })
   const rows = buildSiteTree(result.docs)
   const adminRoute = props.payload.config.routes.admin
+  const typeName = (type: Site['type']) =>
+    typeof type === 'object' && type ? type.name : 'Unavailable'
 
   return (
     <main className="table-view site-tree-view">
       <header className="table-view__header">
         <div>
           <h1>Sites</h1>
-          <p>Sites are sorted by hierarchy and alphabetically within each parent.</p>
+          <p>Organize geographic and production sites in one hierarchy.</p>
         </div>
-        {props.hasCreatePermission ? (
-          <Button el="link" url={props.newDocumentURL}>
-            Create site
+        <div className="site-tree-view__actions">
+          <Button el="link" url={`${adminRoute}/purdue`}>
+            Purdue overview
           </Button>
-        ) : null}
+          {props.hasCreatePermission ? (
+            <Button el="link" url={props.newDocumentURL}>
+              Create site
+            </Button>
+          ) : null}
+        </div>
       </header>
 
       {rows.length ? (
@@ -110,7 +118,12 @@ const SiteTreeView = async (props: ListViewServerProps) => {
                       </div>
                     </div>
                   </td>
-                  <td>{site.type}</td>
+                  <td>
+                    {typeName(site.type)}
+                    {typeof site.type === 'object' && site.type?.blockImports ? (
+                      <div>Imports blocked</div>
+                    ) : null}
+                  </td>
                   <td>{parentName}</td>
                   <td>
                     <Link href={assetListURL(adminRoute, 'site', site.id)}>View assets</Link>

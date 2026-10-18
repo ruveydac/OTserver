@@ -1,4 +1,5 @@
 import config from '@/payload.config'
+import { siteTypeID } from '../siteType'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
@@ -965,7 +966,7 @@ describe('vulnerability catalog', () => {
     plcClassID = (await ensureAssetClass(payload, 'plc')).id
     const site = await payload.create({
       collection: 'sites',
-      data: { name: `Vulnerability site ${randomUUID()}`, type: 'Test site' },
+      data: { name: `Vulnerability site ${randomUUID()}`, type: await siteTypeID(payload) },
     })
     siteID = site.id
     const user = await payload.create({

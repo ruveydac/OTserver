@@ -85,6 +85,16 @@ not grant inventory or site permissions by itself:
 - Moving a scanner is not an edit. Revoke/re-enroll it for the new site so historical runs/imports
   keep their original site scope.
 
+Administrators can enable **Block imports** on a site type. Only sites directly using that type are
+blocked; child sites follow their own types. The controller rejects enrollment, re-enrollment, new
+configurations/schedules, manual runs, run starts, and uploads into blocked sites. Existing schedules
+and queued runs wait while the site is blocked. Polling returns idle for new work, and polling or
+heartbeats request cancellation for active runs using the existing cancel response. Imports queued
+before a policy change fail before inventory writes with an explicit blocked-site reason; they can
+be retried after imports are allowed again. History, cancellation, credential revocation, and disabling
+existing schedules remain available. The controller rechecks the site's current type rather than a
+policy copied into the run snapshot.
+
 Open **Otter → Otter Scanners** and select **Create New**. The enrollment popup provides the
 download link, creates a site-bound scanner, and shows its one-time token and enrollment commands.
 Use **Otter → Otter Configurations** to select the scanner and site, edit network and protocol options,

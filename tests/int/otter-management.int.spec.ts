@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { beforeAll, describe, expect, it } from 'vitest'
 import config from '@/payload.config'
+import { siteTypeID } from '../siteType'
 import { ensureAdminRole } from '../../src/collections/UserRoles'
 import { executeQueuedImport } from '../../src/application/queuedImports'
 import { decryptOtterCredentials } from '../../src/otter/security'
@@ -109,12 +110,12 @@ describe('Otter management controller', () => {
     try {
       const site = await payload.create({
         collection: 'sites',
-        data: { name: siteName, type: 'Plant' },
+        data: { name: siteName, type: await siteTypeID(payload) },
       })
       siteID = site.id
       const otherSite = await payload.create({
         collection: 'sites',
-        data: { name: `Other Otter site ${randomUUID()}`, type: 'Plant' },
+        data: { name: `Other Otter site ${randomUUID()}`, type: await siteTypeID(payload) },
       })
       otherSiteID = otherSite.id
       const role = await payload.create({

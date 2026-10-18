@@ -67,6 +67,8 @@ const makePayload = (doc = baseDoc()) => {
     findByID: vi.fn(
       async ({ collection }: { collection: string }): Promise<Record<string, unknown> | null> => {
         if (collection === 'users') return { id: 'user-1' }
+        if (collection === 'sites') return { id: 'site-1', type: 'type-1' }
+        if (collection === 'site-types') return { id: 'type-1', blockImports: false }
         importReads += 1
         return importReads === 1 ? doc : { ...doc, status: 'running' }
       },
@@ -182,6 +184,8 @@ describe('queued import execution boundary', () => {
     completed.findByID
       .mockResolvedValueOnce(baseDoc())
       .mockResolvedValueOnce({ id: 'user-1' })
+      .mockResolvedValueOnce({ type: 'type-1' })
+      .mockResolvedValueOnce({ blockImports: false })
       .mockResolvedValueOnce({ ...baseDoc(), status: 'completed' })
     await executeQueuedImport(completed as never, 'import-1', 'job-1', 0)
     expect(mocks.processImport).not.toHaveBeenCalled()
@@ -191,6 +195,8 @@ describe('queued import execution boundary', () => {
     changed.findByID
       .mockResolvedValueOnce(baseDoc())
       .mockResolvedValueOnce({ id: 'user-1' })
+      .mockResolvedValueOnce({ type: 'type-1' })
+      .mockResolvedValueOnce({ blockImports: false })
       .mockResolvedValueOnce({ ...baseDoc(), jobID: 'other-job', status: 'running' })
     await expect(
       executeQueuedImport(changed as never, 'import-1', 'job-1', 0),

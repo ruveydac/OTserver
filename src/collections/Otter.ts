@@ -5,7 +5,7 @@ import {
   type CollectionBeforeDeleteHook,
   type CollectionConfig,
 } from 'payload'
-import { filterWritableSites, getAuthorization, relationshipID } from '../access/authorization'
+import { getAuthorization, relationshipID } from '../access/authorization'
 import {
   encryptOtterCredentials,
   requireOtterConfigAccess,
@@ -14,6 +14,7 @@ import {
 import { validateScheduleInput } from '../otter/scheduling'
 import { userSuppliedAssetFields } from '../domain/assetFields'
 import { sanitizeCustomFieldValues } from './AssetFields'
+import { assertSiteAllowsImports, filterImportSites } from '../application/importSites'
 
 const canReadOtter: Access = async ({ req }) => {
   if (req.context.otterScannerID) return false
@@ -42,7 +43,18 @@ const canCreateOtter: Access = async ({ data, req }) => {
 const internal = { create: () => false, read: () => false, update: () => false }
 const serverReadOnly = { create: () => false, update: () => false }
 
-const validateScannerSettings: CollectionBeforeChangeHook = async ({ data, req }) => {
+const validateScannerSettings: CollectionBeforeChangeHook = async ({
+  data,
+  originalDoc,
+  operation,
+  req,
+}) => {
+  if (
+    operation === 'create' ||
+    (Object.hasOwn(data, 'site') &&
+      String(relationshipID(data.site)) !== String(relationshipID(originalDoc?.site)))
+  )
+    await assertSiteAllowsImports(data.site ?? originalDoc?.site, req)
   if (!req.user || req.context.otterScannerUpdate) return data
   if (Object.hasOwn(data, 'profile') || Object.hasOwn(data, 'network'))
     throw new APIError('Scan settings must be changed in Otter configurations.', 400)
@@ -100,6 +112,8 @@ const validateProfile: CollectionBeforeChangeHook = async ({
   )
   if (!siteID || !scannerID) throw new APIError('Select a site and scanner.', 400)
   await requireOtterConfigAccess(req, siteID, true)
+  if (operation === 'create' || String(siteID) !== String(relationshipID(originalDoc?.site)))
+    await assertSiteAllowsImports(siteID, req)
   const scanner = await req.payload.findByID({
     collection: 'otter-scanners',
     depth: 0,
@@ -156,6 +170,7 @@ const validateSchedule: CollectionBeforeChangeHook = async ({
   const scope = await scheduleProfile(merged, req)
   Object.assign(data, scope)
   Object.assign(merged, scope)
+  if (operation === 'create' || merged.enabled) await assertSiteAllowsImports(scope.site, req)
   if (operation === 'create') {
     const schedules = await req.payload.count({
       collection: 'otter-schedules',
@@ -241,7 +256,7 @@ export const OtterScanners: CollectionConfig = {
     {
       name: 'site',
       type: 'relationship',
-      filterOptions: filterWritableSites,
+      filterOptions: filterImportSites('otter-scanners'),
       index: true,
       maxDepth: 0,
       relationTo: 'sites',
@@ -327,7 +342,7 @@ export const OtterProfiles: CollectionConfig = {
     {
       name: 'site',
       type: 'relationship',
-      filterOptions: filterWritableSites,
+      filterOptions: filterImportSites('otter-profiles'),
       index: true,
       maxDepth: 0,
       relationTo: 'sites',
@@ -545,7 +560,7 @@ export const OtterSchedules: CollectionConfig = {
     {
       name: 'site',
       type: 'relationship',
-      filterOptions: filterWritableSites,
+      filterOptions: filterImportSites('otter-schedules'),
       index: true,
       maxDepth: 0,
       relationTo: 'sites',

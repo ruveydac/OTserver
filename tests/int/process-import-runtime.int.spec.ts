@@ -77,7 +77,14 @@ describe('processImport runtime boundaries', () => {
     }
     const req = {
       context: { ...originalContext },
-      payload: { create, find, update },
+      payload: {
+        create,
+        find,
+        update,
+        findByID: vi.fn(async ({ collection }: { collection: string }) =>
+          collection === 'sites' ? { type: 'type-1' } : { blockImports: false },
+        ),
+      },
     }
     mocks.parseNmap.mockReturnValue({
       assets: [],

@@ -1,4 +1,5 @@
 import config from '@/payload.config'
+import { siteTypeID } from '../siteType'
 import { randomUUID } from 'node:crypto'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { createLocalReq, getPayload, type Payload } from 'payload'
@@ -16,11 +17,15 @@ describe('versioned legacy identity migration', () => {
   it('leaves legacy rows unchanged at startup and migrates populated rows explicitly', async () => {
     const site = await payload.create({
       collection: 'sites',
-      data: { name: `Legacy migration ${randomUUID()}`, type: 'Test' },
+      data: { name: `Legacy migration ${randomUUID()}`, type: await siteTypeID(payload) },
     })
     const childSite = await payload.create({
       collection: 'sites',
-      data: { name: `Legacy child ${randomUUID()}`, parent: site.id, type: 'Test' },
+      data: {
+        name: `Legacy child ${randomUUID()}`,
+        parent: site.id,
+        type: await siteTypeID(payload),
+      },
     })
     const adminRole = await ensureAdminRole(payload)
     const user = await payload.create({
@@ -45,6 +50,16 @@ describe('versioned legacy identity migration', () => {
     })
 
     try {
+      const ObjectId = payload.db.connection.base.Types.ObjectId
+      for (const [id, type] of [
+        [site.id, 'Plant'],
+        [childSite.id, 'Bespoke work cell'],
+      ]) {
+        await payload.db.collections.sites.collection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { type } },
+        )
+      }
       await payload.db.collections.users.updateOne({ _id: user.id }, { $unset: { role: '' } })
       await payload.db.collections.assets.updateOne(
         { _id: asset.id },
@@ -69,6 +84,27 @@ describe('versioned legacy identity migration', () => {
       expect(legacyAsset).not.toHaveProperty('assetClass')
       expect(legacyUser).not.toHaveProperty('role')
 
+      await payload.db.migrate({ migrations: migrations as never })
+      const fallbackType = await siteTypeID(payload, 'to-be-changed')
+      for (const id of [site.id, childSite.id]) {
+        const migratedSite = await payload.findByID({ collection: 'sites', id, depth: 0 })
+        expect(migratedSite.type).toBe(fallbackType)
+        expect(migratedSite).not.toHaveProperty('legacyType')
+      }
+      const siteAudit = await payload.find({
+        collection: 'audit-logs',
+        where: {
+          and: [
+            { targetCollection: { equals: 'sites' } },
+            { documentID: { equals: childSite.id } },
+            { actorName: { equals: 'Versioned migration' } },
+          ],
+        },
+      })
+      expect(siteAudit.docs[0]).toMatchObject({
+        site: childSite.id,
+        changes: { type: { before: 'Bespoke work cell', after: fallbackType } },
+      })
       await payload.db.migrate({ migrations: migrations as never })
 
       const migratedAsset = (await payload.db.collections.assets

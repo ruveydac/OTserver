@@ -67,6 +67,7 @@ export interface Config {
   };
   blocks: {};
   collections: {
+    'site-types': SiteType;
     sites: Site;
     'asset-classes': AssetClass;
     assets: Asset;
@@ -99,6 +100,7 @@ export interface Config {
   };
   collectionsJoins: {};
   collectionsSelect: {
+    'site-types': SiteTypesSelect<false> | SiteTypesSelect<true>;
     sites: SitesSelect<false> | SitesSelect<true>;
     'asset-classes': AssetClassesSelect<false> | AssetClassesSelect<true>;
     assets: AssetsSelect<false> | AssetsSelect<true>;
@@ -173,7 +175,45 @@ export interface UserAuthOperations {
   };
 }
 /**
- * Organize assets with your own site types and hierarchy.
+ * Types for every level of the site hierarchy. Retire built-in types to remove them from new selections.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "site-types".
+ */
+export interface SiteType {
+  id: string;
+  name: string;
+  normalizedName?: string | null;
+  key: string;
+  description?: string | null;
+  category: 'geographic' | 'organizational' | 'production' | 'custom';
+  isa95Element?:
+    | (
+        | 'enterprise'
+        | 'site'
+        | 'area'
+        | 'work-center'
+        | 'work-unit'
+        | 'production-line'
+        | 'work-cell'
+        | 'process-cell'
+        | 'unit'
+        | 'production-unit'
+        | 'storage-zone'
+        | 'storage-unit'
+      )
+    | null;
+  active: boolean;
+  /**
+   * Block imports and Otter scans for sites assigned this type. Child sites follow their own types. Existing inventory and history remain accessible.
+   */
+  blockImports?: boolean | null;
+  referenceRevision?: number | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Organize geographic and production sites in one hierarchy using your own site types.
  *
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "sites".
@@ -182,7 +222,7 @@ export interface Site {
   id: string;
   name: string;
   path?: string | null;
-  type: string;
+  type: string | SiteType;
   /**
    * Optional parent site; nesting can be as deep as needed.
    */
@@ -255,6 +295,10 @@ export interface Asset {
    * The site or hierarchy node this asset belongs to.
    */
   site: string | Site;
+  /**
+   * Classify the deployed functions using the Purdue cybersecurity convention. Leave empty for unclassified. Levels are independent of location and do not establish security zones; the industrial DMZ is not a functional level.
+   */
+  purdueLevels?: ('0' | '1' | '2' | '3' | '4' | '5')[] | null;
   assetClass: string | AssetClass;
   assetOwner?: string | null;
   location?: string | null;
@@ -1246,6 +1290,10 @@ export interface PayloadLockedDocument {
   id: string;
   document?:
     | ({
+        relationTo: 'site-types';
+        value: string | SiteType;
+      } | null)
+    | ({
         relationTo: 'sites';
         value: string | Site;
       } | null)
@@ -1349,6 +1397,23 @@ export interface PayloadMigration {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "site-types_select".
+ */
+export interface SiteTypesSelect<T extends boolean = true> {
+  name?: T;
+  normalizedName?: T;
+  key?: T;
+  description?: T;
+  category?: T;
+  isa95Element?: T;
+  active?: T;
+  blockImports?: T;
+  referenceRevision?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "sites_select".
  */
 export interface SitesSelect<T extends boolean = true> {
@@ -1409,6 +1474,7 @@ export interface AssetsSelect<T extends boolean = true> {
   name?: T;
   description?: T;
   site?: T;
+  purdueLevels?: T;
   assetClass?: T;
   assetOwner?: T;
   location?: T;

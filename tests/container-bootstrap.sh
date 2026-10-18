@@ -208,6 +208,22 @@ assert.deepEqual(
   expectedClassKeys,
 )
 assert.ok(classes.docs.find(({ legacyKey }) => legacyKey === 'plc').assignmentRules.length > 0)
+const siteTypes = await json('/api/site-types?depth=0&limit=100', { headers: authorization })
+const siteType = siteTypes.docs.find(({ key }) => key === 'site')
+assert.ok(siteType)
+assert.ok(siteTypes.docs.some(({ key }) => key === 'production-line'))
+assert.ok(siteTypes.docs.some(({ name }) => name === 'To be changed'))
+assert.deepEqual(
+  siteTypes.docs.filter(({ blockImports }) => blockImports).map(({ key }) => key).sort(),
+  ['city', 'continent', 'country'],
+)
+assert.ok(siteTypes.docs.every(({ isa95Element }) => isa95Element))
+assert.equal(siteTypes.docs.find(({ key }) => key === 'continent').isa95Element, 'enterprise')
+assert.equal(siteTypes.docs.find(({ key }) => key === 'country').isa95Element, 'area')
+assert.equal(siteTypes.docs.find(({ key }) => key === 'region').isa95Element, 'area')
+assert.equal(siteTypes.docs.find(({ key }) => key === 'city').isa95Element, 'area')
+assert.equal(siteTypes.docs.find(({ key }) => key === 'to-be-changed').isa95Element, 'site')
+assert.equal(siteType.isa95Element, 'site')
 
 const payload = await getPayload({ config })
 try {
@@ -219,7 +235,7 @@ try {
   })
   const site = await payload.create({
     collection: 'sites',
-    data: { name: 'External worker smoke site', type: 'Test' },
+    data: { name: 'External worker smoke site', type: siteType.id },
     overrideAccess: false,
     user,
   })
