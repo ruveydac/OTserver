@@ -1,4 +1,5 @@
 import config from '@/payload.config'
+import { siteTypeID } from '../siteType'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { getPayload, type Payload } from 'payload'
@@ -81,12 +82,12 @@ describe('asset panel read interface', () => {
     try {
       const site = await payload.create({
         collection: 'sites',
-        data: { name: `Asset panel ${randomUUID()}`, type: 'Plant' },
+        data: { name: `Asset panel ${randomUUID()}`, type: await siteTypeID(payload) },
       })
       siteID = site.id
       const otherSite = await payload.create({
         collection: 'sites',
-        data: { name: `Other panel ${randomUUID()}`, type: 'Plant' },
+        data: { name: `Other panel ${randomUUID()}`, type: await siteTypeID(payload) },
       })
       otherSiteID = otherSite.id
       const role = await payload.create({

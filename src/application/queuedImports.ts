@@ -16,6 +16,7 @@ import { processImport } from './processImport'
 import { safeFailure, transientFailure } from '../jobs/errors'
 import type { AssetImport } from '../payload-types'
 import { principalRequest, systemRequest } from '../integrations/payload/requests'
+import { assertSiteAllowsImports } from './importSites'
 
 export const queuedImportsEnabled = () => process.env.OTSERVER_QUEUED_IMPORTS === 'on'
 export const fileDigest = (data: Buffer) => createHash('sha256').update(data).digest('hex')
@@ -82,6 +83,7 @@ export const retryImport: PayloadHandler = async (req) => {
       req,
     })
     await requireSiteWriter(previous.site, req)
+    await assertSiteAllowsImports(previous.site, req)
     if (previous.executionMode !== 'queued' || previous.status !== 'failed')
       throw new APIError('Only failed queued imports can be retried.', 409)
     return withRequestContext(req, { importWrite: true, skipAssetImport: true }, async () => {
@@ -180,6 +182,7 @@ export const executeQueuedImport = async (
       )
     }
     await requireSiteWriter(doc.site, req)
+    await assertSiteAllowsImports(doc.site, req)
     await payload.update({
       collection: 'asset-imports',
       id: doc.id,

@@ -12,7 +12,6 @@ import {
   canReadOtterImports,
   canWriteSiteDocuments,
   enforceWritableSite,
-  filterWritableSites,
   relationshipID,
 } from '../access/authorization'
 import { userSuppliedAssetFields } from '../domain/assetFields'
@@ -27,6 +26,7 @@ import {
   retryImport,
 } from '../application/queuedImports'
 import { assertCurrentOtterRunLease } from '../otter/runLease'
+import { assertSiteAllowsImports, filterImportSites } from '../application/importSites'
 export { getAssetOverrides } from '../application/processImport'
 
 const MAX_DIAGNOSTICS_LENGTH = 4_000_000
@@ -217,6 +217,27 @@ const protectUpload: CollectionBeforeOperationHook = async ({ args, operation, r
     })
     if (result.docs.length && (operation === 'delete' || req.file))
       throw new APIError('Queued uploads cannot be replaced or deleted while active.', 409)
+    if (operation === 'update' && req.file) {
+      const replacementSite = relationshipID((args as { data?: { site?: unknown } }).data?.site)
+      let page = 1
+      for (;;) {
+        const existing = await req.payload.find({
+          collection: 'asset-imports',
+          depth: 0,
+          limit: 100,
+          page,
+          sort: 'id',
+          overrideAccess: false,
+          req,
+          select: { site: true },
+          where: ids.id ? { id: { equals: ids.id } } : ids.where || {},
+        })
+        for (const imported of existing.docs)
+          await assertSiteAllowsImports(replacementSite ?? imported.site, req)
+        if (!existing.hasNextPage) break
+        page++
+      }
+    }
   }
   return args
 }
@@ -318,7 +339,7 @@ export const AssetImports: CollectionConfig = {
       name: 'site',
       type: 'relationship',
       admin: { description: 'Every asset in this file will be assigned to this site.' },
-      filterOptions: filterWritableSites,
+      filterOptions: filterImportSites('asset-imports'),
       index: true,
       relationTo: 'sites',
       required: true,
@@ -461,6 +482,17 @@ export const AssetImports: CollectionConfig = {
       sanitizeCustomFieldValues,
       ({ data, context }) => {
         if (context.appliedImportKey) data.appliedKey = context.appliedImportKey
+        return data
+      },
+      async ({ data, originalDoc, operation, req, context }) => {
+        if (
+          !context.importWrite &&
+          (operation === 'create' ||
+            req.file ||
+            (Object.hasOwn(data, 'site') &&
+              String(relationshipID(data.site)) !== String(relationshipID(originalDoc?.site))))
+        )
+          await assertSiteAllowsImports(data.site ?? originalDoc?.site, req)
         return data
       },
     ],

@@ -1,4 +1,5 @@
 import config from '@/payload.config'
+import { siteTypeID } from '../siteType'
 import Ajv2020 from 'ajv/dist/2020.js'
 import addFormats from 'ajv-formats'
 import { randomBytes, randomUUID } from 'node:crypto'
@@ -659,7 +660,7 @@ describe('OTserver Otter importer', () => {
       userID = user.id
       const site = await payload.create({
         collection: 'sites',
-        data: { name: `Scanner site ${randomUUID()}`, type: 'Test' },
+        data: { name: `Scanner site ${randomUUID()}`, type: await siteTypeID(payload) },
         overrideAccess: false,
         user,
       })
@@ -874,7 +875,7 @@ describe('OTserver Otter importer', () => {
       userID = user.id
       const site = await payload.create({
         collection: 'sites',
-        data: { name: `Contract site ${randomUUID()}`, type: 'Test' },
+        data: { name: `Contract site ${randomUUID()}`, type: await siteTypeID(payload) },
         overrideAccess: false,
         user,
       })
@@ -1070,12 +1071,12 @@ describe('OTserver Otter importer', () => {
     try {
       const writableSite = await payload.create({
         collection: 'sites',
-        data: { name: `API key site ${randomUUID()}`, type: 'Test' },
+        data: { name: `API key site ${randomUUID()}`, type: await siteTypeID(payload) },
       })
       siteIDs.push(writableSite.id)
       const blockedSite = await payload.create({
         collection: 'sites',
-        data: { name: `Blocked API key site ${randomUUID()}`, type: 'Test' },
+        data: { name: `Blocked API key site ${randomUUID()}`, type: await siteTypeID(payload) },
       })
       siteIDs.push(blockedSite.id)
       const role = await payload.create({

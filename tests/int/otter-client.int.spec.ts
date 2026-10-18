@@ -1,4 +1,5 @@
 import config from '@/payload.config'
+import { siteTypeID } from '../siteType'
 import { spawn, execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -68,7 +69,7 @@ describe.skipIf(!process.env.OTTER_CLIENT_BIN)('Rust controller interoperability
       process.env.OTSERVER_PUBLIC_URL = url
       const site = await payload.create({
         collection: 'sites',
-        data: { name: `Client lab ${randomUUID()}`, type: 'Test' },
+        data: { name: `Client lab ${randomUUID()}`, type: await siteTypeID(payload) },
       })
       created.push({ collection: 'sites', id: site.id })
       const role = await payload.create({

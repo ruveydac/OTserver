@@ -12,8 +12,14 @@
 }
 
 .site-tree-view__path {
-  color: var(--theme-elevation-500);
+  color: var(--theme-text);
   display: block;
   font-size: 0.78rem;
   margin-top: 0.15rem;
+}
+
+.site-tree-view__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
 }

@@ -21,6 +21,7 @@ import {
 } from '../identity/reconcile'
 import { scopedKey } from '../identity/keys'
 import { withRequestContext } from '../integrations/payload/context'
+import { assertSiteAllowsImports } from './importSites'
 
 const parsers = {
   nmap: parseNmap,
@@ -76,6 +77,7 @@ const processImportInContext = async ({
         'Identity imports are limited to 2000 device/component/link records per transaction. Split this file into smaller scans.',
       )
     await requireTransaction(req)
+    await assertSiteAllowsImports(site, req)
     mutating = true
     const appliedKey = scopedKey(
       'import-v1',

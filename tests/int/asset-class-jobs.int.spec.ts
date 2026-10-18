@@ -1,4 +1,5 @@
 import config from '@/payload.config'
+import { siteTypeID } from '../siteType'
 import { randomUUID } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import { getPayload, type Payload, type RequiredDataFromCollectionSlug } from 'payload'
@@ -122,7 +123,7 @@ describe('asset-class rule jobs', () => {
     })
     const site = await payload.create({
       collection: 'sites',
-      data: { name: `Rule job ${randomUUID()}`, type: 'Test' },
+      data: { name: `Rule job ${randomUUID()}`, type: await siteTypeID(payload) },
     })
     const automatic = await payload.create({
       collection: 'assets',

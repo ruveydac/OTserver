@@ -20,6 +20,7 @@ import { Icon as Icon_ea112afe978e228c434ec2fb66c71b02 } from '@/components/Bran
 import { Logo as Logo_ea112afe978e228c434ec2fb66c71b02 } from '@/components/Brand'
 import { default as default_c7b00627a26fa7f67bc5572c9be5c49c } from '@/components/TopologyNavLink'
 import { default as default_1a7510af427896d367a49dbf838d2de6 } from '@/components/BeforeDashboard'
+import { default as default_eddf1deaacd8f05937bcbd481f19394a } from '@/components/PurdueView'
 import { default as default_10de5814a66cadb96e2a15909b461a8f } from '@/components/TopologyView'
 import { default as default_a625382a3e6c10d385fca20fc0376c7e } from '@/components/OtterManagementView'
 import { CollectionCards as CollectionCards_f9c02e79a4aed9a3924487c0cd4cafb1 } from '@payloadcms/next/rsc'
@@ -48,6 +49,7 @@ export const importMap = {
   '@/components/Brand#Logo': Logo_ea112afe978e228c434ec2fb66c71b02,
   '@/components/TopologyNavLink#default': default_c7b00627a26fa7f67bc5572c9be5c49c,
   '@/components/BeforeDashboard#default': default_1a7510af427896d367a49dbf838d2de6,
+  '@/components/PurdueView#default': default_eddf1deaacd8f05937bcbd481f19394a,
   '@/components/TopologyView#default': default_10de5814a66cadb96e2a15909b461a8f,
   '@/components/OtterManagementView#default': default_a625382a3e6c10d385fca20fc0376c7e,
   '@payloadcms/next/rsc#CollectionCards': CollectionCards_f9c02e79a4aed9a3924487c0cd4cafb1,

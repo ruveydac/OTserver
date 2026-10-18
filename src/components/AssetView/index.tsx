@@ -16,6 +16,7 @@ import type { Asset, AssetObservation, AuditLog, TopologyLink } from '@/payload-
 import type { VulnerabilityMatch } from '@/vulnerabilities/matching'
 import { bySeverity } from '@/vulnerabilities/match'
 import { documentClientProps } from '@/integrations/payload/admin'
+import { purdueLabel } from '@/domain/purdue'
 
 import './index.scss'
 
@@ -420,6 +421,10 @@ const AssetView = async (props: DocumentViewServerProps) => {
           { label: 'Asset owner', value: fieldValue(asset, 'assetOwner', asset.assetOwner) },
           { label: 'Physical location', value: fieldValue(asset, 'location', asset.location) },
           {
+            label: 'Purdue levels',
+            value: fieldValue(asset, 'purdueLevels', purdueLabel(asset.purdueLevels)),
+          },
+          {
             label: 'Description',
             value: asset.description || 'No description provided.',
             wide: true,
@@ -622,6 +627,25 @@ const AssetView = async (props: DocumentViewServerProps) => {
 
   const security = (
     <>
+      <Section
+        title="Purdue classification"
+        details={[
+          {
+            label: 'Functional levels',
+            value: fieldValue(asset, 'purdueLevels', purdueLabel(asset.purdueLevels)),
+          },
+          {
+            label: 'Site overview',
+            value: (
+              <Link
+                href={`${adminRoute}/purdue?site=${encodeURIComponent(relationID(asset.site) || '')}`}
+              >
+                View Purdue classification for this site
+              </Link>
+            ),
+          },
+        ]}
+      />
       <section className="asset-view__section asset-view__section--wide">
         <div className="asset-view__section-heading">
           <h2>Vulnerability severity</h2>

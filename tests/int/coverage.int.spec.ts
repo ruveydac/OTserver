@@ -933,9 +933,27 @@ describe('admin presentation', () => {
 
   it('renders a site hierarchy and the small admin components', async () => {
     const sites = [
-      { id: 'child', name: 'Line 2', parent: 'root', type: 'Line', updatedAt: '2026-08-10' },
-      { id: 'root', name: 'Plant', parent: null, type: 'Plant', updatedAt: '2026-08-10' },
-      { id: 'orphan', name: 'Remote', parent: 'missing', type: 'Site', updatedAt: '2026-08-10' },
+      {
+        id: 'child',
+        name: 'Line 2',
+        parent: 'root',
+        type: { id: 'line', name: 'Production line' },
+        updatedAt: '2026-08-10',
+      },
+      {
+        id: 'root',
+        name: 'Plant',
+        parent: null,
+        type: { id: 'plant', name: 'Site / plant', blockImports: true },
+        updatedAt: '2026-08-10',
+      },
+      {
+        id: 'orphan',
+        name: 'Remote',
+        parent: 'missing',
+        type: 'site-type',
+        updatedAt: '2026-08-10',
+      },
     ]
     expect(buildSiteTree(sites as never).map(({ path }) => path)).toEqual([
       'Plant',
@@ -956,6 +974,11 @@ describe('admin presentation', () => {
     expect(html).toContain('Create site')
     expect(html).toContain('Plant / Line 2')
     expect(html).toContain('View assets')
+    expect(html).toContain('Purdue overview')
+    expect(html).toContain('Production line')
+    expect(html).toContain('Imports blocked')
+    expect(html).toContain('/collections/sites/child')
+    expect(html).toContain('where%5Bsite%5D%5Bequals%5D=child')
     expect(html).toContain('where%5Bsite%5D%5Bequals%5D=root')
     expect(renderToStaticMarkup(createElement(Icon))).toContain('OTserver')
     expect(renderToStaticMarkup(createElement(Logo))).toContain('otserver.org')

@@ -1,4 +1,5 @@
 import config from '@/payload.config'
+import { siteTypeID } from '../siteType'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
@@ -52,7 +53,7 @@ describe('asset CRUD', () => {
 
       const site = await payload.create({
         collection: 'sites',
-        data: { name: `CRUD site ${randomUUID()}`, type: 'Test site' },
+        data: { name: `CRUD site ${randomUUID()}`, type: await siteTypeID(payload) },
       })
       siteID = site.id
 
@@ -143,7 +144,7 @@ describe('asset CRUD', () => {
     try {
       const site = await payload.create({
         collection: 'sites',
-        data: { name: `Trash site ${randomUUID()}`, type: 'Test site' },
+        data: { name: `Trash site ${randomUUID()}`, type: await siteTypeID(payload) },
       })
       siteID = site.id
 
@@ -230,7 +231,7 @@ describe('asset CRUD', () => {
 
       const site = await payload.create({
         collection: 'sites',
-        data: { name: `Asset class site ${randomUUID()}`, type: 'Test site' },
+        data: { name: `Asset class site ${randomUUID()}`, type: await siteTypeID(payload) },
       })
       siteID = site.id
 
@@ -324,11 +325,20 @@ describe('asset CRUD', () => {
 
   it('supports custom site types and prevents hierarchy cycles', async () => {
     const siteIDs: string[] = []
+    const customType = await payload.create({
+      collection: 'site-types',
+      data: {
+        name: `Production campus ${randomUUID()}`,
+        key: randomUUID(),
+        category: 'custom',
+        active: true,
+      },
+    })
 
     try {
       const continent = await payload.create({
         collection: 'sites',
-        data: { name: 'EU', type: 'Continent' },
+        data: { name: 'EU', type: await siteTypeID(payload, 'continent') },
       })
       siteIDs.push(continent.id)
       const region = await payload.create({
@@ -336,7 +346,7 @@ describe('asset CRUD', () => {
         data: {
           name: 'Germany',
           parent: continent.id,
-          type: 'Custom region',
+          type: customType.id,
         },
       })
       siteIDs.push(region.id)
@@ -345,13 +355,13 @@ describe('asset CRUD', () => {
         data: {
           name: 'Berlin',
           parent: region.id,
-          type: 'Production campus',
+          type: customType.id,
         },
       })
       siteIDs.push(berlin.id)
       const aachen = await payload.create({
         collection: 'sites',
-        data: { name: 'Aachen', parent: region.id, type: 'Production campus' },
+        data: { name: 'Aachen', parent: region.id, type: customType.id },
       })
       siteIDs.push(aachen.id)
 
@@ -399,6 +409,7 @@ describe('asset CRUD', () => {
         await payload.update({ collection: 'sites', data: { parent: null }, id: siteIDs[0] })
       }
       for (const id of siteIDs.reverse()) await payload.delete({ collection: 'sites', id })
+      await payload.delete({ collection: 'site-types', id: customType.id })
     }
   })
 
@@ -423,22 +434,34 @@ describe('asset CRUD', () => {
 
       const eu = await payload.create({
         collection: 'sites',
-        data: { name: `EU ${randomUUID()}`, type: 'Continent' },
+        data: { name: `EU ${randomUUID()}`, type: await siteTypeID(payload, 'continent') },
       })
       siteIDs.push(eu.id)
       const germany = await payload.create({
         collection: 'sites',
-        data: { name: `Germany ${randomUUID()}`, parent: eu.id, type: 'Country' },
+        data: {
+          name: `Germany ${randomUUID()}`,
+          parent: eu.id,
+          type: await siteTypeID(payload, 'country'),
+        },
       })
       siteIDs.push(germany.id)
       const aachen = await payload.create({
         collection: 'sites',
-        data: { name: `Aachen ${randomUUID()}`, parent: germany.id, type: 'Plant' },
+        data: {
+          name: `Aachen ${randomUUID()}`,
+          parent: germany.id,
+          type: await siteTypeID(payload),
+        },
       })
       siteIDs.push(aachen.id)
       const usa = await payload.create({
         collection: 'sites',
-        data: { name: `USA ${randomUUID()}`, parent: eu.id, type: 'Country' },
+        data: {
+          name: `USA ${randomUUID()}`,
+          parent: eu.id,
+          type: await siteTypeID(payload, 'country'),
+        },
       })
       siteIDs.push(usa.id)
 
@@ -669,12 +692,12 @@ describe('asset CRUD', () => {
     try {
       const allowedSite = await payload.create({
         collection: 'sites',
-        data: { name: `Export allowed ${randomUUID()}`, type: 'Plant' },
+        data: { name: `Export allowed ${randomUUID()}`, type: await siteTypeID(payload) },
       })
       siteIDs.push(allowedSite.id)
       const otherSite = await payload.create({
         collection: 'sites',
-        data: { name: `Export other ${randomUUID()}`, type: 'Plant' },
+        data: { name: `Export other ${randomUUID()}`, type: await siteTypeID(payload) },
       })
       siteIDs.push(otherSite.id)
 
@@ -819,7 +842,7 @@ describe('asset CRUD', () => {
 
       const site = await payload.create({
         collection: 'sites',
-        data: { name: `Import site ${randomUUID()}`, type: 'Plant' },
+        data: { name: `Import site ${randomUUID()}`, type: await siteTypeID(payload) },
         overrideAccess: false,
         user,
       })
@@ -985,7 +1008,7 @@ describe('asset CRUD', () => {
       userID = user.id
       const site = await payload.create({
         collection: 'sites',
-        data: { name: `Rollback site ${randomUUID()}`, type: 'Test' },
+        data: { name: `Rollback site ${randomUUID()}`, type: await siteTypeID(payload) },
         overrideAccess: false,
         user,
       })
@@ -1128,7 +1151,7 @@ describe('asset CRUD', () => {
 
       const site = await payload.create({
         collection: 'sites',
-        data: { name: `Nmap fixture site ${randomUUID()}`, type: 'Test site' },
+        data: { name: `Nmap fixture site ${randomUUID()}`, type: await siteTypeID(payload) },
         overrideAccess: false,
         user,
       })

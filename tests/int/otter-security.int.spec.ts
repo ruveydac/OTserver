@@ -591,14 +591,18 @@ describe('Otter security and scheduling boundaries', () => {
         find: async ({ collection }: { collection: string }) =>
           collection === 'user-roles' ? { docs: [{ isAdmin: true }] } : { docs: [] },
         findByID: async ({ collection, id }: { collection: string; id: string }) =>
-          collection === 'otter-scanners'
-            ? { id, site: scannerSite }
-            : {
-                id,
-                site: profileSite,
-                scanner: profileScanner,
-                encryptedCredentials: 'ciphertext',
-              },
+          collection === 'sites'
+            ? { id, type: 'type-1' }
+            : collection === 'site-types'
+              ? { id, blockImports: false }
+              : collection === 'otter-scanners'
+                ? { id, site: scannerSite }
+                : {
+                    id,
+                    site: profileSite,
+                    scanner: profileScanner,
+                    encryptedCredentials: 'ciphertext',
+                  },
         count: async () => ({ totalDocs: scheduledCount }),
       },
     }

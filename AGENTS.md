@@ -90,6 +90,38 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
 ### Sites and authorization
 
 - Site types and hierarchy depth are user-defined. Do not hard-code continent/country/plant levels.
+- Site types are administrator-managed `site-types` documents used by every site in one hierarchy.
+  Seed geographic and ISA-95 defaults by stable keys with canonical equipment-element mappings
+  (Continent → Enterprise; Country, State / region, and City → Area; Site / plant and the
+  To be changed fallback → Site; production types → their matching elements), preserve edits and
+  retirement, and retire built-in types instead of deleting them. Every built-in type must carry a
+  mapping. Retired types remain valid on existing
+  assignments; new assignments require active types. Never accept free-text type values.
+- The `20261018_120000_site_types` migration replaces every legacy free-text site type with the
+  seeded **To be changed** relationship, without retaining a legacy text field. Original values
+  remain only in immutable audit history. Back up and run `pnpm migrate` before serving an upgraded
+  database; restoring a backup is required to reverse this migration.
+- Use the same `sites` collection for geographic and production nodes, including areas, lines,
+  and cells. Assets have one mandatory `site`; do not introduce a separate functional-location
+  hierarchy or assignment. Types are descriptive, not different kinds of inventory scope.
+  Role permissions include descendants; imports and scanners keep their exact-site scope.
+  Catalogue reference locks protect type deletion/retirement races. Site deletion checks include
+  assets in Trash.
+- `site-types.blockImports` defaults to false; seed Continent, Country, and City with it enabled,
+  preserving administrator changes on subsequent starts. It applies only to sites directly assigned
+  that type, never to descendants with a different type. Enforce the current type policy through
+  `src/application/importSites.ts` for upload creation/replacement, queued execution/retries,
+  and Otter enrollment, run creation/claim/start. Blocking pauses Otter assignments and requests
+  cancellation of active runs on polling/heartbeat. Keep inventory/history reads, cancellation,
+  scanner revocation, and disabling schedules available. Internal status writes must still complete.
+  Site/import selectors may retain a record's current blocked site for maintenance; that never
+  authorizes a new import or scan. Do not copy the policy onto sites or run snapshots.
+- `assets.purdueLevels` contains optional, manually assigned levels 0 through 5 using the documented
+  Purdue cybersecurity convention. Empty means unclassified; level 0 is valid and multiple levels
+  are allowed. These describe deployed functions, not ISA-95 equipment nesting, security zones,
+  or IEC 62443 security levels. Never infer them from asset class, site type, IP, or topology.
+  The site-scoped Purdue overview counts unique assets overall and per-level memberships separately.
+  Keep its asset links and graphical filters on the shared Lucene/search manifest.
 - A site cannot be its own parent or a descendant of itself. Preserve both the UI filter and the
   server-side cycle guard in `src/collections/Sites.ts`.
 - Role permissions apply to a selected site and every descendant. A role can contain multiple site

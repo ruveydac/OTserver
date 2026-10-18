@@ -20,6 +20,7 @@ import { randomUUID } from 'node:crypto'
 import { protectAssetIdentity, syncManualEndpoint } from '../identity/relationships'
 import { identityAction, migrateIdentity } from '../identity/actions'
 import { releaseDeletedAssetBindings } from '../identity/deletion'
+import { purdueLevels } from '../domain/purdue'
 
 import { userSuppliedAssetFields } from '../domain/assetFields'
 export { userSuppliedAssetFields } from '../domain/assetFields'
@@ -180,6 +181,18 @@ export const Assets: CollectionConfig = {
       index: true,
       relationTo: 'sites',
       required: true,
+    },
+    {
+      name: 'purdueLevels',
+      label: 'Purdue levels',
+      type: 'select',
+      hasMany: true,
+      options: purdueLevels,
+      index: true,
+      admin: {
+        description:
+          'Classify the deployed functions using the Purdue cybersecurity convention. Leave empty for unclassified. Levels are independent of location and do not establish security zones; the industrial DMZ is not a functional level.',
+      },
     },
     {
       type: 'row',
@@ -432,5 +445,9 @@ export const Assets: CollectionConfig = {
     afterChange: [syncManualEndpoint],
     afterDelete: [releaseDeletedAssetBindings],
   },
-  indexes: [{ fields: ['site', 'status'] }, { fields: ['site', 'assetClass'] }],
+  indexes: [
+    { fields: ['site', 'status'] },
+    { fields: ['site', 'assetClass'] },
+    { fields: ['site', 'purdueLevels'] },
+  ],
 }

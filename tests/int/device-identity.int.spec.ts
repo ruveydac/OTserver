@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createLocalReq, getPayload, type Payload } from 'payload'
 import config from '@/payload.config'
+import { siteTypeID } from '../siteType'
 import type { Asset, User } from '@/payload-types'
 import { ensureAdminRole } from '@/collections/UserRoles'
 import { hardwareKey, normalizeIdentity, OT_NAMESPACE, slotUUID, uuidV5 } from '@/identity/keys'
@@ -269,7 +270,7 @@ describe('device identity', () => {
   const site = async () => {
     const value = await payload.create({
       collection: 'sites',
-      data: { name: `Identity ${randomUUID()}`, type: 'Test' },
+      data: { name: `Identity ${randomUUID()}`, type: await siteTypeID(payload) },
       user,
       overrideAccess: false,
     })

@@ -1,4 +1,5 @@
 import config from '@/payload.config'
+import { siteTypeID } from '../siteType'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { getPayload, type Payload } from 'payload'
@@ -40,13 +41,17 @@ describe('audit log', () => {
     })
     const site = await payload.create({
       collection: 'sites',
-      data: { name: `Audit site ${randomUUID()}`, type: 'Test site' },
+      data: { name: `Audit site ${randomUUID()}`, type: await siteTypeID(payload) },
       overrideAccess: false,
       user,
     })
     const childSite = await payload.create({
       collection: 'sites',
-      data: { name: `Audit child site ${randomUUID()}`, parent: site.id, type: 'Area' },
+      data: {
+        name: `Audit child site ${randomUUID()}`,
+        parent: site.id,
+        type: await siteTypeID(payload, 'area'),
+      },
       overrideAccess: false,
       user,
     })

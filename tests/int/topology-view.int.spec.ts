@@ -1,4 +1,5 @@
 import config from '@/payload.config'
+import { siteTypeID } from '../siteType'
 import { randomUUID } from 'node:crypto'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { getPayload, type Payload } from 'payload'
@@ -518,13 +519,13 @@ describe('topology view registration and site visibility', () => {
 
       const siteA = await payload.create({
         collection: 'sites',
-        data: { name: `Topology site A ${randomUUID()}`, type: 'Plant' },
+        data: { name: `Topology site A ${randomUUID()}`, type: await siteTypeID(payload) },
       })
       siteAID = siteA.id
 
       const siteB = await payload.create({
         collection: 'sites',
-        data: { name: `Topology site B ${randomUUID()}`, type: 'Area' },
+        data: { name: `Topology site B ${randomUUID()}`, type: await siteTypeID(payload, 'area') },
       })
       siteBID = siteB.id
 

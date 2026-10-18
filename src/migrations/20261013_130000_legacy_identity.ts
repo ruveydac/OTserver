@@ -12,7 +12,7 @@ type LegacyAsset = {
 }
 type LegacyUser = { _id: unknown; email?: unknown; name?: unknown }
 
-const writeMigrationAudit = async (
+export const writeMigrationAudit = async (
   { payload, req, session }: MigrateUpArgs,
   {
     after,
