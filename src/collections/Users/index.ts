@@ -73,6 +73,21 @@ export const Users: CollectionConfig = {
       relationTo: 'user-roles',
       required: true,
     },
+    {
+      name: 'enableAPIKey',
+      type: 'checkbox',
+      admin: { hidden: true },
+    },
+    {
+      name: 'apiKey',
+      type: 'text',
+      admin: { hidden: true },
+    },
+    {
+      name: 'hasAPIKey',
+      type: 'checkbox',
+      admin: { hidden: true },
+    },
   ],
   hooks: { beforeValidate: [assignFirstUserToAdmin] },
 }

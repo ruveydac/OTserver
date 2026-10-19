@@ -26,6 +26,7 @@ const assetSubjectFields: Record<string, string[]> = {
   'asset-identifiers': ['asset'],
   'asset-installations': ['module', 'parent'],
   'asset-observations': ['asset'],
+  'asset-vulnerability-reviews': ['asset'],
   'identity-cases': ['asset', 'candidate'],
   'network-endpoints': ['asset'],
   'service-bindings': ['asset'],

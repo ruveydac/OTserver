@@ -3,6 +3,7 @@ import * as migration_20260926_111902_site_paths from './20260926_111902_site_pa
 import * as migration_20261010_164200_otter_indexes from './20261010_164200_otter_indexes'
 import * as migration_20261013_130000_legacy_identity from './20261013_130000_legacy_identity'
 import * as migration_20261018_120000_site_types from './20261018_120000_site_types'
+import * as migration_20261019_120000_asset_vulnerability_reviews from './20261019_120000_asset_vulnerability_reviews'
 
 export const migrations = [
   {
@@ -29,5 +30,10 @@ export const migrations = [
     up: migration_20261018_120000_site_types.up,
     down: migration_20261018_120000_site_types.down,
     name: '20261018_120000_site_types',
+  },
+  {
+    up: migration_20261019_120000_asset_vulnerability_reviews.up,
+    down: migration_20261019_120000_asset_vulnerability_reviews.down,
+    name: '20261019_120000_asset_vulnerability_reviews',
   },
 ]

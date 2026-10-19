@@ -34,8 +34,9 @@ change over time. Add assets manually or import discovery results from
 - Combine discovery results while preserving manual edits and the source of each value.
 - Search and filter assets, inspect topology, and review an immutable change history.
 - Enroll Otter scanners, configure discovery, schedule scans, and review results centrally.
-- Find potential vulnerability matches using recorded device metadata and local vulnerability catalogs.
-  This lookup does not actively test devices and does not confirm that a device is vulnerable.
+- Find and review potential vulnerability matches using recorded device metadata and local catalogs.
+  Confirm, dismiss, resolve, and reopen findings without probing devices; changed matching criteria
+  flag confirmed findings for review.
 
 ## Quick start
 
@@ -117,8 +118,9 @@ Download it from the [Otter releases page](https://github.com/ruveydac/otserver-
 run discovery, and import the resulting JSON into OTserver. You can also enroll scanners in
 OTserver to manage configurations and schedules centrally.
 
-For managed scanners, set `OTSERVER_PUBLIC_URL` and a stable `OTSERVER_OTTER_ENCRYPTION_KEY`
-in the OTserver container environment. See [Otter management](otter_management.md) for setup.
+For managed scanners, set a stable `OTSERVER_OTTER_ENCRYPTION_KEY` and configure the public
+controller URL under **Settings > Application settings**. See [Otter management](otter_management.md)
+for setup.
 
 ## Development and technical guidance
 

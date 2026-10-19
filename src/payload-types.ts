@@ -85,6 +85,7 @@ export interface Config {
     'user-roles': UserRole;
     users: User;
     'asset-observations': AssetObservation;
+    'asset-vulnerability-reviews': AssetVulnerabilityReview;
     'topology-links': TopologyLink;
     vulnerabilities: Vulnerability;
     'vulnerability-feeds': VulnerabilityFeed;
@@ -118,6 +119,7 @@ export interface Config {
     'user-roles': UserRolesSelect<false> | UserRolesSelect<true>;
     users: UsersSelect<false> | UsersSelect<true>;
     'asset-observations': AssetObservationsSelect<false> | AssetObservationsSelect<true>;
+    'asset-vulnerability-reviews': AssetVulnerabilityReviewsSelect<false> | AssetVulnerabilityReviewsSelect<true>;
     'topology-links': TopologyLinksSelect<false> | TopologyLinksSelect<true>;
     vulnerabilities: VulnerabilitiesSelect<false> | VulnerabilitiesSelect<true>;
     'vulnerability-feeds': VulnerabilityFeedsSelect<false> | VulnerabilityFeedsSelect<true>;
@@ -135,8 +137,12 @@ export interface Config {
     defaultIDType: string;
   };
   fallbackLocale: null;
-  globals: {};
-  globalsSelect: {};
+  globals: {
+    'application-settings': ApplicationSetting;
+  };
+  globalsSelect: {
+    'application-settings': ApplicationSettingsSelect<false> | ApplicationSettingsSelect<true>;
+  };
   locale: null;
   widgets: {
     collections: CollectionsWidget;
@@ -354,7 +360,7 @@ export interface Asset {
   status: 'online' | 'offline' | 'maintenance' | 'unknown';
   criticality: 'low' | 'medium' | 'high' | 'critical';
   /**
-   * Unvalidated catalog matches for the recorded vendor, model, and version data. Empty until the vulnerability catalog is loaded.
+   * Current unconfirmed matches and confirmed unresolved vulnerability findings. Dismissed and resolved findings are excluded.
    */
   vulnerabilityCount?: number | null;
   lastSeen?: string | null;
@@ -521,7 +527,7 @@ export interface AssetImport {
   id: string;
   name?: string | null;
   /**
-   * Queued imports require OTSERVER_QUEUED_IMPORTS=on and a healthy worker.
+   * Enable queued imports under Settings > Application settings and keep a worker healthy.
    */
   executionMode?: ('sync' | 'queued') | null;
   jobID?: string | null;
@@ -953,6 +959,32 @@ export interface AssetObservation {
     | boolean
     | null;
   warnings?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "asset-vulnerability-reviews".
+ */
+export interface AssetVulnerabilityReview {
+  id: string;
+  site: string | Site;
+  asset: string | Asset;
+  cve: string;
+  status: 'confirmed' | 'dismissed' | 'resolved';
+  revision: number;
+  decidedAt: string;
+  reviewerID: string;
+  reviewerName?: string | null;
+  evidence?:
     | {
         [k: string]: unknown;
       }
@@ -1868,6 +1900,23 @@ export interface AssetObservationsSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "asset-vulnerability-reviews_select".
+ */
+export interface AssetVulnerabilityReviewsSelect<T extends boolean = true> {
+  site?: T;
+  asset?: T;
+  cve?: T;
+  status?: T;
+  revision?: T;
+  decidedAt?: T;
+  reviewerID?: T;
+  reviewerName?: T;
+  evidence?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "topology-links_select".
  */
 export interface TopologyLinksSelect<T extends boolean = true> {
@@ -2075,6 +2124,34 @@ export interface PayloadMigrationsSelect<T extends boolean = true> {
   batch?: T;
   updatedAt?: T;
   createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "application-settings".
+ */
+export interface ApplicationSetting {
+  id: string;
+  /**
+   * Leave blank to use OTSERVER_PUBLIC_URL from the deployment environment. Remote URLs require HTTPS.
+   */
+  controllerURL?: string | null;
+  /**
+   * Controls new queued import submissions and retries. Jobs already accepted continue processing. The deployment default uses OTSERVER_QUEUED_IMPORTS.
+   */
+  queuedImports?: ('deployment' | 'enabled' | 'disabled') | null;
+  updatedAt?: string | null;
+  createdAt?: string | null;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "application-settings_select".
+ */
+export interface ApplicationSettingsSelect<T extends boolean = true> {
+  controllerURL?: T;
+  queuedImports?: T;
+  updatedAt?: T;
+  createdAt?: T;
+  globalType?: T;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema

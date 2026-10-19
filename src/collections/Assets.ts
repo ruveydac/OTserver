@@ -21,6 +21,7 @@ import { protectAssetIdentity, syncManualEndpoint } from '../identity/relationsh
 import { identityAction, migrateIdentity } from '../identity/actions'
 import { releaseDeletedAssetBindings } from '../identity/deletion'
 import { purdueLevels } from '../domain/purdue'
+import { vulnerabilityReviewAction } from '../vulnerabilities/reviews'
 
 import { userSuppliedAssetFields } from '../domain/assetFields'
 export { userSuppliedAssetFields } from '../domain/assetFields'
@@ -88,6 +89,7 @@ export const Assets: CollectionConfig = {
   defaultSort: 'name',
   endpoints: [
     { handler: identityAction, method: 'post', path: '/:id/identity' },
+    { handler: vulnerabilityReviewAction, method: 'post', path: '/:id/vulnerability-review' },
     { handler: migrateIdentity, method: 'post', path: '/migrate-identity' },
     {
       handler: exportAssetsCSV,
@@ -388,12 +390,12 @@ export const Assets: CollectionConfig = {
       },
       admin: {
         description:
-          'Unvalidated catalog matches for the recorded vendor, model, and version data. Empty until the vulnerability catalog is loaded.',
+          'Current unconfirmed matches and confirmed unresolved vulnerability findings. Dismissed and resolved findings are excluded.',
         position: 'sidebar',
         readOnly: true,
       },
       index: true,
-      label: 'Potential vulnerability matches',
+      label: 'Open vulnerability findings',
     },
     {
       name: 'lastSeen',

@@ -55,7 +55,7 @@ describe.each(['development', 'production'])('Otter browser requests in %s', (en
           headers: { ...headers, ...(origin ? { Origin: origin } : {}) },
           body: JSON.stringify({ name: 'Local Otter', site: 'site-1' }),
         }),
-        { context: {} },
+        { context: {}, payload: { findGlobal: vi.fn(async () => ({})) } },
       ) as never,
     )
 

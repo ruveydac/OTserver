@@ -157,7 +157,10 @@ describe('versioned legacy identity migration', () => {
       const otterIndexes = migrations[2]!
       await otterIndexes.down(migrationArgs as never)
       await otterIndexes.up(migrationArgs as never)
-      await expect(migrations.at(-1)!.down({} as never)).rejects.toThrow('not reversible')
+      const reviewIndexes = migrations.at(-1)!
+      await reviewIndexes.down(migrationArgs as never)
+      await reviewIndexes.up(migrationArgs as never)
+      await expect(migrations.at(-2)!.down({} as never)).rejects.toThrow('not reversible')
     } finally {
       await payload.delete({ collection: 'assets', id: asset.id })
       await payload.delete({ collection: 'users', id: user.id })

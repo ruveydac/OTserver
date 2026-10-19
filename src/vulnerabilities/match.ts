@@ -72,20 +72,42 @@ export const findAssetVulnerabilities = async (
   return matches
 }
 
+type MatchCache = Map<string, Promise<VulnerabilityMatch[]>>
+
+const cachedAssetVulnerabilityMatches = (
+  payload: Payload,
+  asset: AssetMatchInput,
+  access: { req?: PayloadRequest; user?: TypedUser | null },
+  suppliedCache?: MatchCache,
+) => {
+  const cache =
+    suppliedCache ||
+    (access.req
+      ? ((access.req.context.vulnerabilityMatchResults ??= new Map<
+          string,
+          Promise<VulnerabilityMatch[]>
+        >()) as MatchCache)
+      : undefined)
+  if (!cache) return findAssetVulnerabilities(payload, asset, access)
+  const key = assetFingerprint(asset)
+  const cached = cache.get(key)
+  if (cached) return cached
+  const pending = findAssetVulnerabilities(payload, asset, access)
+  if (cache.size >= 1000) cache.delete(cache.keys().next().value!)
+  cache.set(key, pending)
+  return pending
+}
+
 /** Distinct CVEs for the installed physical assembly; each match retains its module/version. */
 export const findAssemblyVulnerabilities = async (
   payload: Payload,
   asset: AssetMatchInput & { id?: string; name?: string },
   access: { req?: PayloadRequest; user?: TypedUser | null } = {},
 ): Promise<VulnerabilityMatch[]> => {
+  const groups = await findAssemblyVulnerabilityGroups(payload, asset, access)
   const matches = new Map<string, VulnerabilityMatch>()
-  const pending = [asset]
-  const visited = new Set<string>()
-  while (pending.length) {
-    const current = pending.shift()!
-    if (current.id && visited.has(current.id)) continue
-    if (current.id) visited.add(current.id)
-    for (const match of await findAssetVulnerabilities(payload, current, access)) {
+  for (const { asset: current, matches: currentMatches } of groups) {
+    for (const match of currentMatches) {
       const previous = matches.get(match.cve)
       const components = [
         ...(previous?.components || []),
@@ -95,6 +117,29 @@ export const findAssemblyVulnerabilities = async (
       ]
       matches.set(match.cve, { ...(previous || match), components })
     }
+  }
+  return [...matches.values()]
+}
+
+export const findAssemblyVulnerabilityGroups = async (
+  payload: Payload,
+  asset: AssetMatchInput & { id?: string; name?: string },
+  access: { req?: PayloadRequest; user?: TypedUser | null } = {},
+) => {
+  const groups: {
+    asset: AssetMatchInput & { id?: string; name?: string }
+    matches: VulnerabilityMatch[]
+  }[] = []
+  const pending = [asset]
+  const visited = new Set<string>()
+  while (pending.length) {
+    const current = pending.shift()!
+    if (current.id && visited.has(current.id)) continue
+    if (current.id) visited.add(current.id)
+    groups.push({
+      asset: current,
+      matches: await findAssetVulnerabilities(payload, current, access),
+    })
     if (!current.id) continue
     const installations = await payload.find({
       collection: 'asset-installations',
@@ -118,7 +163,7 @@ export const findAssemblyVulnerabilities = async (
       if (component && component.lifecycle === 'active') pending.push(component)
     }
   }
-  return [...matches.values()]
+  return groups
 }
 
 /**
@@ -130,21 +175,64 @@ export const countAssetVulnerabilities = async (
   asset: AssetMatchInput,
   access: { req?: PayloadRequest; user?: TypedUser | null } = {},
 ): Promise<number> => {
-  const req = access.req
-  if (!req) return (await findAssetVulnerabilities(payload, asset, access)).length
+  return (await cachedAssetVulnerabilityMatches(payload, asset, access)).length
+}
 
-  // Imports touch hundreds of near-identical devices; resolve each fingerprint once.
-  const cache = (req.context.vulnerabilityCounts ??= new Map<string, Promise<number>>()) as Map<
-    string,
-    Promise<number>
-  >
-  const key = assetFingerprint(asset)
-  const cached = cache.get(key)
-  if (cached) return cached
-  const pending = findAssetVulnerabilities(payload, asset, access).then((matches) => matches.length)
-  if (cache.size >= 1000) cache.delete(cache.keys().next().value!)
-  cache.set(key, pending)
-  return pending
+type AssetReviewStatus = { asset: string | { id: string }; cve: string; status: string }
+
+const findReviewsForAssets = async (
+  payload: Payload,
+  assetIDs: string[],
+  access: { req?: PayloadRequest; user?: TypedUser | null },
+) => {
+  if (!assetIDs.length) return [] as AssetReviewStatus[]
+  const user = access.req?.user ?? access.user
+  const reviews: AssetReviewStatus[] = []
+  let after: string | undefined
+  for (;;) {
+    const result = await payload.find({
+      collection: 'asset-vulnerability-reviews',
+      depth: 0,
+      limit: 100,
+      pagination: false,
+      ...(user ? { overrideAccess: false, user } : { overrideAccess: true }),
+      ...(access.req ? { req: access.req } : {}),
+      select: { asset: true, cve: true, status: true },
+      sort: 'id',
+      where: {
+        and: [{ asset: { in: assetIDs } }, ...(after ? [{ id: { greater_than: after } }] : [])],
+      },
+    })
+    reviews.push(...result.docs)
+    if (result.docs.length < 100) break
+    after = result.docs.at(-1)!.id
+  }
+  return reviews
+}
+
+export const countOpenAssetVulnerabilities = async (
+  payload: Payload,
+  asset: AssetMatchInput & { id?: string; lifecycle?: string | null },
+  access: { req?: PayloadRequest; user?: TypedUser | null } = {},
+  matchCache?: MatchCache,
+  reviewStatuses?: AssetReviewStatus[],
+): Promise<number> => {
+  if (asset.lifecycle === 'merged') return 0
+  const matches = await cachedAssetVulnerabilityMatches(payload, asset, access, matchCache)
+  if (!asset.id) return matches.length
+  const reviews = reviewStatuses ?? (await findReviewsForAssets(payload, [asset.id], access))
+  const assetReviews = reviews.filter(
+    (review) =>
+      String(typeof review.asset === 'object' ? review.asset.id : review.asset) === asset.id,
+  )
+  const statuses = new Map(assetReviews.map(({ cve, status }) => [cve, status]))
+  const matched = new Set(matches.map(({ cve }) => cve))
+  let count = matches.filter(
+    ({ cve }) => !['dismissed', 'resolved'].includes(statuses.get(cve) || ''),
+  ).length
+  for (const { cve, status } of assetReviews)
+    if (status === 'confirmed' && !matched.has(cve)) count += 1
+  return count
 }
 
 export const catalogIsLoaded = async (payload: Payload, req?: PayloadRequest): Promise<boolean> => {
@@ -169,10 +257,29 @@ export const catalogIsLoaded = async (payload: Payload, req?: PayloadRequest): P
   return loaded
 }
 
-/**
- * Keeps `vulnerabilityCount` in sync with the stored asset metadata. It is a derived
- * value: nothing but this hook and the post-sync recount may write it.
- */
+export const refreshAssetVulnerabilityCount = async (
+  payload: Payload,
+  asset: AssetMatchInput & {
+    id: string
+    lifecycle?: string | null
+    vulnerabilityCount?: number | null
+  },
+  req: PayloadRequest,
+) => {
+  if (asset.lifecycle !== 'merged' && !(await catalogIsLoaded(payload, req))) return
+  const count = await countOpenAssetVulnerabilities(payload, asset, { req })
+  if ((asset.vulnerabilityCount ?? null) === count) return
+  await payload.update({
+    collection: 'assets',
+    id: asset.id,
+    data: { vulnerabilityCount: count },
+    context: { vulnerabilityCountSync: true },
+    overrideAccess: true,
+    req,
+  })
+}
+
+/** Keeps the stored open-finding count in sync with asset metadata. */
 export const assignVulnerabilityCount: CollectionBeforeChangeHook = async ({
   context,
   data,
@@ -182,12 +289,21 @@ export const assignVulnerabilityCount: CollectionBeforeChangeHook = async ({
   if (context.vulnerabilityCountSync) return data
   if (!(await catalogIsLoaded(req.payload, req))) return data
 
-  const asset: AssetMatchInput = {}
+  const asset: AssetMatchInput & { id?: string; lifecycle?: string | null } = {}
   for (const field of MATCH_FIELDS) {
     const value = Object.hasOwn(data, field) ? data[field] : originalDoc?.[field]
     if (typeof value === 'string') asset[field] = value
   }
-  data.vulnerabilityCount = await countAssetVulnerabilities(req.payload, asset, { req })
+  if (typeof data.lifecycle === 'string' || originalDoc?.lifecycle)
+    asset.lifecycle = data.lifecycle || originalDoc?.lifecycle
+  data.vulnerabilityCount = await countOpenAssetVulnerabilities(
+    req.payload,
+    {
+      ...asset,
+      id: originalDoc?.id,
+    },
+    { req },
+  )
   return data
 }
 
@@ -196,7 +312,8 @@ export const recountAssetVulnerabilities = async (
   payload: Payload,
   req?: PayloadRequest,
 ): Promise<number> => {
-  const counts = new Map<string, number>()
+  if (!(await catalogIsLoaded(payload, req))) return 0
+  const matches = new Map<string, Promise<VulnerabilityMatch[]>>()
   let after: string | undefined
   let updated = 0
 
@@ -216,18 +333,33 @@ export const recountAssetVulnerabilities = async (
         catalogNumber: true,
         operatingSystem: true,
         vendor: true,
+        lifecycle: true,
         vulnerabilityCount: true,
       },
     })
 
     for (const asset of result.docs) {
       const fingerprint = assetFingerprint(asset)
-      let count = counts.get(fingerprint)
-      if (count === undefined) {
-        count = (await findAssetVulnerabilities(payload, asset)).length
-        if (counts.size >= 1000) counts.delete(counts.keys().next().value!)
-        counts.set(fingerprint, count)
+      let pendingMatches = matches.get(fingerprint)
+      if (!pendingMatches) {
+        pendingMatches = findAssetVulnerabilities(payload, asset)
+        if (matches.size >= 1000) matches.delete(matches.keys().next().value!)
+        matches.set(fingerprint, pendingMatches)
       }
+    }
+    const pageReviews = await findReviewsForAssets(
+      payload,
+      result.docs.map(({ id }) => id),
+      req ? { req } : {},
+    )
+    for (const asset of result.docs) {
+      const count = await countOpenAssetVulnerabilities(
+        payload,
+        { ...asset, id: asset.id },
+        req ? { req } : {},
+        matches,
+        pageReviews,
+      )
       if ((asset.vulnerabilityCount ?? null) === count) continue
 
       await payload.update({

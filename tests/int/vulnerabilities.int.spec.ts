@@ -10,7 +10,14 @@ import { createLocalReq, getPayload, type Payload, type TypedUser } from 'payloa
 
 import { ensureAssetClass } from '../../src/collections/AssetClasses'
 import { ensureAdminRole } from '../../src/collections/UserRoles'
+vi.mock('../../src/components/AssetVulnerabilityReviewActions', () => ({ default: () => null }))
 import AssetVulnerabilitiesView from '../../src/components/AssetVulnerabilitiesView'
+import {
+  loadAssetVulnerabilityReviews,
+  performVulnerabilityReview,
+  vulnerabilityReviewAction,
+} from '../../src/vulnerabilities/reviews'
+import { performIdentityAction } from '../../src/identity/actions'
 import {
   CISA_CSAF_FEED_URLS,
   affectedProducts,
@@ -927,6 +934,7 @@ describe('vulnerability catalog', () => {
   let plcClassID: string
   let siteID: string
   const assetIDs: string[] = []
+  const extraSiteIDs: string[] = []
   const roleIDs: string[] = []
   const userIDs: string[] = []
 
@@ -995,6 +1003,7 @@ describe('vulnerability catalog', () => {
     for (const id of userIDs) await payload.delete({ collection: 'users', id })
     for (const id of roleIDs) await payload.delete({ collection: 'user-roles', id })
     await payload.delete({ collection: 'sites', id: siteID })
+    for (const id of extraSiteIDs) await payload.delete({ collection: 'sites', id })
   })
 
   const createAsset = async (data: Record<string, unknown>) => {
@@ -1431,6 +1440,340 @@ describe('vulnerability catalog', () => {
     ).toBe(1)
   })
 
+  it('retains confirm, dismiss, resolve, and reopen decisions across a firmware update', async () => {
+    const cves = ['CVE-2099-8101', 'CVE-2099-8102', 'CVE-2099-8103']
+    await upsertVulnerabilities(
+      payload,
+      cves.map((cve, index) => ({
+        cve,
+        set: {
+          affected: [
+            {
+              part: 'a',
+              product: 'reviewline_controller_firmware',
+              vendor: 'reviewvendor',
+              version: '*',
+              versionEndExcluding: '2.0',
+            },
+          ],
+          cvssScore: 7 + index,
+          cvssSeverity: 'HIGH',
+          knownExploited: false,
+          productTokens: ['reviewline', 'controller'],
+          products: ['reviewlinecontrollerfirmware'],
+        },
+      })),
+    )
+    const asset = await createAsset({
+      ...feedDocument,
+      firmwareVersion: '1.0',
+      model: 'ReviewLine Controller',
+      name: 'Review flow PLC',
+      vendor: 'Review Vendor',
+    })
+    const request = () => createLocalReq({ user: adminUser }, payload)
+    const decideOn = async (assetID: string, cve: string, action: string, revision: number) =>
+      performVulnerabilityReview(assetID, { action, cve, revision }, await request())
+    const decide = (cve: string, action: string, revision: number) =>
+      decideOn(asset.id, cve, action, revision)
+    const decideWithoutCatalog = async (cve: string, action: string, revision: number) => {
+      const req = await request()
+      req.context.vulnerabilityCatalogReady = false
+      return performVulnerabilityReview(asset.id, { action, cve, revision }, req)
+    }
+    let target: Awaited<ReturnType<typeof createAsset>> | undefined
+
+    try {
+      expect(asset.vulnerabilityCount).toBe(3)
+      await expect(
+        vulnerabilityReviewAction(
+          await createLocalReq({ req: { json: async () => ({}) } }, payload),
+        ),
+      ).rejects.toMatchObject({ status: 401 })
+      await expect(
+        vulnerabilityReviewAction(
+          await createLocalReq(
+            { user: adminUser, req: { json: async () => Promise.reject(new Error('bad json')) } },
+            payload,
+          ),
+        ),
+      ).rejects.toMatchObject({ status: 400 })
+      await expect(
+        vulnerabilityReviewAction(
+          await createLocalReq(
+            {
+              user: adminUser,
+              req: {
+                routeParams: { id: asset.id },
+                json: async () => ({ action: 'dismiss', cve: cves[0], revision: 0, site: siteID }),
+              },
+            },
+            payload,
+          ),
+        ),
+      ).rejects.toMatchObject({ status: 400 })
+      const dismissed = await vulnerabilityReviewAction(
+        await createLocalReq(
+          {
+            user: adminUser,
+            req: {
+              routeParams: { id: asset.id },
+              json: async () => ({ action: 'dismiss', cve: cves[0], revision: 0 }),
+            },
+          },
+          payload,
+        ),
+      )
+      expect(dismissed.status).toBe(200)
+      expect((await decide(cves[0]!, 'dismiss', 0)).revision).toBe(1)
+      await expect(decide(cves[0]!, 'confirm', 1)).rejects.toMatchObject({ status: 409 })
+      await expect(decide(cves[0]!, 'resolve', 1)).rejects.toMatchObject({ status: 409 })
+      await expect(decide(cves[0]!, 'reopen', 1)).rejects.toMatchObject({ status: 409 })
+      await expect(decide(cves[1]!, 'dismiss', 1)).rejects.toMatchObject({ status: 409 })
+      await expect(decide('CVE-2099-8998', 'confirm', 0)).rejects.toMatchObject({ status: 409 })
+      await expect(decide(cves[1]!, 'unknown-action', 0)).rejects.toMatchObject({ status: 400 })
+      await expect(decide('invalid-cve', 'confirm', 0)).rejects.toMatchObject({ status: 400 })
+      await expect(decide(cves[1]!, 'confirm', '0' as never)).rejects.toMatchObject({
+        status: 400,
+      })
+      await decide(cves[1]!, 'confirm', 0)
+      await decideWithoutCatalog(cves[2]!, 'confirm', 0)
+
+      await (
+        payload.db.collections.vulnerabilities.collection as unknown as {
+          updateOne: (filter: object, update: object) => Promise<unknown>
+        }
+      ).updateOne({ cve: cves[1] }, { $set: { products: [], productTokens: [] } })
+      const stillAssessed = await loadAssetVulnerabilityReviews(payload, asset, {
+        user: adminUser,
+      })
+      expect(stillAssessed.findings).toContainEqual(
+        expect.objectContaining({
+          match: expect.objectContaining({ cve: cves[1] }),
+          status: 'confirmed',
+          assessment: 'matched',
+        }),
+      )
+      expect(
+        (await payload.findByID({ collection: 'assets', id: asset.id })).vulnerabilityCount,
+      ).toBe(2)
+
+      await (
+        payload.db.collections.vulnerabilities.collection as unknown as {
+          updateOne: (filter: object, update: object) => Promise<unknown>
+        }
+      ).updateOne(
+        { cve: cves[1] },
+        {
+          $set: {
+            products: ['reviewlinecontrollerfirmware'],
+            productTokens: ['reviewline', 'controller'],
+          },
+        },
+      )
+      await decideWithoutCatalog(cves[1]!, 'resolve', 1)
+      const resolvedAtCurrentVersion = await loadAssetVulnerabilityReviews(
+        payload,
+        await payload.findByID({ collection: 'assets', id: asset.id }),
+        { user: adminUser },
+      )
+      expect(resolvedAtCurrentVersion.resolved.map(({ cve }) => cve)).toContain(cves[1])
+      await payload.update({
+        collection: 'assets',
+        id: asset.id,
+        data: { firmwareVersion: null },
+      })
+      const missingVersion = await loadAssetVulnerabilityReviews(
+        payload,
+        await payload.findByID({ collection: 'assets', id: asset.id }),
+        { user: adminUser },
+      )
+      expect(missingVersion.findings).toMatchObject([
+        {
+          match: { cve: cves[2] },
+          status: 'confirmed',
+          assessment: 'unknown',
+          assessmentMessage: 'A relevant version is not recorded for this asset.',
+        },
+      ])
+      const upgraded = await payload.update({
+        collection: 'assets',
+        id: asset.id,
+        data: { firmwareVersion: '2.0' },
+      })
+      expect(upgraded.vulnerabilityCount).toBe(1)
+
+      const afterUpgrade = await loadAssetVulnerabilityReviews(payload, upgraded, {
+        user: adminUser,
+      })
+      expect(afterUpgrade.findings).toMatchObject([
+        { match: { cve: cves[2] }, status: 'confirmed', assessment: 'no-longer-matches' },
+      ])
+      expect(afterUpgrade.findings.some(({ match }) => match.cve === cves[0])).toBe(false)
+
+      await decide(cves[2]!, 'resolve', 1)
+      expect(
+        (await payload.findByID({ collection: 'assets', id: asset.id })).vulnerabilityCount,
+      ).toBe(0)
+      const resolved = await loadAssetVulnerabilityReviews(payload, upgraded, { user: adminUser })
+      expect(resolved.resolved.map(({ cve }) => cve).sort()).toEqual([cves[1], cves[2]])
+
+      await decide(cves[1]!, 'reopen', 2)
+      expect(
+        (await payload.findByID({ collection: 'assets', id: asset.id })).vulnerabilityCount,
+      ).toBe(1)
+      const reopened = await decide(cves[1]!, 'reopen', 2)
+      expect(reopened.revision).toBe(3)
+      await expect(decide(cves[2]!, 'reopen', 0)).rejects.toMatchObject({ status: 409 })
+
+      target = await createAsset({
+        ...feedDocument,
+        firmwareVersion: '1.0',
+        model: 'ReviewLine Controller',
+        name: 'Review merge target',
+        vendor: 'Review Vendor',
+      })
+      await decideOn(target.id, cves[2]!, 'confirm', 0)
+      await expect(
+        performIdentityAction(
+          asset.id,
+          { action: 'merge', reason: 'Duplicate inventory record', target: target.id },
+          await request(),
+        ),
+      ).rejects.toMatchObject({ status: 409 })
+
+      const conflictingReview = await payload.find({
+        collection: 'asset-vulnerability-reviews',
+        depth: 0,
+        limit: 1,
+        overrideAccess: true,
+        where: { and: [{ asset: { equals: target.id } }, { cve: { equals: cves[2] } }] },
+      })
+      await payload.delete({
+        collection: 'asset-vulnerability-reviews',
+        id: conflictingReview.docs[0]!.id,
+        overrideAccess: true,
+      })
+      await performIdentityAction(
+        asset.id,
+        { action: 'merge', reason: 'Duplicate inventory record', target: target.id },
+        await request(),
+      )
+      expect(
+        (await payload.findByID({ collection: 'assets', id: asset.id })).vulnerabilityCount,
+      ).toBe(0)
+      expect(
+        (await payload.findByID({ collection: 'assets', id: target.id })).vulnerabilityCount,
+      ).toBe(1)
+      const mergedReviews = await payload.find({
+        collection: 'asset-vulnerability-reviews',
+        depth: 0,
+        limit: 10,
+        overrideAccess: true,
+        where: { asset: { equals: target.id } },
+      })
+      expect(mergedReviews.docs.map(({ cve }) => cve).sort()).toEqual([...cves].sort())
+      await expect(decideOn(asset.id, cves[1]!, 'resolve', 3)).rejects.toMatchObject({
+        status: 409,
+      })
+
+      const readerRole = await payload.create({
+        collection: 'user-roles',
+        data: {
+          name: `Vulnerability reader ${randomUUID()}`,
+          permissions: [{ access: 'read', site: siteID }],
+        },
+      })
+      roleIDs.push(readerRole.id)
+      const reader = await payload.create({
+        collection: 'users',
+        data: {
+          email: `vulnerability-reader-${randomUUID()}@example.test`,
+          password: randomUUID(),
+          role: readerRole.id,
+        },
+      })
+      userIDs.push(reader.id)
+      const scopedReviews = await payload.find({
+        collection: 'asset-vulnerability-reviews',
+        overrideAccess: false,
+        user: reader as unknown as TypedUser,
+        where: { asset: { equals: target.id } },
+      })
+      expect(scopedReviews.totalDocs).toBe(3)
+      await expect(
+        performVulnerabilityReview(
+          target.id,
+          { action: 'resolve', cve: cves[1], revision: 1 },
+          await createLocalReq({ user: reader as unknown as TypedUser }, payload),
+        ),
+      ).rejects.toMatchObject({ status: 403 })
+      await expect(
+        performVulnerabilityReview(
+          target.id,
+          { action: 'resolve', cve: cves[1], revision: 1 },
+          await createLocalReq(
+            { user: adminUser, context: { otterScannerID: 'scanner-1' } },
+            payload,
+          ),
+        ),
+      ).rejects.toMatchObject({ status: 403 })
+      await expect(
+        payload.create({
+          collection: 'asset-vulnerability-reviews',
+          data: {
+            asset: target.id,
+            cve: 'CVE-2099-8999',
+            decidedAt: new Date().toISOString(),
+            revision: 1,
+            reviewerID: String(adminUser.id),
+            site: siteID,
+            status: 'confirmed',
+          },
+          overrideAccess: false,
+          user: adminUser,
+        }),
+      ).rejects.toThrow()
+
+      const transferSite = await payload.create({
+        collection: 'sites',
+        data: { name: `Review transfer ${randomUUID()}`, type: await siteTypeID(payload) },
+      })
+      extraSiteIDs.push(transferSite.id)
+      await performIdentityAction(
+        target.id,
+        { action: 'transfer', reason: 'Site reassignment', site: transferSite.id },
+        await request(),
+      )
+      const transferredReviews = await payload.find({
+        collection: 'asset-vulnerability-reviews',
+        depth: 0,
+        limit: 10,
+        overrideAccess: true,
+        where: { asset: { equals: target.id } },
+      })
+      expect(transferredReviews.docs.map(({ site }) => site)).toEqual(
+        Array(3).fill(transferSite.id),
+      )
+      await performIdentityAction(
+        target.id,
+        { action: 'transfer', reason: 'Return to original site', site: siteID },
+        await request(),
+      )
+    } finally {
+      await payload.delete({
+        collection: 'asset-vulnerability-reviews',
+        where: { asset: { in: [asset.id, ...(target ? [target.id] : [])] } },
+        overrideAccess: true,
+      })
+      await (
+        payload.db.collections.vulnerabilities.collection as unknown as {
+          deleteMany: (where: object) => Promise<unknown>
+        }
+      ).deleteMany({ cve: { $in: cves } })
+    }
+  })
+
   it('scopes the catalog and its state through collection access', async () => {
     const anonymous = await payload.find({
       collection: 'vulnerability-feeds',
@@ -1480,6 +1823,7 @@ describe('vulnerability catalog', () => {
   })
 
   it('renders the lookup view with its validation warning', async () => {
+    const adminReq = await createLocalReq({ user: adminUser }, payload)
     const asset = (
       await payload.find({
         collection: 'assets',
@@ -1490,16 +1834,16 @@ describe('vulnerability catalog', () => {
     const html = renderToStaticMarkup(
       await AssetVulnerabilitiesView({
         doc: asset,
-        initPageResult: { req: { user: adminUser } },
+        initPageResult: { req: adminReq },
         payload,
         routeSegments: ['collections', 'assets', asset.id, 'vulnerabilities'],
         searchParams: {},
         user: adminUser,
       } as never),
     )
-    expect(html).toContain('not validated')
-    expect(html).toContain('No vulnerability check was run')
-    expect(html).toContain('1 potential vulnerability matches')
+    expect(html).toContain('unconfirmed until reviewed')
+    expect(html).toContain('OTserver does not probe devices')
+    expect(html).toContain('1 open vulnerability finding')
     expect(html).toContain('CVE-2099-0002')
     expect(html).toContain('firmware version')
     expect(html).toContain('satisfies')
@@ -1517,7 +1861,7 @@ describe('vulnerability catalog', () => {
     const enrichedHTML = renderToStaticMarkup(
       await AssetVulnerabilitiesView({
         doc: enriched,
-        initPageResult: { req: { user: adminUser } },
+        initPageResult: { req: adminReq },
         payload,
         routeSegments: ['collections', 'assets', enriched.id, 'vulnerabilities'],
         searchParams: {},
@@ -1539,25 +1883,26 @@ describe('vulnerability catalog', () => {
     const empty = renderToStaticMarkup(
       await AssetVulnerabilitiesView({
         doc: bare,
-        initPageResult: { req: { user: adminUser } },
+        initPageResult: { req: adminReq },
         payload,
         routeSegments: ['collections', 'assets', bare.id, 'vulnerabilities'],
         searchParams: {},
         user: adminUser,
       } as never),
     )
-    expect(empty).toContain('no catalog entry can be matched')
+    expect(empty).toContain('No open vulnerability findings')
 
+    const anonymousReq = await createLocalReq({}, payload)
     const unauthenticated = renderToStaticMarkup(
       await AssetVulnerabilitiesView({
         doc: asset,
-        initPageResult: { req: { user: null } },
+        initPageResult: { req: anonymousReq },
         payload,
         routeSegments: ['collections', 'assets', asset.id, 'vulnerabilities'],
         searchParams: { page: '9' },
       } as never),
     )
-    expect(unauthenticated).toContain('not validated')
+    expect(unauthenticated).toContain('unconfirmed until reviewed')
     expect(unauthenticated).not.toContain('CVE-2099-0002')
   })
 

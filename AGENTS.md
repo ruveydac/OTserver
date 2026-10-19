@@ -173,6 +173,8 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
 ### Auditability
 
 - Every collection registered in `src/payload.config.ts` is wrapped by `withAudit`.
+- Admin-managed Globals enforce read/update access in their API config and audit writes with
+  `writeAudit` using the original request.
 - Audit logs are immutable and redact fields whose names resemble secrets, tokens, passwords, hashes,
   or sessions.
 - Asset-related observations and topology changes must retain their asset relationship so they appear
@@ -187,8 +189,20 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
 
 ### Vulnerability matching
 
-- Assets store only the derived vulnerability count. CVE details remain in the local vulnerability
-  catalog and are looked up when the asset vulnerability view opens.
+- Assets store only the derived open vulnerability count. CVE details remain in the local
+  vulnerability catalog and are looked up when the asset vulnerability view opens. The count
+  includes unconfirmed matches and confirmed unresolved findings; dismissed and resolved findings
+  are excluded. The stored count is for that physical asset; assembly detail may also display
+  findings from its active installed modules.
+- Persist human decisions by asset ID and canonical CVE in `asset-vulnerability-reviews`, not in
+  feed records or derived asset fields. Confirmed findings remain open when matching evidence
+  changes; flag a no-longer-matching finding for human review, and treat missing metadata/catalog
+  evidence as unable to reassess. Never auto-dismiss, resolve, or reopen decisions on imports,
+  metadata changes, or feed updates.
+- Dismissed findings stay hidden. Resolved findings remain in history and reopen only through an
+  explicit human action. Decision writes use the site-scoped asset action, optimistic revisions,
+  transactions, and audit history. Move current reviews on site transfer and merge; reject merge
+  collisions for the same CVE. Merged source assets have no open vulnerability findings.
 - Match only recorded metadata. Never add an active vulnerability probe, exploit, or scanner check.
 - CSAF sources are the CERT@VDE aggregator and CISA OT/IT ROLIE feeds. Refresh CSAF as one complete
   snapshot, preserve the previous snapshot on any provider failure, and never overwrite NVD-owned
@@ -226,9 +240,11 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
   so source lookup must never depend on Payload's physical storage filename.
   Usable CSAF-only catalogs must enable derived counts. Seven-day staging cleanup retains active job
   files; catalog failures must not make previously loaded data unusable.
-- The asset detail view shows the five most severe potential matches, known-exploited first and then
-  highest CVSS, with a paginated view for all matches and their evidence. These are unvalidated
-  metadata matches, not confirmation that a device is vulnerable.
+- The asset detail view shows the five most severe open findings, known-exploited first and then
+  highest CVSS, with a paginated view for all findings and their evidence. Confirmation records a
+  human review, not an active device test; a confirmed finding remains until explicitly resolved.
+  The Security tab shows catalog description previews and URL-backed severity filters. Filter before
+  pagination, keep severity totals unfiltered, and load descriptions only for the visible page.
 
 ### Vulnerability-feed operator reference
 
@@ -315,8 +331,9 @@ Queued imports retain the same 2000-record atomic limit and call the shared `pro
 Workers must reload the executing user, recheck current site permissions, verify upload digests, and
 run under the database fence. Never put credentials or serialized requests in job inputs. The web
 process owns both queues by default. Set `OTSERVER_WORKER_MODE=external` only when dedicated workers
-started with `pnpm worker:imports` and `pnpm worker:maintenance` are healthy. Queued uploads also
-require `OTSERVER_QUEUED_IMPORTS=on`.
+started with `pnpm worker:imports` and `pnpm worker:maintenance` are healthy. Administrators enable
+queued submissions and retries under Settings > Application settings; `OTSERVER_QUEUED_IMPORTS` is
+the deployment fallback. Disabling submissions does not stop already accepted jobs.
 
 ## Search
 
@@ -351,19 +368,20 @@ the first account receives the protected Admin role.
 - Prebuilt images are published as `ghcr.io/ruveydac/otserver:latest`, `X.Y.Z`, and `X.Y`. Use an exact
   version tag for pinned deployments. The repository Compose file builds `otserver:local`.
 - Standalone mode runs the web application and both fenced queues. To use separate workers, set
-  `OTSERVER_WORKER_MODE=external` and `OTSERVER_QUEUED_IMPORTS=on`, then run
-  `docker compose --profile workers up -d`. Confirm both worker heartbeats in the administrator
-  operations endpoint before relying on external mode.
+  `OTSERVER_WORKER_MODE=external`, run `docker compose --profile workers up -d`, and enable queued
+  submissions under Settings > Application settings. Confirm both worker heartbeats in the
+  administrator operations endpoint before relying on external mode.
 - For a custom Compose deployment, pass the optional settings from `.env` into container
-  `environment` explicitly: `OTSERVER_PUBLIC_URL`, `OTSERVER_OTTER_ENCRYPTION_KEY`,
-  `OTSERVER_QUEUED_IMPORTS`, `OTSERVER_VULNERABILITY_FEEDS`, `OTSERVER_WORKER_MODE`, and `NODE_OPTIONS`.
-  The minimal README deployment passes only the database URL and application secret.
+  `environment` explicitly: `OTSERVER_PUBLIC_URL` and `OTSERVER_QUEUED_IMPORTS` as fallbacks,
+  `OTSERVER_OTTER_ENCRYPTION_KEY`, `OTSERVER_VULNERABILITY_FEEDS`, `OTSERVER_WORKER_MODE`, and
+  `NODE_OPTIONS`. The minimal README deployment passes only the database URL and application secret.
 - External workers use the same database and `OTSERVER_SECRET` as the web application. Import workers
   need read access to `import-files`; maintenance workers need read/write access and the same online
   feed setting as the web process. The existing Compose `workers` profile defines these services.
-- Managed Otter requires `OTSERVER_PUBLIC_URL` and a stable, backed-up encryption key generated with
-  `openssl rand -hex 32`. For same-host development, use `http://localhost:3000`; remote controllers
-  require HTTPS. See `otter_management.md` for enrollment, configuration, and protocol details.
+- Managed Otter requires a public controller URL configured under Settings > Application settings
+  and a stable, backed-up encryption key generated with `openssl rand -hex 32`. For same-host
+  development, use `http://localhost:3000`; remote controllers require HTTPS. See
+  `otter_management.md` for enrollment, configuration, and protocol details.
 - Standalone Otter uploads use a user's Payload API key and current site permissions. Managed
   uploads use scanner credentials instead. Standalone SNMP/OPC UA credentials remain in
   executable-adjacent `otter.json`; never include them in logs or scan exports.

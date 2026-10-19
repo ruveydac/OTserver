@@ -16,6 +16,11 @@ import {
 } from './security'
 import { dueOccurrence } from './scheduling'
 import { getAssetOverrides } from '../application/processImport'
+import {
+  configuredControllerURL,
+  isLoopbackControllerURL,
+  validateControllerURL,
+} from '../application/settings'
 import { systemRequest } from '../integrations/payload/requests'
 import {
   assertSiteAllowsImports,
@@ -145,12 +150,11 @@ const body = async (req: PayloadRequest, maxBytes = 32_000) => {
 }
 
 const isLoopbackURL = (url: URL) =>
-  ['http:', 'https:'].includes(url.protocol) &&
-  ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+  ['http:', 'https:'].includes(url.protocol) && isLoopbackControllerURL(url)
 
-const humanOrigin = (req: PayloadRequest) => {
+const humanOrigin = async (req: PayloadRequest) => {
   const origin = req.headers.get('origin')
-  const configured = process.env.OTSERVER_PUBLIC_URL
+  const configured = await configuredControllerURL(req.payload, req)
   if (!origin || !req.url) throw new APIError('A same-origin browser request is required.', 403)
 
   const allowedURLs: URL[] = []
@@ -242,23 +246,14 @@ const profileFor = async (req: PayloadRequest, id: unknown, scannerID: string) =
   return { configuration, encryptedCredentials: profile.encryptedCredentials, profile }
 }
 
-const publicControllerURL = () => {
-  const value = process.env.OTSERVER_PUBLIC_URL
+const publicControllerURL = async (req: PayloadRequest, configuredValue?: string) => {
+  const value = configuredValue ?? (await configuredControllerURL(req.payload, req))
   if (!value)
-    throw new APIError('OTSERVER_PUBLIC_URL must be configured before Otter jobs can run.', 503)
-  let url: URL
-  try {
-    url = new URL(value)
-  } catch {
-    throw new APIError('OTSERVER_PUBLIC_URL is invalid.', 503)
-  }
-  if (url.username || url.password || url.search || url.hash)
-    throw new APIError(
-      'OTSERVER_PUBLIC_URL must not contain credentials, a query, or a fragment.',
-      503,
-    )
-  if (url.protocol !== 'https:' && !isLoopbackURL(url))
-    throw new APIError('OTSERVER_PUBLIC_URL must use HTTPS, or HTTP on localhost/loopback.', 503)
+    throw new APIError('Configure the public controller URL before Otter jobs can run.', 503)
+  const validation = validateControllerURL(value)
+  if (validation !== true)
+    throw new APIError(`The public controller URL is invalid. ${validation}`, 503)
+  const url = new URL(value)
   return url.toString().replace(/\/$/, '')
 }
 
@@ -506,7 +501,7 @@ const assignJob = async (req: PayloadRequest, scanner: OtterScanner, now: Date) 
   return assigned
 }
 
-const jobResponse = (run: OtterRun, scanner: OtterScanner) => {
+const jobResponse = async (run: OtterRun, scanner: OtterScanner, req: PayloadRequest) => {
   if (run.status === 'cancel-requested') return { action: 'cancel', runID: String(run.id) }
   if (
     !run.configSnapshot ||
@@ -520,7 +515,7 @@ const jobResponse = (run: OtterRun, scanner: OtterScanner) => {
     run: {
       configuration: {
         ...configuration,
-        serverUrl: publicControllerURL(),
+        serverUrl: await publicControllerURL(req),
         site: String(relationshipID(scanner.site)),
       },
       credentials: decryptOtterCredentials(run.encryptedCredentialsSnapshot),
@@ -598,8 +593,9 @@ export const otterOverview: Endpoint['handler'] = async (req) => {
       ],
     },
   })
+  const controllerURL = await configuredControllerURL(req.payload, req)
   return json({
-    controllerUrl: process.env.OTSERVER_PUBLIC_URL ? publicControllerURL() : '',
+    controllerUrl: controllerURL ? await publicControllerURL(req, controllerURL) : '',
     runs: runs.docs.map(
       ({
         id,
@@ -695,8 +691,8 @@ export const getOtterScanner: Endpoint['handler'] = async (req) => {
 }
 
 export const createOtterScanner: Endpoint['handler'] = async (req) => {
-  humanOrigin(req)
-  const controllerUrl = publicControllerURL()
+  await humanOrigin(req)
+  const controllerUrl = await publicControllerURL(req)
   const data = await body(req)
   const name = typeof data.name === 'string' ? data.name.trim() : ''
   if (!name || name.length > 120 || /[\u0000-\u001f]/.test(name))
@@ -850,8 +846,7 @@ export const pollOtter: Endpoint['handler'] = async (req) => {
     }
     const run = await assignJob(req, refreshed, now)
     if (!run) return { action: 'idle', retryAfterSeconds: 30 }
-    if (run.status === 'cancel-requested') return jobResponse(run, refreshed)
-    return jobResponse(run, refreshed)
+    return jobResponse(run, refreshed, req)
   })
   return json(response)
 }
@@ -1017,7 +1012,7 @@ export const rotateOtterCredential: Endpoint['handler'] = async (req) => {
 }
 
 export const saveOtterCredentials: Endpoint['handler'] = async (req) => {
-  humanOrigin(req)
+  await humanOrigin(req)
   const id = String(req.routeParams?.id || '')
   const profile = await req.payload.findByID({
     collection: 'otter-profiles',
@@ -1045,7 +1040,7 @@ export const saveOtterCredentials: Endpoint['handler'] = async (req) => {
 }
 
 export const runOtterNow: Endpoint['handler'] = async (req) => {
-  humanOrigin(req)
+  await humanOrigin(req)
   const data = await body(req)
   const run = await inTransaction(req, async () => {
     const scanner = await req.payload.findByID({
@@ -1076,7 +1071,7 @@ export const runOtterNow: Endpoint['handler'] = async (req) => {
 }
 
 export const cancelOtterRun: Endpoint['handler'] = async (req) => {
-  humanOrigin(req)
+  await humanOrigin(req)
   const id = String(req.routeParams?.id || '')
   const result = await inTransaction(req, async () => {
     const run = await req.payload.findByID({
@@ -1113,7 +1108,7 @@ export const cancelOtterRun: Endpoint['handler'] = async (req) => {
 }
 
 export const revokeOtterScanner: Endpoint['handler'] = async (req) => {
-  humanOrigin(req)
+  await humanOrigin(req)
   const id = String(req.routeParams?.id || '')
   await inTransaction(req, async () => {
     const scanner = await req.payload.findByID({
@@ -1157,8 +1152,8 @@ export const revokeOtterScanner: Endpoint['handler'] = async (req) => {
 }
 
 export const reenrollOtterScanner: Endpoint['handler'] = async (req) => {
-  humanOrigin(req)
-  const controllerUrl = publicControllerURL()
+  await humanOrigin(req)
+  const controllerUrl = await publicControllerURL(req)
   const id = String(req.routeParams?.id || '')
   const token = newToken()
   const expiresAt = new Date(Date.now() + 15 * 60_000).toISOString()

@@ -89,9 +89,12 @@ describe('queued import execution boundary', () => {
   it('rejects retry requests when queued imports are disabled', async () => {
     process.env.OTSERVER_QUEUED_IMPORTS = 'off'
     try {
-      await expect(retryImport({ routeParams: { id: 'import-1' } } as never)).rejects.toMatchObject(
-        { status: 503 },
-      )
+      await expect(
+        retryImport({
+          payload: { findGlobal: vi.fn(async () => ({ queuedImports: 'deployment' })) },
+          routeParams: { id: 'import-1' },
+        } as never),
+      ).rejects.toMatchObject({ status: 503 })
     } finally {
       delete process.env.OTSERVER_QUEUED_IMPORTS
     }
