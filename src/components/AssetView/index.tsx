@@ -4,6 +4,8 @@ import type { ReactNode } from 'react'
 
 import CopyButton from '@/components/AssetView/CopyButton'
 import DensityToggle from '@/components/AssetView/DensityToggle'
+import AssetVulnerabilityReviewActions from '@/components/AssetVulnerabilityReviewActions'
+import { VULNERABILITY_PAGE_SIZE } from '@/components/AssetVulnerabilitiesView'
 import {
   criticalityLabels,
   formatDateTime,
@@ -17,6 +19,9 @@ import type { VulnerabilityMatch } from '@/vulnerabilities/matching'
 import { bySeverity } from '@/vulnerabilities/match'
 import { documentClientProps } from '@/integrations/payload/admin'
 import { purdueLabel } from '@/domain/purdue'
+import { getAuthorization } from '@/access/authorization'
+import { idOf } from '@/identity/access'
+import { NO_LONGER_MATCHES_MESSAGE } from '@/vulnerabilities/reviews'
 
 import './index.scss'
 
@@ -297,7 +302,7 @@ const VulnerabilityList = ({
 }) => {
   const visible = matches.slice(0, MAX_LISTED_VULNERABILITIES)
 
-  if (!matches.length) return <span>None matched</span>
+  if (!matches.length) return <span>No open findings</span>
 
   return (
     <>
@@ -320,8 +325,8 @@ const VulnerabilityList = ({
       </ul>
       <Link href={`${assetURL}/vulnerabilities`}>
         {matches.length > visible.length
-          ? `View all ${matches.length} matches`
-          : 'View match details'}
+          ? `View all ${matches.length} open findings`
+          : 'View vulnerability review'}
       </Link>
     </>
   )
@@ -352,7 +357,8 @@ const AssetView = async (props: DocumentViewServerProps) => {
     auditLogs,
     observations,
     topologyLinks,
-    vulnerabilityMatches,
+    vulnerabilityFindings,
+    resolvedVulnerabilities,
     endpointCount,
     loadedSite,
     loadedAssetClass,
@@ -367,11 +373,65 @@ const AssetView = async (props: DocumentViewServerProps) => {
     pageSize: 50,
   })
 
-  const matches = vulnerabilityMatches.slice().sort(bySeverity)
+  const request = props.initPageResult.req
+  const authorization = await getAuthorization(request)
+  const canReviewVulnerabilities = Boolean(
+    authorization.isAdmin || authorization.writableSiteIDs.includes(idOf(asset.site)),
+  )
+  const findings = vulnerabilityFindings
+    .slice()
+    .sort(
+      (left, right) =>
+        bySeverity(left.match, right.match) || left.assetName.localeCompare(right.assetName),
+    )
+  const matches = findings.map(({ match }) => match)
   const severityCounts = Object.fromEntries(
     vulnerabilitySeverities.map((severity) => [severity, 0]),
   ) as Record<VulnerabilitySeverity, number>
   for (const match of matches) severityCounts[matchSeverity(match)] += 1
+  const severityParam = firstParam(props.searchParams?.severity)?.toUpperCase()
+  const selectedSeverity = vulnerabilitySeverities.find((severity) => severity === severityParam)
+  const filteredFindings = selectedSeverity
+    ? findings.filter(({ match }) => matchSeverity(match) === selectedSeverity)
+    : findings
+  const vulnerabilityPages = Math.max(
+    1,
+    Math.ceil(filteredFindings.length / VULNERABILITY_PAGE_SIZE),
+  )
+  const vulnerabilityPage = Math.min(
+    pageNumber(props.searchParams?.vulnerabilityPage),
+    vulnerabilityPages,
+  )
+  const vulnerabilityOffset = (vulnerabilityPage - 1) * VULNERABILITY_PAGE_SIZE
+  const visibleFindings = filteredFindings.slice(
+    vulnerabilityOffset,
+    vulnerabilityOffset + VULNERABILITY_PAGE_SIZE,
+  )
+  const descriptionCVEs = [...new Set(visibleFindings.map(({ match }) => match.cve))]
+  const descriptions =
+    selectedTab === 'security' && descriptionCVEs.length
+      ? await props.payload.find({
+          collection: 'vulnerabilities',
+          depth: 0,
+          limit: VULNERABILITY_PAGE_SIZE,
+          pagination: false,
+          overrideAccess: false,
+          req: request,
+          select: { cve: true, description: true, kevName: true },
+          where: { cve: { in: descriptionCVEs } },
+        })
+      : undefined
+  const descriptionByCVE = new Map(
+    (descriptions?.docs ?? []).map((entry) => [
+      entry.cve,
+      (entry.description?.trim() || entry.kevName?.trim() || 'No description available.').replace(
+        /\s+/g,
+        ' ',
+      ),
+    ]),
+  )
+  const securityURL = (severity?: VulnerabilitySeverity, page = 1) =>
+    `${assetURL}?tab=security${severity ? `&severity=${severity}` : ''}${page > 1 ? `&vulnerabilityPage=${page}` : ''}`
   const site = loadedSite || populatedSite
   const assetClass = loadedAssetClass || populatedAssetClass
   const siteName = site?.path || site?.name
@@ -479,7 +539,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
           },
           { label: 'Last seen', value: formatDateTime(asset.lastSeen) },
           {
-            label: 'Potential vulnerability matches',
+            label: 'Open vulnerability findings',
             value: <VulnerabilityList assetURL={assetURL} matches={matches} />,
             wide: true,
           },
@@ -627,50 +687,175 @@ const AssetView = async (props: DocumentViewServerProps) => {
 
   const security = (
     <>
-      <Section
-        title="Purdue classification"
-        details={[
-          {
-            label: 'Functional levels',
-            value: fieldValue(asset, 'purdueLevels', purdueLabel(asset.purdueLevels)),
-          },
-          {
-            label: 'Site overview',
-            value: (
-              <Link
-                href={`${adminRoute}/purdue?site=${encodeURIComponent(relationID(asset.site) || '')}`}
-              >
-                View Purdue classification for this site
-              </Link>
-            ),
-          },
-        ]}
-      />
       <section className="asset-view__section asset-view__section--wide">
         <div className="asset-view__section-heading">
-          <h2>Vulnerability severity</h2>
-          <span>{matches.length} total</span>
+          <h2>Open vulnerability severity</h2>
+          <span>{findings.length} total</span>
         </div>
-        <dl className="asset-view__severity-summary">
+        <p className="asset-view__security-help">
+          Filter open findings by severity. Counts include this asset and its active installed
+          modules.
+        </p>
+        <nav aria-label="Filter open findings by severity" className="asset-view__severity-summary">
+          <Link
+            aria-current={!selectedSeverity ? 'page' : undefined}
+            className="asset-view__severity-count"
+            href={securityURL()}
+            scroll={false}
+          >
+            <span>All severities</span>
+            <strong>{findings.length}</strong>
+          </Link>
           {vulnerabilitySeverities.map((severity) => (
-            <div
+            <Link
+              aria-current={selectedSeverity === severity ? 'page' : undefined}
               className={`asset-view__severity-count asset-view__severity-count--${severity.toLowerCase()}`}
+              href={securityURL(severity)}
               key={severity}
+              scroll={false}
             >
-              <dt>{severity === 'UNRATED' ? 'Unrated' : severity.toLowerCase()}</dt>
-              <dd>{severityCounts[severity]}</dd>
-            </div>
+              <span>{severity[0] + severity.slice(1).toLowerCase()}</span>
+              <strong>{severityCounts[severity]}</strong>
+            </Link>
           ))}
-        </dl>
+        </nav>
+      </section>
+      <section
+        aria-labelledby="open-vulnerability-findings"
+        className="asset-view__section asset-view__security-findings"
+      >
+        <div className="asset-view__section-heading">
+          <h2 id="open-vulnerability-findings">Open vulnerability findings</h2>
+          {selectedSeverity ? (
+            <Link href={securityURL()} scroll={false}>
+              Clear severity filter
+            </Link>
+          ) : null}
+        </div>
+        <p className="asset-view__security-help" role="status">
+          {filteredFindings.length
+            ? `Showing ${vulnerabilityOffset + 1}–${vulnerabilityOffset + visibleFindings.length} of ${filteredFindings.length} ${selectedSeverity ? `${selectedSeverity.toLowerCase()} ` : ''}open ${filteredFindings.length === 1 ? 'finding' : 'findings'}. Known exploited first, then highest CVSS.`
+            : selectedSeverity
+              ? `No ${selectedSeverity.toLowerCase()} open findings. Select another severity or clear the filter.`
+              : asset.vulnerabilityCount == null
+                ? 'No findings are available. The asset has not been evaluated against a usable vulnerability catalog.'
+                : 'No open vulnerability findings for this asset or its active installed modules.'}
+        </p>
+        <ul className="asset-view__vulnerabilities">
+          {visibleFindings.map((finding) => {
+            const { match } = finding
+            const severity = matchSeverity(match)
+            const description = descriptionByCVE.get(match.cve) || 'No description available.'
+            const detailPage = Math.floor(findings.indexOf(finding) / VULNERABILITY_PAGE_SIZE) + 1
+            const detailURL = `${assetURL}/vulnerabilities?page=${detailPage}#finding-${finding.assetID}:${match.cve}`
+            return (
+              <li key={`${finding.assetID}:${match.cve}`}>
+                <div className="asset-view__vulnerability-match">
+                  <div className="asset-view__vulnerability-flags">
+                    <h3 className="asset-view__vulnerability-title">
+                      <Link href={detailURL}>{match.cve}</Link>
+                    </h3>
+                    <span className={`asset-view__severity--${severity.toLowerCase()}`}>
+                      {severity === 'UNRATED'
+                        ? 'Unrated'
+                        : `${severity}${match.cvssScore == null ? '' : ` ${match.cvssScore}`}`}
+                    </span>
+                    {match.knownExploited ? (
+                      <span className="asset-view__exploited">Known exploited</span>
+                    ) : null}
+                    <span className="asset-view__review-status">
+                      {finding.status === 'confirmed'
+                        ? `Confirmed${finding.reviewerName ? ` by ${finding.reviewerName}` : ''}`
+                        : 'Unconfirmed'}
+                    </span>
+                    {finding.assessment === 'no-longer-matches' ? (
+                      <span
+                        aria-label={NO_LONGER_MATCHES_MESSAGE}
+                        className="asset-view__match-warning"
+                        role="img"
+                        tabIndex={0}
+                        title={NO_LONGER_MATCHES_MESSAGE}
+                      >
+                        !
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="asset-view__vulnerability-description">
+                    {description.length > 280
+                      ? `${description.slice(0, 280).replace(/\s+\S*$/, '')}…`
+                      : description}
+                  </p>
+                  <p className="asset-view__match-reason">
+                    Affected hardware:{' '}
+                    <Link href={`${adminRoute}/collections/assets/${finding.assetID}`}>
+                      {finding.assetName}
+                    </Link>
+                  </p>
+                  <p className="asset-view__match-reason">
+                    {finding.assessment === 'matched'
+                      ? 'Matching evidence'
+                      : 'Original matching evidence'}
+                    : {match.matchedVendor} {match.matchedProduct} · {match.versionEvidence}{' '}
+                    {match.version} satisfies {match.constraint}
+                  </p>
+                  {finding.assessment === 'unknown' ? (
+                    <p role="note">Unable to reassess: {finding.assessmentMessage}</p>
+                  ) : null}
+                  {finding.assessment === 'no-longer-matches' ? (
+                    <p role="note">{NO_LONGER_MATCHES_MESSAGE}</p>
+                  ) : null}
+                  <Link className="asset-view__finding-details" href={detailURL}>
+                    Full details for {match.cve}
+                  </Link>
+                  {canReviewVulnerabilities ? (
+                    <AssetVulnerabilityReviewActions
+                      api={apiRoute}
+                      assetID={finding.assetID}
+                      assetName={finding.assetName}
+                      cve={match.cve}
+                      revision={finding.revision}
+                      status={finding.status}
+                    />
+                  ) : null}
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+        {vulnerabilityPages > 1 ? (
+          <nav aria-label="Open vulnerability finding pages" className="asset-view__pagination">
+            {vulnerabilityPage > 1 ? (
+              <Link
+                href={`${securityURL(selectedSeverity, vulnerabilityPage - 1)}#open-vulnerability-findings`}
+              >
+                Previous
+              </Link>
+            ) : null}
+            <span>
+              Page {vulnerabilityPage} of {vulnerabilityPages}
+            </span>
+            {vulnerabilityPage < vulnerabilityPages ? (
+              <Link
+                href={`${securityURL(selectedSeverity, vulnerabilityPage + 1)}#open-vulnerability-findings`}
+              >
+                Next
+              </Link>
+            ) : null}
+          </nav>
+        ) : null}
+        <p className="asset-view__security-help">
+          Catalog matches are unconfirmed until reviewed. The asset was not probed for a
+          vulnerability. Dismissed and resolved findings are excluded from these counts.
+        </p>
       </section>
       <Section
         details={[
           {
-            label: 'Catalog result',
+            label: 'Open finding count',
             value:
               asset.vulnerabilityCount == null
                 ? 'Not evaluated'
-                : `${asset.vulnerabilityCount} potential matches`,
+                : `${asset.vulnerabilityCount} open ${asset.vulnerabilityCount === 1 ? 'finding' : 'findings'}`,
           },
           { label: 'Vendor', value: asset.vendor },
           {
@@ -692,48 +877,57 @@ const AssetView = async (props: DocumentViewServerProps) => {
         title="Security assessment"
       />
       <Section
+        title="Purdue classification"
+        details={[
+          {
+            label: 'Functional levels',
+            value: fieldValue(asset, 'purdueLevels', purdueLabel(asset.purdueLevels)),
+          },
+          {
+            label: 'Site overview',
+            value: (
+              <Link
+                href={`${adminRoute}/purdue?site=${encodeURIComponent(relationID(asset.site) || '')}`}
+              >
+                View Purdue classification for this site
+              </Link>
+            ),
+          },
+        ]}
+      />
+      <Section
         details={
-          matches.length
-            ? matches.map((match) => {
-                const severity = matchSeverity(match)
-                return {
-                  key: match.cve,
-                  label: match.cve,
-                  value: (
-                    <div className="asset-view__vulnerability-match">
-                      <div className="asset-view__vulnerability-flags">
-                        <span className={`asset-view__severity--${severity.toLowerCase()}`}>
-                          {severity === 'UNRATED'
-                            ? 'Unrated'
-                            : `${severity}${match.cvssScore == null ? '' : ` ${match.cvssScore}`}`}
-                        </span>
-                        {match.knownExploited ? (
-                          <span className="asset-view__exploited">Known exploited</span>
-                        ) : null}
-                      </div>
-                      <span>
-                        {match.matchedVendor} {match.matchedProduct} · {match.versionEvidence}{' '}
-                        {match.version} satisfies {match.constraint}
-                      </span>
-                    </div>
-                  ),
-                  wide: true,
-                }
-              })
-            : [
-                {
-                  label: 'Matches',
-                  value: 'No catalog entry matched the recorded vendor, model, and version data.',
-                  wide: true,
-                },
-              ]
+          resolvedVulnerabilities.length
+            ? resolvedVulnerabilities.map((review) => ({
+                key: `${review.assetID}:${review.cve}`,
+                label: `${review.cve} · ${review.assetName}`,
+                value: (
+                  <div className="asset-view__vulnerability-match">
+                    <span>
+                      Resolved by {review.reviewerName || 'a user'} on{' '}
+                      {formatDateTime(review.decidedAt)}
+                    </span>
+                    {canReviewVulnerabilities ? (
+                      <AssetVulnerabilityReviewActions
+                        api={props.payload.config.routes.api || '/api'}
+                        assetID={review.assetID}
+                        assetName={review.assetName}
+                        cve={review.cve}
+                        revision={review.revision}
+                        status="resolved"
+                      />
+                    ) : null}
+                  </div>
+                ),
+                wide: true,
+              }))
+            : [{ label: 'History', value: 'No vulnerabilities have been resolved.', wide: true }]
         }
-        title="Potential vulnerability matches"
+        title="Resolved vulnerability history"
         wide
       />
       <p className="asset-view__note">
-        These are catalog matches, not validated findings. The asset was not probed for a
-        vulnerability. <Link href={`${assetURL}/vulnerabilities`}>View full match details</Link>
+        <Link href={`${assetURL}/vulnerabilities`}>View full review details</Link>
       </p>
     </>
   )
@@ -875,9 +1069,11 @@ const AssetView = async (props: DocumentViewServerProps) => {
           <small>{endpointTotal === 1 ? 'active binding' : 'active bindings'}</small>
         </Link>
         <Link className="asset-view__metric" href={tabURL('security')}>
-          <span>Potential vulnerability matches</span>
+          <span>Open vulnerability findings</span>
           <strong>{asset.vulnerabilityCount == null ? '—' : matches.length}</strong>
-          <small>{asset.vulnerabilityCount == null ? 'Not evaluated' : 'Catalog matches'}</small>
+          <small>
+            {asset.vulnerabilityCount == null ? 'Not evaluated' : 'Unconfirmed and confirmed'}
+          </small>
         </Link>
       </section>
 

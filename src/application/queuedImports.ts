@@ -17,8 +17,9 @@ import { safeFailure, transientFailure } from '../jobs/errors'
 import type { AssetImport } from '../payload-types'
 import { principalRequest, systemRequest } from '../integrations/payload/requests'
 import { assertSiteAllowsImports } from './importSites'
+import { queuedImportsEnabled } from './settings'
 
-export const queuedImportsEnabled = () => process.env.OTSERVER_QUEUED_IMPORTS === 'on'
+export { queuedImportsEnabled }
 export const fileDigest = (data: Buffer) => createHash('sha256').update(data).digest('hex')
 const internalImportFields = [
   'jobID',
@@ -72,7 +73,8 @@ export const queueImport = async (doc: AssetImport, req: PayloadRequest) => {
 }
 
 export const retryImport: PayloadHandler = async (req) => {
-  if (!queuedImportsEnabled()) throw new APIError('Queued imports are not enabled.', 503)
+  if (!(await queuedImportsEnabled(req.payload, req)))
+    throw new APIError('Queued imports are not enabled.', 503)
   const id = String(req.routeParams?.id || '')
   const doc = await inTransaction(req, async () => {
     const previous = await req.payload.findByID({

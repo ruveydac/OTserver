@@ -7,6 +7,7 @@ import { AssetClasses, initializeAssetClasses } from './collections/AssetClasses
 import { AssetImports } from './collections/AssetImports'
 import { AssetFields } from './collections/AssetFields'
 import { AssetObservations } from './collections/AssetObservations'
+import { AssetVulnerabilityReviews } from './collections/AssetVulnerabilityReviews'
 import { AuditLogs, withAudit } from './collections/AuditLogs'
 import { Sites } from './collections/Sites'
 import { SiteTypes, initializeSiteTypes } from './collections/SiteTypes'
@@ -31,6 +32,7 @@ import {
   IdentityCases,
 } from './collections/Identity'
 import { OtterProfiles, OtterRuns, OtterScanners, OtterSchedules } from './collections/Otter'
+import { ApplicationSettings } from './globals/ApplicationSettings'
 
 const dirname = import.meta.dirname || path.resolve('src')
 
@@ -111,6 +113,7 @@ export default buildConfig({
     UserRoles,
     Users,
     AssetObservations,
+    AssetVulnerabilityReviews,
     TopologyLinks,
     Vulnerabilities,
     VulnerabilityFeeds,
@@ -119,11 +122,12 @@ export default buildConfig({
     WorkerLeases,
     WorkerHeartbeats,
   ].map(withAudit),
+  globals: [ApplicationSettings],
   db: mongooseAdapter({
     url: process.env.DATABASE_URL,
     migrationDir: path.resolve(dirname, 'migrations'),
     prodMigrations: migrations,
-    // Identity uniqueness must exist before the first transaction or import can run.
+    // Identity and review uniqueness must exist before the first transaction or import can run.
     ensureIndexes: true,
   }),
   secret: process.env.OTSERVER_SECRET,

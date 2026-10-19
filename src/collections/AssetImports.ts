@@ -178,7 +178,8 @@ const protectProcessing: CollectionBeforeChangeHook = async ({
   data.status = 'pending'
   data.attemptCount = 0
   if (data.executionMode === 'queued') {
-    if (!queuedImportsEnabled()) throw new APIError('Queued imports are not enabled.', 503)
+    if (!(await queuedImportsEnabled(req.payload, req)))
+      throw new APIError('Queued imports are not enabled.', 503)
     await requireSiteWriter(data.site, req)
     if (!req.file) throw new APIError('A file is required for a queued import.', 400)
     data.submittedBy = data.executorID = scannerID || String(req.user!.id)
@@ -289,7 +290,8 @@ export const AssetImports: CollectionConfig = {
         { label: 'Queued', value: 'queued' },
       ],
       admin: {
-        description: 'Queued imports require OTSERVER_QUEUED_IMPORTS=on and a healthy worker.',
+        description:
+          'Enable queued imports under Settings > Application settings and keep a worker healthy.',
       },
     },
     {

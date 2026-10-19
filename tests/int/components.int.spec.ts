@@ -771,7 +771,7 @@ describe('remaining Otter component states', () => {
     expect(container.textContent).toContain('Enter a configuration name')
     expect(container.textContent).toContain('deleted-site')
     expect(container.textContent).toContain('Scanner is disabled')
-    expect(container.textContent).toContain('Set OTSERVER_PUBLIC_URL')
+    expect(container.textContent).toContain('Set the public controller URL in Application settings')
 
     overview = { scanners: [{ id: 'scanner-1', enabled: true, enrolled: false }] }
     mocks.formFields = { site: { value: '' }, scanner: { value: 'scanner-1' } }

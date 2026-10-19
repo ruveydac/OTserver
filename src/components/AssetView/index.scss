@@ -7,6 +7,11 @@
 
   a {
     color: var(--theme-elevation-800);
+
+    &:focus-visible {
+      outline: 2px solid var(--theme-text);
+      outline-offset: 3px;
+    }
   }
 
   pre {
@@ -253,6 +258,7 @@
   &__section-heading {
     align-items: baseline;
     display: flex;
+    flex-wrap: wrap;
     gap: 0.7rem;
     justify-content: space-between;
     margin-bottom: 0.8rem;
@@ -263,7 +269,7 @@
     }
 
     span {
-      color: var(--theme-elevation-500);
+      color: var(--theme-elevation-600);
       font-size: 0.68rem;
     }
   }
@@ -469,28 +475,49 @@
   &__severity-summary {
     display: grid;
     gap: 0.5rem;
-    grid-template-columns: repeat(auto-fit, minmax(95px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 6rem), 1fr));
     margin: 0;
   }
 
   &__severity-count {
     background: var(--theme-elevation-50);
-    border: 1px solid var(--theme-elevation-150);
+    border: 1px solid var(--theme-elevation-600);
     border-radius: 6px;
-    border-top: 3px solid var(--theme-elevation-400);
+    border-top: 3px solid var(--theme-elevation-600);
+    display: grid;
+    min-height: 44px;
+    min-width: 0;
+    overflow-wrap: anywhere;
     padding: 0.65rem 0.75rem;
+    text-decoration: none;
 
-    dt {
-      color: var(--theme-elevation-600);
-      font-size: 0.65rem;
+    span {
+      color: var(--theme-text);
+      font-size: 0.8rem;
       font-weight: 650;
-      text-transform: capitalize;
     }
 
-    dd {
+    strong {
+      color: var(--theme-text);
       font-size: 1.35rem;
       font-weight: 700;
       margin: 0.15rem 0 0;
+    }
+
+    &:hover,
+    &:active {
+      background: var(--theme-elevation-150);
+    }
+
+    &[aria-current='page'] {
+      background: var(--theme-elevation-150);
+      border-color: var(--theme-text);
+      box-shadow: inset 0 0 0 1px var(--theme-text);
+
+      span {
+        text-decoration: underline;
+        text-underline-offset: 0.2em;
+      }
     }
 
     &--critical,
@@ -510,12 +537,106 @@
   &__vulnerability-match {
     display: grid;
     gap: 0.4rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
+
+    p {
+      margin: 0;
+    }
+  }
+
+  &__security-help,
+  &__match-reason {
+    color: var(--theme-elevation-700);
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+
+  &__security-help {
+    margin: 0.75rem 0;
+  }
+
+  &__vulnerability-title {
+    font-size: 1rem;
+    margin: 0;
+  }
+
+  &__vulnerability-description {
+    line-height: 1.6;
+    max-width: 80ch;
+  }
+
+  &__finding-details,
+  &__security-findings h3 a {
+    align-items: center;
+    display: inline-flex;
+    min-height: 44px;
+    width: fit-content;
+  }
+
+  &__security-findings {
+    h2 {
+      scroll-margin-top: 12rem;
+    }
+
+    .asset-view__section-heading > a {
+      align-items: center;
+      display: inline-flex;
+      min-height: 44px;
+    }
+
+    .asset-view__vulnerabilities > li {
+      padding: 1rem 0;
+    }
+  }
+
+  &__vulnerabilities > li[id] {
+    scroll-margin-top: 12rem;
+
+    &:target {
+      outline: 2px solid var(--theme-text);
+      outline-offset: 4px;
+    }
   }
 
   &__vulnerability-flags {
+    align-items: center;
     display: flex;
     flex-wrap: wrap;
     gap: 0.4rem;
+  }
+
+  &__review-status {
+    background: var(--theme-elevation-150);
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 650;
+    padding: 0.18rem 0.4rem;
+  }
+
+  &__match-warning {
+    align-items: center;
+    background: var(--theme-warning-100);
+    border: 1px solid var(--theme-warning-700);
+    border-radius: 50%;
+    color: var(--theme-warning-900);
+    display: inline-flex;
+    font-weight: 800;
+    height: 1.3rem;
+    justify-content: center;
+    line-height: 1;
+    width: 1.3rem;
+
+    &:focus-visible {
+      outline: 2px solid var(--theme-text);
+      outline-offset: 2px;
+    }
+  }
+
+  &__vulnerability-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
   }
 
   &__exploited,
@@ -562,8 +683,15 @@
   &__pagination {
     align-items: center;
     display: flex;
+    flex-wrap: wrap;
     gap: 1rem;
     justify-content: flex-end;
+
+    a {
+      align-items: center;
+      display: inline-flex;
+      min-height: 44px;
+    }
   }
 
   &[data-density='compact'] {
@@ -606,6 +734,10 @@
     padding-left: 0.75rem;
     padding-right: 0.75rem;
 
+    &__header {
+      position: static;
+    }
+
     &__header-main {
       flex-direction: column;
     }
@@ -640,5 +772,18 @@
     &__density {
       text-align: center;
     }
+  }
+}
+
+.asset-vulnerability-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+
+  button {
+    margin: 0;
+    min-height: 44px;
   }
 }

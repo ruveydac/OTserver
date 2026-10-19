@@ -21,6 +21,7 @@ const adminRequest = (file?: { data: Buffer }) => ({
   file,
   payload: {
     find: vi.fn(async () => ({ docs: [] as Record<string, unknown>[] })),
+    findGlobal: vi.fn(async () => ({ queuedImports: 'deployment' })),
     jobs: { queue: vi.fn(async () => ({ id: 'job-1' })) },
     update: vi.fn(async ({ data }: { data: object }) => ({ id: 'import-1', ...data })),
   },

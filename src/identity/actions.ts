@@ -3,9 +3,10 @@ import { randomUUID } from 'node:crypto'
 import { APIError, type PayloadHandler, type PayloadRequest } from 'payload'
 import { getAuthorization } from '../access/authorization'
 import { writeAudit } from '../collections/AuditLogs'
+import { refreshAssetVulnerabilityCount } from '../vulnerabilities/match'
 import { idOf, requireWritableAsset } from './access'
 import { record, text } from './keys'
-import { inIdentityContext, syncManualEndpoint } from './relationships'
+import { inIdentityContext, lockIdentityAssets, syncManualEndpoint } from './relationships'
 import { withRequestContext } from '../integrations/payload/context'
 import type { Asset, NetworkEndpoint } from '../payload-types'
 
@@ -105,6 +106,29 @@ export const performIdentityAction = async (
       if (!target || target.lifecycle !== 'active' || source.lifecycle !== 'active')
         throw new APIError('Select two active assets.', 400)
       if (action === 'merge') {
+        await lockIdentityAssets([id, target.id], req)
+        const sourceReviews = await req.payload.find({
+          collection: 'asset-vulnerability-reviews',
+          pagination: false,
+          depth: 0,
+          overrideAccess: false,
+          req,
+          where: { asset: { equals: id } },
+        })
+        const targetReviews = await req.payload.find({
+          collection: 'asset-vulnerability-reviews',
+          pagination: false,
+          depth: 0,
+          overrideAccess: false,
+          req,
+          where: { asset: { equals: target.id } },
+        })
+        const targetCVEs = new Set(targetReviews.docs.map(({ cve }) => cve))
+        if (sourceReviews.docs.some(({ cve }) => targetCVEs.has(cve)))
+          throw new APIError(
+            'Assets with reviews for the same CVE cannot be merged until those reviews are reconciled.',
+            409,
+          )
         const keys = await req.payload.find({
           collection: 'asset-identifiers',
           pagination: false,
@@ -142,6 +166,14 @@ export const performIdentityAction = async (
             id: key.id,
             data: { asset: target.id },
             overrideAccess: false,
+            req,
+          })
+        for (const review of sourceReviews.docs)
+          await req.payload.update({
+            collection: 'asset-vulnerability-reviews',
+            id: review.id,
+            data: { asset: target.id, site: idOf(target.site) },
+            overrideAccess: true,
             req,
           })
         const installed = await req.payload.find({
@@ -186,6 +218,8 @@ export const performIdentityAction = async (
           overrideAccess: false,
           req,
         })
+        await refreshAssetVulnerabilityCount(req.payload, { ...source, lifecycle: 'merged' }, req)
+        await refreshAssetVulnerabilityCount(req.payload, target, req)
       } else {
         for (const endpoint of endpoints) {
           await closeEndpoint(endpoint, at, req)
@@ -344,6 +378,22 @@ export const performIdentityAction = async (
           id: key.id,
           data: { site },
           overrideAccess: false,
+          req,
+        })
+      const reviews = await req.payload.find({
+        collection: 'asset-vulnerability-reviews',
+        pagination: false,
+        depth: 0,
+        overrideAccess: false,
+        req,
+        where: { asset: { equals: id } },
+      })
+      for (const review of reviews.docs)
+        await req.payload.update({
+          collection: 'asset-vulnerability-reviews',
+          id: review.id,
+          data: { site },
+          overrideAccess: true,
           req,
         })
       for (const endpoint of endpoints)

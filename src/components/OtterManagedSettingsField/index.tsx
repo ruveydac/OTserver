@@ -90,7 +90,7 @@ const OtterManagedSettingsField: UIFieldClientComponent = () => {
           <dd>
             {loading || error
               ? 'Unavailable'
-              : overview.controllerUrl || 'Set OTSERVER_PUBLIC_URL on the OTserver deployment'}
+              : overview.controllerUrl || 'Set the public controller URL in Application settings'}
           </dd>
         </div>
         <div>

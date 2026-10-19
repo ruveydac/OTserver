@@ -43,13 +43,20 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-CONTAINER_ID=$("$RUNTIME" run --detach --rm --name "$CONTAINER" \
+CONTAINER_ID=$("$RUNTIME" run --detach --name "$CONTAINER" \
   --publish 127.0.0.1::27017 docker.io/library/mongo:8 --replSet rs0 --bind_ip_all)
 wait_for_mongo() {
-  local expression=$1
+  local expression=$1 running details
   for ((attempt = 0; attempt < 60; attempt++)); do
     if "$RUNTIME" exec "$CONTAINER_ID" mongosh --quiet --eval "$expression" >/dev/null 2>&1; then
       return
+    fi
+    running=$("$RUNTIME" inspect --format '{{.State.Running}}' "$CONTAINER_ID" 2>/dev/null || true)
+    if [[ "$running" != true ]]; then
+      details=$("$RUNTIME" inspect --format \
+        'status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{.State.Error}}' \
+        "$CONTAINER_ID" 2>/dev/null || true)
+      fail "Disposable MongoDB exited before becoming ready: ${details:-container unavailable}."
     fi
     sleep 1
   done

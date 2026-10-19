@@ -186,6 +186,7 @@ describe('asset network fields', () => {
                 { cve: 'CVE-2099-0007', cvssScore: 9.1, knownExploited: false },
               ].map((doc) => ({
                 ...doc,
+                description: 'A crafted network request can interrupt controller operation.',
                 affected: [
                   {
                     part: 'a',
@@ -255,7 +256,7 @@ describe('asset network fields', () => {
     expect(html).toContain('asset-view__severity--critical" title="CRITICAL">9.8</span>')
     expect(html).not.toContain('CVE-2099-0001')
     expect(html).not.toContain('CVE-2099-0006')
-    expect(html).toContain('View all 7 matches')
+    expect(html).toContain('View all 7 open findings')
     expect(html).not.toContain('<h2>Discovery evidence</h2>')
     expect(html).not.toContain('<h2>Change history</h2>')
     expect(html).toContain('operator@example.test')
@@ -275,10 +276,11 @@ describe('asset network fields', () => {
     const securityHTML = renderToStaticMarkup(createElement(() => securityView))
     expect(securityHTML).toContain('7 total')
     expect(securityHTML).toContain(
-      'asset-view__severity-count--critical"><dt>critical</dt><dd>2</dd>',
+      'href="/admin/collections/assets/asset-1?tab=security&amp;severity=CRITICAL"><span>Critical</span><strong>2</strong>',
     )
-    expect(securityHTML).toContain('asset-view__severity-count--high"><dt>high</dt><dd>2</dd>')
-    expect(securityHTML).toContain('asset-view__severity-count--medium"><dt>medium</dt><dd>3</dd>')
+    expect(securityHTML).toContain('<span>High</span><strong>2</strong>')
+    expect(securityHTML).toContain('<span>Medium</span><strong>3</strong>')
+    expect(securityHTML).toContain('A crafted network request can interrupt controller operation.')
     expect(securityHTML).toContain('CVE-2099-0001')
     expect(securityHTML).toContain('CVE-2099-0006')
   })
@@ -496,6 +498,6 @@ describe('asset network fields', () => {
       '<li>CVE-2099-0011<span class="asset-view__severity--medium" title="MEDIUM">4</span></li>',
     )
     expect(html.indexOf('CVE-2099-0012')).toBeLessThan(html.indexOf('CVE-2099-0011'))
-    expect(html).toContain('View match details')
+    expect(html).toContain('View vulnerability review')
   })
 })

@@ -146,16 +146,23 @@ const preventDeletingUsedSites: CollectionBeforeDeleteHook = async ({ id, req })
     req,
     where: { site: { equals: id } },
   })
+  const vulnerabilityReviews = await req.payload.count({
+    collection: 'asset-vulnerability-reviews',
+    overrideAccess: true,
+    req,
+    where: { site: { equals: id } },
+  })
 
   if (
     children.totalDocs ||
     assets.totalDocs ||
     imports.totalDocs ||
     roles.totalDocs ||
-    otters.totalDocs
+    otters.totalDocs ||
+    vulnerabilityReviews.totalDocs
   ) {
     throw new APIError(
-      'Move or delete this site’s child sites, assets (including Trash), imports, Otter scanners, and role permissions before deleting it.',
+      'Move or delete this site’s child sites, assets (including Trash), imports, Otter scanners, vulnerability reviews, and role permissions before deleting it.',
       400,
     )
   }

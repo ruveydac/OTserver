@@ -423,7 +423,8 @@ const runSync = async (
       `${failures.length ? ` with ${failures.length} source failures` : ''}.`,
   )
 
-  // Asset counts are derived from the catalog, so they are refreshed whenever it moved.
+  // Asset counts are derived from usable catalog data and preserved when no catalog is available.
+  if (req) delete req.context.vulnerabilityCatalogReady
   const updatedAssets = await recountAssetVulnerabilities(payload, req)
 
   await writeAudit({

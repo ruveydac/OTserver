@@ -47,25 +47,27 @@ authorize an automatic physical merge.
 
 ## Operator setup
 
-Set these values on every OTserver web process that manages or serves Otter requests:
+Configure the public controller URL under **Settings > Application settings**. Admin settings take
+precedence over the optional `OTSERVER_PUBLIC_URL` environment fallback. Set this key on every
+OTserver web process that manages or serves Otter requests:
 
 ```dotenv
-OTSERVER_PUBLIC_URL=https://otserver.example
 OTSERVER_OTTER_ENCRYPTION_KEY=64-hexadecimal-characters-from-openssl-rand-hex-32
 ```
 
 Generate the encryption key with `openssl rand -hex 32`. Keep it separate from `OTSERVER_SECRET`,
 back it up securely, and use the same value on all web replicas. Losing it makes stored SNMP and OPC
 UA credentials unavailable. Changing it requires decrypting and re-encrypting those credentials and
-active run snapshots before replacing the old key. Keep `OTSERVER_PUBLIC_URL` set to the externally
-reachable HTTPS base URL; jobs use it to tell Otter where to upload scan results. Same-host setups
-may use `OTSERVER_PUBLIC_URL=http://localhost:3000` (also `127.0.0.1` or `[::1]`), including
-production-mode builds. Restart OTserver after changing `.env`. Browser management requests accept
-these loopback aliases on the same scheme and port; external cross-origin requests remain rejected.
+active run snapshots before replacing the old key. Use the externally reachable HTTPS base URL; jobs
+use it to tell Otter where to upload scan results. Same-host setups may use
+`http://localhost:3000` (also `127.0.0.1` or `[::1]`), including production-mode builds. Browser
+management requests accept these loopback aliases on the same scheme and port; external cross-origin
+requests remain rejected.
 
 For a manager on the same host, Otter also accepts `--server-url 127.0.0.1:3000` (equivalent to
 `http://127.0.0.1:3000`). With `--enroll`, paste the token from **Manage Otters** at the prompt and
-press Enter. Use the same controller URL as `OTSERVER_PUBLIC_URL`; subsequent starts omit `--enroll`.
+press Enter. Use the same controller URL as the Application settings value; subsequent starts omit
+`--enroll`.
 
 The controller endpoints are registered with Payload under `/api/otter/v1`. Apply the versioned
 database migrations as part of normal production upgrades; they establish partial unique indexes for
@@ -340,9 +342,10 @@ The manager pins `site` and `source`, discards scanner-supplied human overrides,
 server-owned import override snapshot, and names imports `Otter — scanner name — site — UTC datetime`.
 It preserves normal
 parser validation, identity reconciliation, quality merging, auditing, upload limits, and the
-2,000-record transaction cap. Exact retries use the existing import digest/idempotency logic. Queued
-scanner uploads require `OTSERVER_QUEUED_IMPORTS=on`; workers reload the scanner and fail closed if
-it was disabled, revoked, or expired before processing.
+2,000-record transaction cap. Exact retries use the existing import digest/idempotency logic. Enable
+queued scanner uploads under **Settings > Application settings**; `OTSERVER_QUEUED_IMPORTS` is the
+deployment fallback. Workers reload the scanner and fail closed if it was disabled, revoked, or
+expired before processing.
 
 ### Management actions
 

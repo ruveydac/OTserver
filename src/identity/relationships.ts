@@ -36,6 +36,7 @@ export const lockIdentityAssets = async (ids: string[], req: PayloadRequest) => 
         collection: 'assets',
         id,
         data: { identityRevision: (asset.identityRevision || 0) + 1 },
+        context: { vulnerabilityCountSync: true },
         overrideAccess: true,
         req,
       }),

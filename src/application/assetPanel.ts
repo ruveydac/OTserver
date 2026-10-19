@@ -1,7 +1,7 @@
 import type { Payload, TypedUser } from 'payload'
 import type { Asset } from '../payload-types'
 import { assetHistoryScope } from '../identity/relationships'
-import { findAssemblyVulnerabilities } from '../vulnerabilities/match'
+import { loadAssetVulnerabilityReviews } from '../vulnerabilities/reviews'
 
 export const loadAssetPanel = async ({
   asset,
@@ -63,7 +63,7 @@ export const loadAssetPanel = async ({
     auditLogs,
     observations,
     topologyLinks,
-    vulnerabilityMatches,
+    vulnerabilityReviews,
     endpointCount,
     loadedSite,
     loadedAssetClass,
@@ -109,7 +109,7 @@ export const loadAssetPanel = async ({
         or: [{ localAsset: { equals: asset.id } }, { remoteAsset: { equals: asset.id } }],
       },
     }),
-    findAssemblyVulnerabilities(payload, asset, { user }),
+    loadAssetVulnerabilityReviews(payload, asset, { user }),
     payload.count({
       collection: 'network-endpoints',
       overrideAccess: false,
@@ -125,7 +125,8 @@ export const loadAssetPanel = async ({
     auditLogs,
     observations,
     topologyLinks,
-    vulnerabilityMatches,
+    vulnerabilityFindings: vulnerabilityReviews.findings,
+    resolvedVulnerabilities: vulnerabilityReviews.resolved,
     endpointCount,
     loadedSite,
     loadedAssetClass,
