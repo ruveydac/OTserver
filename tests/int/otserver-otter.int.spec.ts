@@ -309,6 +309,20 @@ describe('OTserver Otter importer', () => {
     ).toBe(true)
     const imported = parseOTserverOtter(validJSON)
     expect(imported.assets).toHaveLength(3)
+    expect(
+      imported.assets.find(({ macAddress }) => macAddress === '02:10:00:00:00:02'),
+    ).toMatchObject({
+      vendor: 'SIEMENS AG',
+      observations: expect.arrayContaining([
+        expect.objectContaining({
+          source: 'profinet-dcp',
+          quality: 'high',
+          fields: expect.objectContaining({ vendorId: 42, deviceId: 7, vendor: 'SIEMENS AG' }),
+          mergeFields: expect.objectContaining({ vendor: 'SIEMENS AG' }),
+          raw: { vendorId: 42, deviceId: 7 },
+        }),
+      ]),
+    })
     expect(imported.assets.find(({ identity }) => identity?.scope === 'chassis')).toMatchObject({
       identity: { authority: 'entity-mib', scope: 'chassis', serial: 'SNMP-ROOT' },
     })
@@ -920,6 +934,10 @@ describe('OTserver Otter importer', () => {
         fieldProvenance: { vendor: { quality: 'high', source: 'snmp' } },
       })
       expect(physicalModule).toMatchObject({ physicalKind: 'module' })
+      expect(assets.docs.find(({ macAddress }) => macAddress === secondMAC)).toMatchObject({
+        vendor: 'SIEMENS AG',
+        fieldProvenance: { vendor: { quality: 'high', source: 'profinet-dcp' } },
+      })
       const identities = await payload.find({
         collection: 'asset-identifiers',
         depth: 0,
@@ -976,8 +994,12 @@ describe('OTserver Otter importer', () => {
         pagination: false,
         where: { import: { equals: imported.id } },
       })
-      expect(observations.docs).toHaveLength(4)
-      expect(observations.docs.find(({ source }) => source === 'profinet-dcp')?.raw).toMatchObject({
+      expect(observations.docs).toHaveLength(5)
+      expect(
+        observations.docs.find(
+          ({ source, asset }) => source === 'profinet-dcp' && asset === chassis!.id,
+        )?.raw,
+      ).toMatchObject({
         pnioRecords: [{ api: 7, slot: 3, subslot: 1 }],
       })
       const audit = await payload.find({
@@ -991,7 +1013,7 @@ describe('OTserver Otter importer', () => {
           ],
         },
       })
-      expect(audit.docs).toHaveLength(4)
+      expect(audit.docs).toHaveLength(5)
       expect(audit.docs.every(({ assetID }) => Boolean(assetID))).toBe(true)
     } finally {
       if (importID) {

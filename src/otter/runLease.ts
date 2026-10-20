@@ -2,6 +2,8 @@ import { APIError } from 'payload'
 import { relationshipID } from '../access/authorization'
 import type { OtterRun, OtterScanner } from '../payload-types'
 
+export const OTTER_RUN_LEASE_MS = 30 * 60_000
+
 export const activeRunStatuses: OtterRun['status'][] = ['assigned', 'running', 'cancel-requested']
 
 export const isRunLeaseExpired = (run: OtterRun, now: Date) => {
