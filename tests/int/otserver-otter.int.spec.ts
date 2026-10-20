@@ -312,14 +312,14 @@ describe('OTserver Otter importer', () => {
     expect(
       imported.assets.find(({ macAddress }) => macAddress === '02:10:00:00:00:02'),
     ).toMatchObject({
-      vendor: 'SIEMENS AG',
+      name: 'Remote I/O',
       observations: expect.arrayContaining([
         expect.objectContaining({
-          source: 'profinet-dcp',
-          quality: 'high',
-          fields: expect.objectContaining({ vendorId: 42, deviceId: 7, vendor: 'SIEMENS AG' }),
-          mergeFields: expect.objectContaining({ vendor: 'SIEMENS AG' }),
-          raw: { vendorId: 42, deviceId: 7 },
+          source: 'arp',
+          quality: 'medium',
+          fields: expect.objectContaining({ name: 'Remote I/O', status: 'online' }),
+          mergeFields: expect.objectContaining({ name: 'Remote I/O', status: 'online' }),
+          raw: {},
         }),
       ]),
     })
@@ -935,8 +935,8 @@ describe('OTserver Otter importer', () => {
       })
       expect(physicalModule).toMatchObject({ physicalKind: 'module' })
       expect(assets.docs.find(({ macAddress }) => macAddress === secondMAC)).toMatchObject({
-        vendor: 'SIEMENS AG',
-        fieldProvenance: { vendor: { quality: 'high', source: 'profinet-dcp' } },
+        name: 'Remote I/O',
+        fieldProvenance: { name: { quality: 'medium', source: 'arp' } },
       })
       const identities = await payload.find({
         collection: 'asset-identifiers',
@@ -994,7 +994,7 @@ describe('OTserver Otter importer', () => {
         pagination: false,
         where: { import: { equals: imported.id } },
       })
-      expect(observations.docs).toHaveLength(5)
+      expect(observations.docs).toHaveLength(4)
       expect(
         observations.docs.find(
           ({ source, asset }) => source === 'profinet-dcp' && asset === chassis!.id,
@@ -1013,7 +1013,7 @@ describe('OTserver Otter importer', () => {
           ],
         },
       })
-      expect(audit.docs).toHaveLength(5)
+      expect(audit.docs).toHaveLength(4)
       expect(audit.docs.every(({ assetID }) => Boolean(assetID))).toBe(true)
     } finally {
       if (importID) {
