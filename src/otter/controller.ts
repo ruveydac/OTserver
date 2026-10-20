@@ -33,6 +33,7 @@ import {
   assertCurrentOtterRunLease,
   assertOtterRunOwner,
   isRunLeaseExpired,
+  OTTER_RUN_LEASE_MS,
 } from './runLease'
 
 const json = (data: unknown, status = 200) =>
@@ -481,7 +482,7 @@ const assignJob = async (req: PayloadRequest, scanner: OtterScanner, now: Date) 
   })
   const run = pending.docs[0]
   if (!run) return undefined
-  const leaseExpiresAt = new Date(now.getTime() + 120_000).toISOString()
+  const leaseExpiresAt = new Date(now.getTime() + OTTER_RUN_LEASE_MS).toISOString()
   const assigned = await req.payload.update({
     collection: 'otter-runs',
     id: run.id,
@@ -880,7 +881,7 @@ export const startOtterRun: Endpoint['handler'] = async (req) => {
       req,
       data: {
         startedAt: now.toISOString(),
-        leaseExpiresAt: new Date(now.getTime() + 120_000).toISOString(),
+        leaseExpiresAt: new Date(now.getTime() + OTTER_RUN_LEASE_MS).toISOString(),
         status: 'running',
       },
     })
@@ -909,7 +910,7 @@ export const heartbeatOtterRun: Endpoint['handler'] = async (req) => {
     if (await siteBlocksImports(scanner.site, req)) run = await cancelBlockedRun(req, run)
     let leaseExpiresAt = run.leaseExpiresAt
     if (run.status !== 'cancel-requested') {
-      leaseExpiresAt = new Date(now.getTime() + 120_000).toISOString()
+      leaseExpiresAt = new Date(now.getTime() + OTTER_RUN_LEASE_MS).toISOString()
       await req.payload.update({
         collection: 'otter-runs',
         id: run.id,

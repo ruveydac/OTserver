@@ -8,6 +8,7 @@ import { ensureAdminRole } from '../../src/collections/UserRoles'
 import { executeQueuedImport } from '../../src/application/queuedImports'
 import { decryptOtterCredentials } from '../../src/otter/security'
 import { relationshipID } from '../../src/access/authorization'
+import { isRunLeaseExpired } from '../../src/otter/runLease'
 import {
   cancelOtterRun,
   createOtterScanner,
@@ -682,12 +683,27 @@ describe('Otter management controller', () => {
         action: string
         run: {
           id: string
+          leaseExpiresAt: string
           credentials: { snmp: Array<{ community: string }> }
           configuration: object
         }
       }
       expect(assignment.action).toBe('run')
       expect(assignment.run.id).toBe(runID)
+      const assignedRun = await payload.findByID({ collection: 'otter-runs', id: runID, depth: 0 })
+      expect(assignment.run.leaseExpiresAt).toBe(assignedRun.leaseExpiresAt)
+      expect(Date.parse(assignedRun.leaseExpiresAt!) - Date.parse(assignedRun.assignedAt!)).toBe(
+        30 * 60_000,
+      )
+      const assignedDeadline = Date.parse(assignedRun.leaseExpiresAt!)
+      expect(isRunLeaseExpired(assignedRun, new Date(assignedDeadline - 1))).toBe(false)
+      expect(isRunLeaseExpired(assignedRun, new Date(assignedDeadline))).toBe(true)
+      await expireOtterLeases(payload, new Date(Date.parse(assignedRun.assignedAt!) + 5 * 60_000))
+      expect(
+        await payload.findByID({ collection: 'otter-runs', id: runID, depth: 0 }),
+      ).toMatchObject({
+        status: 'assigned',
+      })
       expect(assignment.run.configuration).toMatchObject({
         serverUrl: 'http://127.0.0.1:3000',
         site: site.id,
@@ -822,6 +838,10 @@ describe('Otter management controller', () => {
         await routeRequest('/otter/v1/runs/start', runID, `Otter ${enrollment.credential}`),
       )
       expect(started.status).toBe(200)
+      const startedRun = await payload.findByID({ collection: 'otter-runs', id: runID, depth: 0 })
+      expect(Date.parse(startedRun.leaseExpiresAt!) - Date.parse(startedRun.startedAt!)).toBe(
+        30 * 60_000,
+      )
       const repeatedStart = await startOtterRun(
         await routeRequest('/otter/v1/runs/start', runID, `Otter ${enrollment.credential}`),
       )
@@ -833,12 +853,28 @@ describe('Otter management controller', () => {
           }),
         ),
       ).rejects.toMatchObject({ status: 400 })
+      const beforeHeartbeat = Date.now()
       const heartbeat = await heartbeatOtterRun(
         await routeRequest('/otter/v1/runs/heartbeat', runID, `Otter ${enrollment.credential}`, {
           progress: 50,
         }),
       )
-      expect(await heartbeat.json()).toMatchObject({ cancelRequested: false })
+      const heartbeatResult = (await heartbeat.json()) as {
+        cancelRequested: boolean
+        leaseExpiresAt: string
+      }
+      expect(heartbeatResult.cancelRequested).toBe(false)
+      expect(Date.parse(heartbeatResult.leaseExpiresAt)).toBeGreaterThanOrEqual(
+        beforeHeartbeat + 30 * 60_000,
+      )
+      expect(Date.parse(heartbeatResult.leaseExpiresAt)).toBeLessThanOrEqual(
+        Date.now() + 30 * 60_000,
+      )
+      expect(
+        await payload.findByID({ collection: 'otter-runs', id: runID, depth: 0 }),
+      ).toMatchObject({
+        leaseExpiresAt: heartbeatResult.leaseExpiresAt,
+      })
       const heartbeatWithoutProgress = await heartbeatOtterRun(
         await routeRequest('/otter/v1/runs/heartbeat', runID, `Otter ${enrollment.credential}`, {}),
       )

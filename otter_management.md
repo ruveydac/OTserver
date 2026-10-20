@@ -5,7 +5,7 @@ schedules, scan assignments, and run history. Scanner communication is outbound 
 no inbound listener is required on an Otter host.
 
 The Otter executable implements this protocol through the separate `controller` command. Its existing
-local `otter.json`, CLI/GUI scans, and user API-key upload flow continue to work independently. Managed
+local `otter.json`, CLI/GUI scans, and CLI user API-key upload flow continue to work independently. Managed
 mode enrolls, polls, executes assigned snapshots, and uploads with a machine credential. The scan
 result remains the existing `otserver-scan` schema-version-2 document. Scanner setup, private state
 storage, recovery, and verification commands are documented in `otserver-otter/README.md`.
@@ -68,6 +68,18 @@ For a manager on the same host, Otter also accepts `--server-url 127.0.0.1:3000`
 `http://127.0.0.1:3000`). With `--enroll`, paste the token from **Manage Otters** at the prompt and
 press Enter. Use the same controller URL as the Application settings value; subsequent starts omit
 `--enroll`.
+
+Otter's GUI also supports token enrollment under **OTserver controller**, followed by **Install
+controller**. Its former API-key connection fields are removed; GUI local scans only export files.
+For CLI installation, add `--install` to the enrollment command, or run
+`otserver-otter controller --install --ack-authorized` after enrollment. Installation reuses saved
+connection settings and runs only the controller in the background. Linux uses a systemd user service,
+user lingering for boot/after-logout operation, and `CAP_NET_RAW` on the user-installed executable.
+Windows uses a per-user non-interactive S4U scheduled task, starting at login and continuing after
+logout when account policy permits batch logon. Installation saves only the enrollment-issued machine
+credential in private controller state for unattended authentication; scan protocol credentials still
+come from management and remain memory-only. See `otserver-otter/README.md` for paths, OS prompts,
+permissions, stopping and retrying installation.
 
 The controller endpoints are registered with Payload under `/api/otter/v1`. Apply the versioned
 database migrations as part of normal production upgrades; they establish partial unique indexes for
@@ -217,9 +229,10 @@ Every run has an immutable configuration snapshot and progresses through `queued
 `running`, and a terminal state (`completed`, `partial`, `failed`, `cancelled`, or `expired`). Only
 one assigned/running run is active per scanner. Polling returns the existing assignment again until
 it is finished, which lets a scanner recover a lost poll response. Assigned and running jobs use a
-two-minute lease. If the lease expires, OTserver records `expired`; it does not silently repeat an
-uncertain scan. Human cancellation is immediate while queued and becomes `cancel-requested` after
-assignment; Otter observes it on its next poll/heartbeat.
+30-minute lease, renewed on start and by heartbeats every 15 seconds during scans and uploads.
+Otter stops five seconds before the lease deadline. If the lease expires, OTserver records `expired`;
+it does not silently repeat an uncertain scan. Human cancellation is immediate while queued and
+becomes `cancel-requested` after assignment; Otter observes it on its next poll/heartbeat.
 
 The dispatcher calculates due schedules during polling. It does not run scans on OTserver and does
 not need a separate scheduled worker process. MongoDB transactions plus partial unique indexes
@@ -296,7 +309,7 @@ shape:
     },
     "credentials": { "snmp": [{ "version": "3", "username": "inventory" }] },
     "uploadPath": "/api/asset-imports",
-    "leaseExpiresAt": "2026-10-10T12:02:00.000Z"
+    "leaseExpiresAt": "2026-10-10T12:30:00.000Z"
   }
 }
 ```
@@ -378,7 +391,10 @@ and test replica set) cover:
    without requiring a scanner-side inbound listener.
 2. Redeem the enrollment token over HTTPS, then persist the returned credential in an
    OS-appropriate secret store where available; support a permission-restricted file fallback.
-3. Poll `/api/otter/v1/poll` on a configurable interval with bounded exponential backoff and jitter.
+3. Poll `/api/otter/v1/poll` on a configurable interval. After enrollment, keep the client running
+   through polling network/429/5xx failures or unavailable adapter inventory and retry every five
+   minutes.
+   Resume normal polling after recovery; authentication rejection still stops the client.
    Send version, supported capabilities, locally available capture interfaces, computer name, and
    adapter technical/friendly names, description, optional MAC, and IP addresses.
 4. Decode the supported server configuration fields and credential snapshot. Apply profile options
@@ -391,13 +407,16 @@ and test replica set) cover:
 7. Upload the existing schema-v2 JSON to `/api/asset-imports` with
    `Authorization: Otter <credential>`, `site` omitted or matching the bound site,
    `source: otserver-otter`, and the run ID in `otterRun`. Keep the local result file on upload
-   failure.
+   failure. Retry network failures and retryable HTTP responses after two minutes, at most five
+   retries after the initial attempt. Persist attempts before sending so restarts retain the limit;
+   resumed retries also wait two minutes. Maintain heartbeats during waits. Exhaustion fails the
+   run with a retained export; subsequent recovery retries finishing, not uploading.
 8. Retry imports using the returned import ID/status where appropriate, and report scanner completion
    separately from import completion/failure.
 9. Rotate credentials before expiry, atomically persist the returned credential before replacing the
    old one, and stop/re-enroll on revocation or authentication failure.
 10. Add Rust tests for enrollment responses, config mapping/validation, persisted assignment recovery,
-    cancellation, upload auth/metadata, credential redaction, and retry/backoff. Add protocol
+    cancellation, upload auth/metadata, credential redaction, and five-minute reconnection. Add protocol
     interoperability cases to the Otter lab. Update its README/AGENTS safety rules and the
     interoperability tests in this repository in the coordinated change.
 

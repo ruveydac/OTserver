@@ -167,8 +167,14 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
   port as an allowed origin; retain origin checks for external requests.
 - Create due Otter schedule occurrences and claim runs transactionally during scanner polling.
   Preserve the schedule-occurrence partial unique index, one active assignment per scanner, lease
-  checks, and latest-only offline catch-up. Scanner-side changes belong in `otserver-otter` and must
-  coordinate with `otter_management.md`.
+  checks, and latest-only offline catch-up. Run assignment, start, and heartbeat grant a 30-minute
+  lease; Otter renews it every 15 seconds during scans/uploads and stops five seconds before expiry.
+  Keep the server lease duration and client maximum aligned. Scanner-side changes belong in
+  `otserver-otter` and must coordinate with `otter_management.md`.
+- Managed Otter uploads retry network/retryable HTTP failures after two minutes, at most five
+  retries after the initial attempt. Persist attempt counts across restarts and retain the original
+  export. Heartbeats continue through retry waits; exhausted uploads fail the run and retry only
+  finishing, never restart the upload budget. Import processing failures are separate.
 
 ### Auditability
 
