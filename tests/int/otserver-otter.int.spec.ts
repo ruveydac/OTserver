@@ -994,7 +994,28 @@ describe('OTserver Otter importer', () => {
         pagination: false,
         where: { import: { equals: imported.id } },
       })
-      expect(observations.docs).toHaveLength(4)
+      const fixture = JSON.parse(contents) as {
+        devices: {
+          macAddress: string
+          observations: { source: string; raw: unknown }[]
+        }[]
+      }
+      const expectedObservations = fixture.devices.flatMap((device) =>
+        device.observations.map(({ source, raw }) => ({
+          asset: assets.docs.find(({ macAddress }) => macAddress === device.macAddress)!.id,
+          source,
+          raw,
+        })),
+      )
+      expectedObservations.push({
+        asset: physicalModule!.id,
+        source: 'snmp',
+        raw: fixture.devices[0].observations.find(({ source }) => source === 'snmp')!.raw,
+      })
+      expect(observations.docs.map(({ asset, source, raw }) => ({ asset, source, raw }))).toEqual(
+        expect.arrayContaining(expectedObservations),
+      )
+      expect(observations.docs).toHaveLength(expectedObservations.length)
       expect(
         observations.docs.find(
           ({ source, asset }) => source === 'profinet-dcp' && asset === chassis!.id,
@@ -1013,8 +1034,14 @@ describe('OTserver Otter importer', () => {
           ],
         },
       })
-      expect(audit.docs).toHaveLength(4)
-      expect(audit.docs.every(({ assetID }) => Boolean(assetID))).toBe(true)
+      expect(audit.docs).toHaveLength(observations.docs.length)
+      expect(audit.docs).toEqual(
+        expect.arrayContaining(
+          observations.docs.map(({ id, asset }) =>
+            expect.objectContaining({ action: 'create', documentID: id, assetID: asset }),
+          ),
+        ),
+      )
     } finally {
       if (importID) {
         await payload.delete({
