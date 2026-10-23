@@ -321,6 +321,18 @@ describe('OTserver Otter importer', () => {
           mergeFields: expect.objectContaining({ name: 'Remote I/O', status: 'online' }),
           raw: {},
         }),
+        expect.objectContaining({
+          source: 'http',
+          quality: 'low',
+          mergeFields: expect.objectContaining({ protocols: ['http'] }),
+          raw: expect.objectContaining({ protocol: 'http', port: 80 }),
+        }),
+        expect.objectContaining({
+          source: 'https',
+          quality: 'low',
+          mergeFields: expect.objectContaining({ protocols: ['https'] }),
+          raw: expect.objectContaining({ protocol: 'https', port: 443 }),
+        }),
       ]),
     })
     expect(imported.assets.find(({ identity }) => identity?.scope === 'chassis')).toMatchObject({
@@ -361,7 +373,7 @@ describe('OTserver Otter importer', () => {
     )
   })
 
-  it('imports Beckhoff ADS and HTTP protocols with their source quality', () => {
+  it('imports Beckhoff ADS and legacy unknown HTTP observations with their source quality', () => {
     const file = mutableExport(randomMAC(), randomMAC())
     file.devices[0].observations = [
       {
