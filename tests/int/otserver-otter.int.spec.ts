@@ -361,6 +361,32 @@ describe('OTserver Otter importer', () => {
     )
   })
 
+  it('imports Beckhoff ADS and HTTP protocols with their source quality', () => {
+    const file = mutableExport(randomMAC(), randomMAC())
+    file.devices[0].observations = [
+      {
+        source: 'beckhoff-ads',
+        observedAt: '2026-08-10T10:00:00Z',
+        fields: { protocols: ['beckhoff-ads'] },
+        raw: { protocol: 'beckhoff-ads' },
+        warnings: [],
+      },
+      {
+        source: 'unknown',
+        observedAt: '2026-08-10T10:00:01Z',
+        fields: { protocols: ['http', 'https'] },
+        raw: { protocol: 'http' },
+        warnings: [],
+      },
+    ]
+    file.links = []
+
+    expect(parseOTserverOtter(JSON.stringify(file)).assets[0].observations).toMatchObject([
+      { quality: 'high', source: 'beckhoff-ads', mergeFields: { protocols: ['beckhoff-ads'] } },
+      { quality: 'low', source: 'unknown', mergeFields: { protocols: ['http', 'https'] } },
+    ])
+  })
+
   it('imports v0.6 raw inventory details and every observation field', () => {
     const localMAC = randomMAC()
     const alternateMAC = randomMAC()

@@ -344,8 +344,11 @@ export interface Asset {
   protocols?:
     | (
         | 'bacnet'
+        | 'beckhoff-ads'
         | 'dnp3'
         | 'ethernet-ip'
+        | 'http'
+        | 'https'
         | 'iec61850'
         | 'modbus-tcp'
         | 'netbios'
