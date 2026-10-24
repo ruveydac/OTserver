@@ -125,13 +125,30 @@ const configKeys = new Set([
   'noNetbios',
   'noSmb',
   'noRpc',
+  'noHttp',
+  'noAds',
   'noOpcua',
   'noSnmp',
   'noLldp',
+  'adsSourceNetId',
+  'adsTargetNetIds',
+  'adsPorts',
   'opcuaPorts',
 ])
 
 const ipv4 = /^(?:\d{1,3}\.){3}\d{1,3}(?:\/(?:[0-9]|[12][0-9]|3[0-2]))?$/
+const isIPv4Address = (value: string) =>
+  value.split('.').length === 4 &&
+  value.split('.').every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255)
+const isAdsNetId = (value: unknown): value is string => {
+  if (typeof value !== 'string') return false
+  const octets = value.split('.')
+  return (
+    octets.length === 6 &&
+    octets.every((octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255) &&
+    octets.some((octet) => Number(octet) > 0)
+  )
+}
 
 export const validateOtterConfiguration = (input: unknown) => {
   if (!input || typeof input !== 'object' || Array.isArray(input))
@@ -188,6 +205,30 @@ export const validateOtterConfiguration = (input: unknown) => {
       ))
   )
     throw new APIError('OPC UA ports must be integers from 1 to 65535.', 400)
+
+  if (config.adsSourceNetId !== undefined && !isAdsNetId(config.adsSourceNetId))
+    throw new APIError('ADS source NetID must contain six decimal octets from 0 to 255.', 400)
+  if (
+    config.adsTargetNetIds !== undefined &&
+    (!config.adsTargetNetIds ||
+      typeof config.adsTargetNetIds !== 'object' ||
+      Array.isArray(config.adsTargetNetIds) ||
+      Object.keys(config.adsTargetNetIds).length > 1024 ||
+      Object.entries(config.adsTargetNetIds).some(
+        ([target, netID]) => !isIPv4Address(target) || !isAdsNetId(netID),
+      ))
+  )
+    throw new APIError('ADS target NetIDs must map IPv4 addresses to valid AMS NetIDs.', 400)
+  if (
+    config.adsPorts !== undefined &&
+    (!Array.isArray(config.adsPorts) ||
+      config.adsPorts.length > 8 ||
+      config.adsPorts.some(
+        (port) => !Number.isInteger(port) || Number(port) < 1 || Number(port) > 65535,
+      ) ||
+      new Set(config.adsPorts).size !== config.adsPorts.length)
+  )
+    throw new APIError('ADS AMS ports must be unique integers from 1 to 65535 (at most 8).', 400)
 
   return structuredClone(config)
 }

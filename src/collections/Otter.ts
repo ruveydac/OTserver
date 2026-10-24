@@ -455,9 +455,44 @@ export const OtterProfiles: CollectionConfig = {
               defaultValue: false,
               label: 'Disable RPC fingerprinting',
             },
+            { name: 'noHttp', type: 'checkbox', defaultValue: false, label: 'Disable HTTP/HTTPS' },
+            { name: 'noAds', type: 'checkbox', defaultValue: false, label: 'Disable Beckhoff ADS' },
             { name: 'noOpcua', type: 'checkbox', defaultValue: false, label: 'Disable OPC UA' },
             { name: 'noSnmp', type: 'checkbox', defaultValue: false, label: 'Disable SNMP' },
             { name: 'noLldp', type: 'checkbox', defaultValue: false, label: 'Disable LLDP' },
+            {
+              name: 'adsSourceNetId',
+              label: 'ADS source NetID',
+              type: 'text',
+              admin: {
+                description:
+                  'Optional six-octet AMS NetID. Leave empty to derive it from the selected adapter.',
+              },
+            },
+            {
+              name: 'adsTargetNetIds',
+              label: 'ADS target NetIDs',
+              type: 'json',
+              defaultValue: {},
+              admin: {
+                description:
+                  'Map target IPv4 addresses to AMS NetIDs when UDP ServerInfo discovery is unavailable.',
+              },
+            },
+            {
+              name: 'adsPorts',
+              label: 'ADS AMS ports',
+              type: 'number',
+              hasMany: true,
+              defaultValue: [],
+              maxRows: 8,
+              min: 1,
+              max: 65535,
+              admin: {
+                description:
+                  'Logical AMS ports to query. Leave empty to use the Otter defaults; these are not TCP ports.',
+              },
+            },
             {
               name: 'opcuaPorts',
               label: 'OPC UA ports',

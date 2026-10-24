@@ -180,20 +180,28 @@ non-secret `ScannerConfig` options as native fields:
   "noNetbios": false,
   "noSmb": false,
   "noRpc": false,
+  "noHttp": false,
+  "noAds": false,
   "noOpcua": false,
   "opcuaPorts": [4840, 4841, 48400],
   "noSnmp": false,
-  "noLldp": false
+  "noLldp": false,
+  "adsSourceNetId": "192.168.1.20.1.1",
+  "adsTargetNetIds": { "192.168.1.10": "192.168.1.10.1.1" },
+  "adsPorts": [851, 801]
 }
 ```
 
 `targets` must be IPv4 addresses or CIDRs; unknown options, non-IPv4 targets, excessive target
-lists, and invalid ports are rejected. `noProtocols` disables native IP protocols (including SMB
-and RPC), but does not disable ARP, PROFINET, SNMP, or LLDP; those have separate switches. The
-interface selector displays each reported adapter's friendly name, MAC, and addresses and stores its
-technical name. `sourceMac` is optional; Otter refreshes the selected adapter's actual MAC at scan
-start. The controller supplies the scanner's fixed site, OTserver URL, profile name, and upload
-destination. Profiles cannot specify `site`, `serverUrl`, `apiKey`, or an arbitrary local output path.
+lists, invalid ports, and invalid ADS NetIDs are rejected. `noProtocols` disables native IP protocols
+(including SMB and RPC), but does not disable ARP, PROFINET, SNMP, or LLDP; those have separate
+switches. `noHttp` and `noAds` independently disable HTTP/HTTPS and Beckhoff ADS. ADS target NetIDs
+map IPv4 addresses to logical AMS identities when UDP ServerInfo discovery is unavailable; ADS ports
+are logical AMS ports, not TCP ports, and an empty list uses Otter defaults. The interface selector
+displays each reported adapter's friendly name, MAC, and addresses and stores its technical name.
+`sourceMac` is optional; Otter refreshes the selected adapter's actual MAC at scan start. The
+controller supplies the scanner's fixed site, OTserver URL, profile name, and upload destination.
+Profiles cannot specify `site`, `serverUrl`, `apiKey`, or an arbitrary local output path.
 The selected interface controls Layer-2 capture and ARP/DCP source selection. TCP/UDP, SNMP, and other
 native IP probes use the operating system's route table; operators of multi-homed scanners must set
 routes for the target networks in the operating system.

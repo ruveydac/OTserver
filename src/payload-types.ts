@@ -766,9 +766,31 @@ export interface OtterProfile {
     noNetbios?: boolean | null;
     noSmb?: boolean | null;
     noRpc?: boolean | null;
+    noHttp?: boolean | null;
+    noAds?: boolean | null;
     noOpcua?: boolean | null;
     noSnmp?: boolean | null;
     noLldp?: boolean | null;
+    /**
+     * Optional six-octet AMS NetID. Leave empty to derive it from the selected adapter.
+     */
+    adsSourceNetId?: string | null;
+    /**
+     * Map target IPv4 addresses to AMS NetIDs when UDP ServerInfo discovery is unavailable.
+     */
+    adsTargetNetIds?:
+      | {
+          [k: string]: unknown;
+        }
+      | unknown[]
+      | string
+      | number
+      | boolean
+      | null;
+    /**
+     * Logical AMS ports to query. Leave empty to use the Otter defaults; these are not TCP ports.
+     */
+    adsPorts?: number[] | null;
     /**
      * OPC UA ports to probe. Leave empty to use Otter defaults: 4840, 4841, and 48400.
      */
@@ -1759,9 +1781,14 @@ export interface OtterProfilesSelect<T extends boolean = true> {
         noNetbios?: T;
         noSmb?: T;
         noRpc?: T;
+        noHttp?: T;
+        noAds?: T;
         noOpcua?: T;
         noSnmp?: T;
         noLldp?: T;
+        adsSourceNetId?: T;
+        adsTargetNetIds?: T;
+        adsPorts?: T;
         opcuaPorts?: T;
       };
   assetOverrides?:
