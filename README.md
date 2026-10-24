@@ -8,7 +8,7 @@ Native OT discovery · Quality-aware inventory · Site-scoped access · Immutabl
 
 [![Website](https://img.shields.io/badge/otserver.org-111111?logo=firefoxbrowser&logoColor=white)](https://otserver.org)
 [![Next.js](https://img.shields.io/badge/Next.js-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
-[![codecov](https://codecov.io/github/ruveydac/OTserver/branch/main/graph/badge.svg)](https://codecov.io/github/ruveydac/OTserver)
+[![codecov](https://codecov.io/gh/ruveydac/OTserver/graph/badge.svg)](https://codecov.io/gh/ruveydac/OTserver)
 [![MongoDB](https://img.shields.io/badge/MongoDB-001E2B?logo=mongodb&logoColor=47A248)](https://www.mongodb.com/)
 [![Rust](https://img.shields.io/badge/Otter-Rust-000000?logo=rust&logoColor=white)](https://github.com/ruveydac/otserver-otter)
 [![AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENCE.md)
@@ -134,7 +134,7 @@ pnpm install
 pnpm dev
 ```
 
-See [AGENTS.md](AGENTS.md) for architecture, domain rules, worker configuration, runtime sizing,
+See [here](AGENTS.md) for architecture, domain rules, worker configuration, runtime sizing,
 vulnerability-feed operations, and test commands.
 
 ## License
