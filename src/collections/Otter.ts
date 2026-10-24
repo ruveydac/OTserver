@@ -12,6 +12,7 @@ import {
   validateOtterConfiguration,
 } from '../otter/security'
 import { validateScheduleInput } from '../otter/scheduling'
+import { activeRunStatuses } from '../otter/runLease'
 import { userSuppliedAssetFields } from '../domain/assetFields'
 import { sanitizeCustomFieldValues } from './AssetFields'
 import { assertSiteAllowsImports, filterImportSites } from '../application/importSites'
@@ -197,39 +198,52 @@ const validateSchedule: CollectionBeforeChangeHook = async ({
   return data
 }
 
-const preventDeletingReferencedOtterConfig: CollectionBeforeDeleteHook = async ({
+const preventDeletingScheduledOtterProfile: CollectionBeforeDeleteHook = async ({ id, req }) => {
+  const schedules = await req.payload.count({
+    collection: 'otter-schedules',
+    overrideAccess: true,
+    req,
+    where: { profile: { equals: id } },
+  })
+  if (schedules.totalDocs > 0)
+    throw new APIError('Delete schedules that use this configuration before deleting it.', 409)
+}
+
+const preventDeletingOtterScannerWithDependents: CollectionBeforeDeleteHook = async ({
   id,
-  collection,
   req,
 }) => {
-  const references = []
-  if (collection.slug === 'otter-profiles') {
-    references.push(
-      await req.payload.count({
-        collection: 'otter-schedules',
-        overrideAccess: true,
-        req,
-        where: { profile: { equals: id } },
-      }),
-      await req.payload.count({
-        collection: 'otter-runs',
-        overrideAccess: true,
-        req,
-        where: { profile: { equals: id } },
-      }),
+  const profiles = await req.payload.count({
+    collection: 'otter-profiles',
+    overrideAccess: true,
+    req,
+    where: { scanner: { equals: id } },
+  })
+  const schedules = await req.payload.count({
+    collection: 'otter-schedules',
+    overrideAccess: true,
+    req,
+    where: { scanner: { equals: id } },
+  })
+  if (profiles.totalDocs > 0 || schedules.totalDocs > 0)
+    throw new APIError(
+      'Delete this scanner’s configurations and schedules before deleting it.',
+      409,
     )
-  } else {
-    references.push(
-      await req.payload.count({
-        collection: 'otter-runs',
-        overrideAccess: true,
-        req,
-        where: { schedule: { equals: id } },
-      }),
+
+  const runs = await req.payload.count({
+    collection: 'otter-runs',
+    overrideAccess: true,
+    req,
+    where: {
+      and: [{ scanner: { equals: id } }, { status: { in: ['queued', ...activeRunStatuses] } }],
+    },
+  })
+  if (runs.totalDocs > 0)
+    throw new APIError(
+      'Cancel or finish this scanner’s queued and active runs before deleting it.',
+      409,
     )
-  }
-  if (references.some((reference) => reference.totalDocs > 0))
-    throw new APIError('Configuration referenced by scan history cannot be deleted.', 409)
 }
 
 export const OtterScanners: CollectionConfig = {
@@ -237,7 +251,7 @@ export const OtterScanners: CollectionConfig = {
   labels: { singular: 'Otter scanner', plural: 'Otter scanners' },
   access: {
     create: () => false,
-    delete: () => false,
+    delete: canWriteOtter,
     read: canReadOtter,
     update: canWriteOtter,
   },
@@ -249,7 +263,6 @@ export const OtterScanners: CollectionConfig = {
     useAsTitle: 'name',
   },
   defaultSort: 'name',
-  disableBulkDelete: true,
   disableBulkEdit: true,
   fields: [
     { name: 'name', type: 'text', required: true, maxLength: 120 },
@@ -314,7 +327,10 @@ export const OtterScanners: CollectionConfig = {
     { name: 'credentialExpiresAt', type: 'date', access: internal, admin: { hidden: true } },
   ],
   indexes: [{ fields: ['site', 'enabled'] }],
-  hooks: { beforeChange: [validateScannerSettings] },
+  hooks: {
+    beforeChange: [validateScannerSettings],
+    beforeDelete: [preventDeletingOtterScannerWithDependents],
+  },
   lockDocuments: false,
 }
 
@@ -335,7 +351,6 @@ export const OtterProfiles: CollectionConfig = {
     useAsTitle: 'name',
   },
   defaultSort: 'name',
-  disableBulkDelete: true,
   disableBulkEdit: true,
   fields: [
     { name: 'name', type: 'text', required: true },
@@ -565,7 +580,7 @@ export const OtterProfiles: CollectionConfig = {
   ],
   hooks: {
     beforeChange: [validateProfile, sanitizeCustomFieldValues],
-    beforeDelete: [preventDeletingReferencedOtterConfig],
+    beforeDelete: [preventDeletingScheduledOtterProfile],
   },
   indexes: [{ fields: ['scanner', 'site'] }],
   lockDocuments: false,
@@ -588,7 +603,6 @@ export const OtterSchedules: CollectionConfig = {
     useAsTitle: 'name',
   },
   defaultSort: 'nextRunAt',
-  disableBulkDelete: true,
   disableBulkEdit: true,
   fields: [
     { name: 'name', type: 'text', required: true },
@@ -665,10 +679,7 @@ export const OtterSchedules: CollectionConfig = {
     { name: 'nextRunAt', type: 'date', access: serverReadOnly, admin: { readOnly: true } },
     { name: 'lastRunAt', type: 'date', access: serverReadOnly, admin: { readOnly: true } },
   ],
-  hooks: {
-    beforeChange: [validateSchedule],
-    beforeDelete: [preventDeletingReferencedOtterConfig],
-  },
+  hooks: { beforeChange: [validateSchedule] },
   indexes: [{ fields: ['scanner', 'enabled', 'nextRunAt'] }],
   lockDocuments: false,
 }

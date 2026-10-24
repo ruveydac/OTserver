@@ -637,11 +637,27 @@ describe('Otter management overview', () => {
               controllerUrl: 'https://otserver.example',
               expiresAt: new Date().toISOString(),
             }
-          : { writableSites: [{ id: 'site-1', name: 'Plant' }] },
+          : {
+              sites: [
+                { id: 'blocked-site', name: 'Country' },
+                { id: 'site-1', name: 'Plant' },
+                { id: 'read-only-site', name: 'Read-only plant' },
+              ],
+              writableSites: [{ id: 'site-1', name: 'Plant' }],
+            },
     }))
     vi.stubGlobal('fetch', fetch)
     await render(createElement(OtterEnrollment))
     expect(container.textContent).toContain('Enroll scanner')
+    expect(
+      [...container.querySelectorAll('select option')].map((option) => ({
+        value: (option as HTMLOptionElement).value,
+        label: option.textContent,
+      })),
+    ).toEqual([
+      { value: '', label: 'Select a site' },
+      { value: 'site-1', label: 'Plant' },
+    ])
     const input = container.querySelector('input')!
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(

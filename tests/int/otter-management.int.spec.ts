@@ -1206,14 +1206,6 @@ describe('Otter management controller', () => {
         }),
       )
       expect((await repeatedPoll.json()).run.id).toBe(scheduledAssignment.run.id)
-      await expect(
-        payload.delete({
-          collection: 'otter-schedules',
-          id: schedule.id,
-          overrideAccess: false,
-          user,
-        }),
-      ).rejects.toMatchObject({ status: 409 })
       const cancellation = await cancelOtterRun(
         await routeRequest(
           '/otter/v1/runs/cancel',
