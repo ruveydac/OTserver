@@ -1,6 +1,6 @@
 import type { Payload } from 'payload'
 
-export const siteTypeID = async (payload: Payload, key = 'site') => {
+export const siteTypeID = async (payload: Payload, key = 'area') => {
   const result = await payload.find({
     collection: 'site-types',
     depth: 0,

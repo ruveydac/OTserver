@@ -121,6 +121,8 @@ describe('site catalogue, hierarchy, and Purdue classification', () => {
       'city',
       'continent',
       'country',
+      'enterprise',
+      'site',
     ])
     const mappedDefaults = await payload.find({
       collection: 'site-types',

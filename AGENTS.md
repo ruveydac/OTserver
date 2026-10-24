@@ -107,7 +107,7 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
   Role permissions include descendants; imports and scanners keep their exact-site scope.
   Catalogue reference locks protect type deletion/retirement races. Site deletion checks include
   assets in Trash.
-- `site-types.blockImports` defaults to false; seed Continent, Country, and City with it enabled,
+- `site-types.blockImports` defaults to false; seed Continent, Country, City, Enterprise, and Site / plant with it enabled,
   preserving administrator changes on subsequent starts. It applies only to sites directly assigned
   that type, never to descendants with a different type. Enforce the current type policy through
   `src/application/importSites.ts` for upload creation/replacement, queued execution/retries,

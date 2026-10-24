@@ -215,7 +215,7 @@ assert.ok(siteTypes.docs.some(({ key }) => key === 'production-line'))
 assert.ok(siteTypes.docs.some(({ name }) => name === 'To be changed'))
 assert.deepEqual(
   siteTypes.docs.filter(({ blockImports }) => blockImports).map(({ key }) => key).sort(),
-  ['city', 'continent', 'country'],
+  ['city', 'continent', 'country', 'enterprise', 'site'],
 )
 assert.ok(siteTypes.docs.every(({ isa95Element }) => isa95Element))
 assert.equal(siteTypes.docs.find(({ key }) => key === 'continent').isa95Element, 'enterprise')
@@ -235,7 +235,7 @@ try {
   })
   const site = await payload.create({
     collection: 'sites',
-    data: { name: 'External worker smoke site', type: siteType.id },
+    data: { name: 'External worker smoke site', type: siteTypes.docs.find(({ key }) => key === 'area').id },
     overrideAccess: false,
     user,
   })

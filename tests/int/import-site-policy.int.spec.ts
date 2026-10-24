@@ -185,6 +185,19 @@ afterAll(async () => {
 })
 
 describe('site-type import restrictions', () => {
+  it('offers only importable writable sites for scanner enrollment', async () => {
+    const overview = await (await otterOverview(await request('/otter/v1/overview'))).json()
+    expect(overview.writableSites).toEqual([{ id: child.id, name: child.path || child.name }])
+    expect(overview.sites.map((site: { id: string }) => site.id)).toContain(parent.id)
+    const adminOverview = await (
+      await otterOverview(await createLocalReq({ user: admin }, payload))
+    ).json()
+    const adminSites = adminOverview.writableSites.map((site: { id: string }) => site.id)
+    expect(adminSites).toContain(child.id)
+    expect(adminSites).toContain(foreign.id)
+    expect(adminSites).not.toContain(parent.id)
+  })
+
   it('inherits only the exact site type and filters destinations without altering inventory access', async () => {
     expect(allowedType.blockImports).toBe(false)
     const req = await createLocalReq({ user: operator }, payload)
