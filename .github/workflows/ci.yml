@@ -29,5 +29,11 @@ jobs:
       - run: pnpm exec prettier --check .
       - run: pnpm lint
       - run: pnpm test:coverage
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage/lcov.info
+          disable_search: true
+          token: ${{ secrets.CODECOV_TOKEN }}
       - run: pnpm build
       - run: git diff --check
