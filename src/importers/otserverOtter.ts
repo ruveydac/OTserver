@@ -19,8 +19,11 @@ const dateTimePattern =
 const sources: Record<string, DataQuality> = {
   arp: 'medium',
   bacnet: 'medium',
+  'beckhoff-ads': 'high',
   dnp3: 'medium',
   'ethernet-ip': 'high',
+  http: 'low',
+  https: 'low',
   iec61850: 'medium',
   lldp: 'high',
   netbios: 'medium',

@@ -199,9 +199,23 @@ describe('Otter security and scheduling boundaries', () => {
         noSnmp: true,
         noSmb: true,
         noRpc: true,
+        noHttp: true,
+        noAds: true,
+        adsSourceNetId: '192.0.2.1.1.1',
+        adsTargetNetIds: { '192.0.2.10': '10.0.0.10.1.1' },
+        adsPorts: [851, 801],
         opcuaPorts: [4840],
       }),
-    ).toMatchObject({ targets: ['192.0.2.1', '192.0.2.0/24'], noSmb: true, noRpc: true })
+    ).toMatchObject({
+      targets: ['192.0.2.1', '192.0.2.0/24'],
+      noSmb: true,
+      noRpc: true,
+      noHttp: true,
+      noAds: true,
+      adsSourceNetId: '192.0.2.1.1.1',
+      adsTargetNetIds: { '192.0.2.10': '10.0.0.10.1.1' },
+      adsPorts: [851, 801],
+    })
     expect(() => validateOtterConfiguration({ targets: ['192.0.2.1'], apiKey: 'secret' })).toThrow(
       /unsupported/i,
     )
@@ -218,6 +232,33 @@ describe('Otter security and scheduling boundaries', () => {
     )
     expect(() => validateOtterConfiguration({ targets: ['192.0.2.1'], opcuaPorts: [0] })).toThrow(
       /ports/i,
+    )
+    expect(() => validateOtterConfiguration({ targets: ['192.0.2.1'], adsSourceNetId: 7 })).toThrow(
+      /NetID/i,
+    )
+    expect(() =>
+      validateOtterConfiguration({ targets: ['192.0.2.1'], adsSourceNetId: '0.0.0.0.0.0' }),
+    ).toThrow(/NetID/i)
+    expect(() =>
+      validateOtterConfiguration({
+        targets: ['192.0.2.1'],
+        adsTargetNetIds: { '192.0.2.999': '10.0.0.10.1.1' },
+      }),
+    ).toThrow(/NetID/i)
+    expect(() =>
+      validateOtterConfiguration({
+        targets: ['192.0.2.1'],
+        adsTargetNetIds: { '192.0.2.10': '10.0.0.10.1.256' },
+      }),
+    ).toThrow(/NetID/i)
+    expect(() =>
+      validateOtterConfiguration({ targets: ['192.0.2.1'], adsTargetNetIds: [] }),
+    ).toThrow(/NetID/i)
+    expect(() =>
+      validateOtterConfiguration({ targets: ['192.0.2.1'], adsPorts: [851, 851] }),
+    ).toThrow(/ADS AMS ports/i)
+    expect(() => validateOtterConfiguration({ targets: ['192.0.2.1'], adsPorts: [65536] })).toThrow(
+      /ADS AMS ports/i,
     )
   })
 

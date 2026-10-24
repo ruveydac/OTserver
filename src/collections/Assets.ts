@@ -340,8 +340,11 @@ export const Assets: CollectionConfig = {
       hasMany: true,
       options: [
         { label: 'BACnet', value: 'bacnet' },
+        { label: 'Beckhoff ADS', value: 'beckhoff-ads' },
         { label: 'DNP3', value: 'dnp3' },
         { label: 'EtherNet/IP', value: 'ethernet-ip' },
+        { label: 'HTTP', value: 'http' },
+        { label: 'HTTPS', value: 'https' },
         { label: 'IEC 61850', value: 'iec61850' },
         { label: 'Modbus TCP', value: 'modbus-tcp' },
         { label: 'NetBIOS', value: 'netbios' },

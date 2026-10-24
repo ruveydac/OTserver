@@ -1,18 +1,18 @@
-FROM node:22-alpine AS deps
+FROM node:22.23.4-alpine AS deps
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY patches ./patches
 RUN corepack enable && pnpm install --frozen-lockfile
 
-FROM node:22-alpine AS builder
+FROM node:22.23.4-alpine AS builder
 WORKDIR /app
 ENV DATABASE_URL=mongodb://127.0.0.1/otserver
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN corepack enable && OTSERVER_SECRET=build-only-placeholder pnpm build
 
-FROM node:22-alpine AS runner
+FROM node:22.23.4-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0
 ENV NODE_OPTIONS=--max-old-space-size=2048

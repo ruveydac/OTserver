@@ -28,6 +28,19 @@ jobs:
       - run: pnpm check:generated
       - run: pnpm exec prettier --check .
       - run: pnpm lint
-      - run: pnpm test:coverage
+      - run: pnpm test:safety && bash tests/run-vitest.sh --coverage --reporter=junit --outputFile=test-report.junit.xml
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage/lcov.info
+          disable_search: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          files: ./test-report.junit.xml
+          disable_search: true
+          token: ${{ secrets.CODECOV_TOKEN }}
       - run: pnpm build
       - run: git diff --check
