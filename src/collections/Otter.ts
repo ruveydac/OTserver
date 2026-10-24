@@ -263,7 +263,6 @@ export const OtterScanners: CollectionConfig = {
     useAsTitle: 'name',
   },
   defaultSort: 'name',
-  disableBulkDelete: true,
   disableBulkEdit: true,
   fields: [
     { name: 'name', type: 'text', required: true, maxLength: 120 },
@@ -352,7 +351,6 @@ export const OtterProfiles: CollectionConfig = {
     useAsTitle: 'name',
   },
   defaultSort: 'name',
-  disableBulkDelete: true,
   disableBulkEdit: true,
   fields: [
     { name: 'name', type: 'text', required: true },
@@ -605,7 +603,6 @@ export const OtterSchedules: CollectionConfig = {
     useAsTitle: 'name',
   },
   defaultSort: 'nextRunAt',
-  disableBulkDelete: true,
   disableBulkEdit: true,
   fields: [
     { name: 'name', type: 'text', required: true },

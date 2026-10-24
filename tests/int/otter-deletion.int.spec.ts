@@ -93,29 +93,30 @@ describe('Otter deletion', () => {
       })
       historyRunID = historyRun.id
 
-      await expect(
-        payload.delete({
-          collection: 'otter-scanners',
-          id: scanner.id,
-          overrideAccess: false,
-          user,
-        }),
-      ).rejects.toMatchObject({ status: 409 })
-      await expect(
-        payload.delete({
-          collection: 'otter-profiles',
-          id: profile.id,
-          overrideAccess: false,
-          user,
-        }),
-      ).rejects.toMatchObject({ status: 409 })
-
-      await payload.delete({
-        collection: 'otter-schedules',
-        id: schedule.id,
+      const blockedScannerDelete = await payload.delete({
+        collection: 'otter-scanners',
+        where: { id: { equals: scanner.id } },
         overrideAccess: false,
         user,
       })
+      expect(blockedScannerDelete.docs).toHaveLength(0)
+      expect(blockedScannerDelete.errors).toEqual([expect.objectContaining({ id: scanner.id })])
+      const blockedProfileDelete = await payload.delete({
+        collection: 'otter-profiles',
+        where: { id: { equals: profile.id } },
+        overrideAccess: false,
+        user,
+      })
+      expect(blockedProfileDelete.docs).toHaveLength(0)
+      expect(blockedProfileDelete.errors).toEqual([expect.objectContaining({ id: profile.id })])
+
+      const deletedSchedule = await payload.delete({
+        collection: 'otter-schedules',
+        where: { id: { equals: schedule.id } },
+        overrideAccess: false,
+        user,
+      })
+      expect(deletedSchedule.docs).toHaveLength(1)
       expect(
         await payload.findByID({
           collection: 'otter-runs',
@@ -124,12 +125,13 @@ describe('Otter deletion', () => {
           overrideAccess: true,
         }),
       ).toMatchObject({ schedule: schedule.id })
-      await payload.delete({
+      const deletedProfile = await payload.delete({
         collection: 'otter-profiles',
-        id: profile.id,
+        where: { id: { equals: profile.id } },
         overrideAccess: false,
         user,
       })
+      expect(deletedProfile.docs).toHaveLength(1)
       expect(
         await payload.findByID({
           collection: 'otter-runs',
@@ -151,14 +153,16 @@ describe('Otter deletion', () => {
         user,
       })
       queuedRunID = queuedRun.id
-      await expect(
-        payload.delete({
-          collection: 'otter-scanners',
-          id: scanner.id,
-          overrideAccess: false,
-          user,
-        }),
-      ).rejects.toMatchObject({ status: 409 })
+      const blockedActiveScannerDelete = await payload.delete({
+        collection: 'otter-scanners',
+        where: { id: { equals: scanner.id } },
+        overrideAccess: false,
+        user,
+      })
+      expect(blockedActiveScannerDelete.docs).toHaveLength(0)
+      expect(blockedActiveScannerDelete.errors).toEqual([
+        expect.objectContaining({ id: scanner.id }),
+      ])
       await payload.update({
         collection: 'otter-runs',
         id: queuedRun.id,
@@ -166,12 +170,13 @@ describe('Otter deletion', () => {
         overrideAccess: true,
         user,
       })
-      await payload.delete({
+      const deletedScanner = await payload.delete({
         collection: 'otter-scanners',
-        id: scanner.id,
+        where: { id: { equals: scanner.id } },
         overrideAccess: false,
         user,
       })
+      expect(deletedScanner.docs).toHaveLength(1)
 
       expect(
         await payload.findByID({
