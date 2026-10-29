@@ -53,6 +53,7 @@ import {
   sanitizeCustomFieldValues,
 } from '../../src/collections/AssetFields'
 import {
+  AssetClasses,
   assignDefaultAssetClass,
   defaultAssetClasses,
   ensureAssetClass,
@@ -309,6 +310,49 @@ describe('collection safety hooks', () => {
     expect(await invoke(sanitizeCustomFieldValues, { data, req })).toEqual(data)
   })
 
+  it('validates custom asset-field assignment conditions', async () => {
+    const rules = AssetClasses.fields.find(
+      (field) => field.type === 'array' && field.name === 'assignmentRules',
+    )
+    if (!rules || rules.type !== 'array') throw new Error('Expected assignment rule fields.')
+    const conditions = rules.fields.find(
+      (field) => field.type === 'array' && field.name === 'conditions',
+    )
+    if (!conditions || conditions.type !== 'array') throw new Error('Expected rule conditions.')
+    const customField = conditions.fields.find(
+      (field) => field.type === 'relationship' && field.name === 'customField',
+    )
+    if (!customField || customField.type !== 'relationship')
+      throw new Error('Expected a custom asset-field relationship.')
+
+    const visibleWhen = customField.admin?.condition
+    if (typeof visibleWhen !== 'function')
+      throw new Error('Expected a custom-field visibility rule.')
+    expect(visibleWhen({}, { field: 'customField' } as never)).toBe(true)
+    expect(visibleWhen({}, { field: 'vendor' } as never)).toBe(false)
+
+    const validate = customField.validate
+    if (typeof validate !== 'function') throw new Error('Expected custom-field validation.')
+    const args = {
+      event: 'onChange',
+      relationTo: 'asset-fields',
+      req: {
+        payload: {
+          collections: { 'asset-fields': { customIDType: 'number' } },
+          db: { defaultIDType: 'number' },
+        },
+        t: (key: string) => key,
+      },
+      siblingData: { field: 'customField' },
+    }
+    await expect(validate(undefined, args as never)).resolves.toBe('Select a custom asset field.')
+    await expect(
+      validate(undefined, { ...args, siblingData: { field: 'vendor' } } as never),
+    ).resolves.toBe(true)
+    await expect(validate(123, args as never)).resolves.toBe(true)
+    await expect(validate('invalid', args as never)).resolves.toContain('invalid relationships')
+  })
+
   it('protects the Admin role and assigns the first user', async () => {
     const protect = UserRoles.hooks?.beforeChange?.[0]
     expect(await invoke(protect, { context: {}, data: { name: 'Editor' } })).toEqual({
@@ -421,7 +465,11 @@ describe('collection safety hooks', () => {
             ? {
                 docs: [
                   {
-                    assignmentRules: [{ manufacturerRegex: 'kept', modelRegex: 'kept' }],
+                    assignmentRules: [
+                      { conditions: [{ field: 'vendor', regex: 'already current' }] },
+                      { manufacturerRegex: 'partial legacy' },
+                      { manufacturerRegex: 'kept', modelRegex: 'kept' },
+                    ],
                     id: 'class-plc',
                     ruleSeedVersion: 0,
                   },
@@ -441,6 +489,8 @@ describe('collection safety hooks', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           assignmentRules: [
+            { conditions: [{ field: 'vendor', regex: 'already current' }] },
+            { manufacturerRegex: 'partial legacy' },
             {
               conditions: [
                 { field: 'vendor', regex: 'kept' },
@@ -448,6 +498,31 @@ describe('collection safety hooks', () => {
               ],
             },
           ],
+        }),
+        id: 'class-plc',
+      }),
+    )
+
+    const emptyRules = {
+      count: vi.fn().mockResolvedValue({ totalDocs: 1 }),
+      find: vi
+        .fn()
+        .mockImplementation(async ({ where }: { where?: { legacyKey?: { equals?: string } } }) =>
+          where?.legacyKey?.equals === 'plc'
+            ? { docs: [{ assignmentRules: [], id: 'class-plc', ruleSeedVersion: 0 }] }
+            : { docs: [] },
+        ),
+      update: vi.fn().mockResolvedValue({}),
+    }
+    await initializeAssetClasses(emptyRules as never)
+    expect(emptyRules.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          assignmentRules: expect.arrayContaining([
+            expect.objectContaining({
+              conditions: expect.arrayContaining([expect.objectContaining({ field: 'vendor' })]),
+            }),
+          ]),
         }),
         id: 'class-plc',
       }),
@@ -465,6 +540,39 @@ describe('collection safety hooks', () => {
     expect(
       await findMatchingAssetClass(ruleless as never, { vendor: 'Siemens', model: 'S7-1500' }),
     ).toBeUndefined()
+
+    const arrayClass = {
+      assignmentRules: [{ conditions: [{ field: 'vendor', regex: '^Acme$' }] }],
+      id: 'class-array',
+    }
+    const arrayPayload = {
+      find: vi.fn(({ collection }: { collection: string }) =>
+        Promise.resolve({ docs: collection === 'asset-fields' ? [] : [arrayClass] }),
+      ),
+    }
+    await expect(
+      findMatchingAssetClass(arrayPayload as never, { vendor: ['Acme', 42, null] }),
+    ).resolves.toBe(arrayClass)
+
+    const invalidClass = {
+      assignmentRules: [
+        {
+          conditions: [
+            { customField: 'missing-field', field: 'customField', regex: '.*' },
+            { field: '', regex: '.*' },
+          ],
+        },
+      ],
+      id: 'class-invalid',
+    }
+    const invalidPayload = {
+      find: vi.fn(({ collection }: { collection: string }) =>
+        Promise.resolve({ docs: collection === 'asset-fields' ? [] : [invalidClass] }),
+      ),
+    }
+    await expect(
+      findMatchingAssetClass(invalidPayload as never, { customFields: {}, vendor: 'Acme' }),
+    ).resolves.toBeUndefined()
 
     const created: unknown[] = []
     const empty = {
