@@ -199,8 +199,13 @@ describe('asset CRUD', () => {
       expect(seededPLC.assignmentRules).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            manufacturerRegex: expect.stringContaining('Siemens'),
-            modelRegex: expect.stringContaining('S7-'),
+            conditions: expect.arrayContaining([
+              expect.objectContaining({
+                field: 'vendor',
+                regex: expect.stringContaining('Siemens'),
+              }),
+              expect.objectContaining({ field: 'model', regex: expect.stringContaining('S7-') }),
+            ]),
           }),
         ]),
       )
@@ -220,7 +225,14 @@ describe('asset CRUD', () => {
         collection: 'asset-classes',
         data: {
           assignmentPriority: 1,
-          assignmentRules: [{ manufacturerRegex: '^Acme Controls$', modelRegex: '^Drive-.*$' }],
+          assignmentRules: [
+            {
+              conditions: [
+                { field: 'vendor', regex: '^Acme Controls$' },
+                { field: 'model', regex: '^Drive-.*$' },
+              ],
+            },
+          ],
           description: 'Variable-frequency drives',
           name: `Drive ${randomUUID()}`,
         },

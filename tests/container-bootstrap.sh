@@ -64,11 +64,13 @@ echo "Building the production image with $RUNTIME..."
   'const assert = require("node:assert/strict"); const heap = require("node:v8").getHeapStatistics().heap_size_limit / 1024 ** 2; assert.ok(heap >= 768 && heap < 900)'
 "$RUNTIME" network create "$NETWORK" >/dev/null
 "$RUNTIME" volume create "$UPLOADS" >/dev/null
+# shortcut: test-only per-thread TCMalloc fallback; remove when MongoDB supports the runner's kernel.
 "$RUNTIME" run --detach \
   --name "$MONGO" \
   --hostname mongo \
   --network "$NETWORK" \
   --network-alias mongo \
+  --env GLIBC_TUNABLES=glibc.pthread.rseq=1 \
   docker.io/library/mongo:8 \
   --replSet rs0 \
   --bind_ip_all >/dev/null

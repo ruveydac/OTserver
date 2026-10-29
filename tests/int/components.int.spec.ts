@@ -73,12 +73,21 @@ vi.mock('@payloadcms/ui', async () => {
       onChange,
       path,
       readOnly,
+      htmlAttributes,
     }: {
       value?: string
       onChange: React.ChangeEventHandler<HTMLInputElement>
       path: string
       readOnly?: boolean
-    }) => createElement('input', { value, onChange, disabled: readOnly, 'data-path': path }),
+      htmlAttributes?: React.InputHTMLAttributes<HTMLInputElement>
+    }) =>
+      createElement('input', {
+        ...htmlAttributes,
+        value,
+        onChange,
+        disabled: readOnly,
+        'data-path': path,
+      }),
     ConfirmationModal: ({
       body,
       onConfirm,
@@ -155,6 +164,7 @@ import AssetListInteractions from '../../src/components/AssetListInteractions'
 import CopyButton from '../../src/components/AssetView/CopyButton'
 import DensityToggle from '../../src/components/AssetView/DensityToggle'
 import CustomAssetFields from '../../src/components/CustomAssetFields'
+import AssetOwnerField from '../../src/components/AssetOwnerField'
 import ImportInstructions from '../../src/components/ImportInstructions'
 import SiteIDField from '../../src/components/SiteIDField'
 import OtterCredentialsField from '../../src/components/OtterCredentialsField'
@@ -322,6 +332,109 @@ describe('custom asset fields', () => {
     await render(createElement(CustomAssetFields, { field: {}, path: 'customFields' } as never))
     await act(async () => root.unmount())
     root = createRoot(container)
+    expect(signal?.aborted).toBe(true)
+  })
+})
+
+describe('asset owner suggestions', () => {
+  it('keeps the owner editable while recommending permitted registered users', async () => {
+    mocks.fieldValue = 'Operations team'
+    const fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        docs: [
+          { email: 'alice@example.test', name: 'Alice Example' },
+          { email: 'robot@example.test' },
+        ],
+      }),
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    await render(
+      createElement(AssetOwnerField, {
+        field: {
+          admin: { placeholder: 'Operations team or responsible person' },
+          label: 'Asset owner',
+        },
+        path: 'assetOwner',
+      } as never),
+    )
+
+    const input = container.querySelector<HTMLInputElement>('input')!
+    const list = container.querySelector('datalist')!
+    expect(input.getAttribute('list')).toBe(list.id)
+    expect(input.value).toBe('Operations team')
+    expect(list.querySelectorAll('option')).toHaveLength(2)
+    expect(list.querySelector('option')).toMatchObject({
+      value: 'Alice Example',
+      label: 'alice@example.test',
+    })
+    const requestURL = new URL(fetch.mock.calls[0]![0] as string, 'http://localhost')
+    expect(requestURL.pathname).toBe('/api/users')
+    expect(requestURL.searchParams.get('select[name]')).toBe('true')
+    expect(requestURL.searchParams.get('select[email]')).toBe('true')
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(
+        input,
+        'another free-text owner',
+      )
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect(mocks.setValue).toHaveBeenCalledWith('another free-text owner')
+  })
+
+  it('keeps free-text entry available when user suggestions cannot load', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }))
+    await render(
+      createElement(AssetOwnerField, {
+        field: { label: 'Asset owner' },
+        path: 'assetOwner',
+      } as never),
+    )
+
+    expect(container.querySelector('input')).not.toBeNull()
+    expect(container.textContent).toContain('User suggestions are unavailable')
+    expect(container.textContent).toContain('You can still enter free text')
+  })
+
+  it('shows an empty state and aborts the user lookup when unmounted', async () => {
+    mocks.fieldValue = ''
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ docs: [] }) }),
+    )
+    await render(
+      createElement(AssetOwnerField, {
+        field: { label: 'Asset owner' },
+        path: 'assetOwner',
+      } as never),
+    )
+    expect(container.textContent).toContain('No registered users are available as suggestions')
+    expect(container.querySelector('input')?.value).toBe('')
+
+    await act(async () => root.unmount())
+    root = createRoot(container)
+    let signal: AbortSignal | undefined
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_url: string, options: { signal: AbortSignal }) =>
+          new Promise((_, reject) => {
+            signal = options.signal
+            signal.addEventListener('abort', () =>
+              reject(new DOMException('Aborted', 'AbortError')),
+            )
+          }),
+      ),
+    )
+    await render(
+      createElement(AssetOwnerField, {
+        field: { label: 'Asset owner' },
+        path: 'assetOwner',
+      } as never),
+    )
+    await act(async () => root.unmount())
     expect(signal?.aborted).toBe(true)
   })
 })
