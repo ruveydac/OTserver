@@ -328,8 +328,8 @@ describe('collection safety hooks', () => {
     const visibleWhen = customField.admin?.condition
     if (typeof visibleWhen !== 'function')
       throw new Error('Expected a custom-field visibility rule.')
-    expect(visibleWhen({}, { field: 'customField' } as never)).toBe(true)
-    expect(visibleWhen({}, { field: 'vendor' } as never)).toBe(false)
+    expect(visibleWhen({}, { field: 'customField' } as never, {} as never)).toBe(true)
+    expect(visibleWhen({}, { field: 'vendor' } as never, {} as never)).toBe(false)
 
     const validate = customField.validate
     if (typeof validate !== 'function') throw new Error('Expected custom-field validation.')
@@ -349,8 +349,10 @@ describe('collection safety hooks', () => {
     await expect(
       validate(undefined, { ...args, siblingData: { field: 'vendor' } } as never),
     ).resolves.toBe(true)
-    await expect(validate(123, args as never)).resolves.toBe(true)
-    await expect(validate('invalid', args as never)).resolves.toContain('invalid relationships')
+    await expect(validate(123 as never, args as never)).resolves.toBe(true)
+    await expect(validate('invalid' as never, args as never)).resolves.toContain(
+      'invalid relationships',
+    )
   })
 
   it('protects the Admin role and assigns the first user', async () => {
