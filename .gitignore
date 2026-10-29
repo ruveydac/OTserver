@@ -26,3 +26,4 @@ otserver-scan.json
 *.otserver.json
 __pycache__/
 coverage/
+.opencode

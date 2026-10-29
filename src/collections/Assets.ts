@@ -211,7 +211,13 @@ export const Assets: CollectionConfig = {
         ...userSuppliedAssetFields.map(({ label, name, placeholder }) => ({
           name,
           type: 'text' as const,
-          admin: { placeholder, width: '33.33%' },
+          admin: {
+            placeholder,
+            width: '33.33%',
+            ...(name === 'assetOwner'
+              ? { components: { Field: '@/components/AssetOwnerField' } }
+              : {}),
+          },
           label,
         })),
       ],

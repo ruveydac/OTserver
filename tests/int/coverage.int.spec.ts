@@ -440,7 +440,14 @@ describe('collection safety hooks', () => {
     expect(updates).toContainEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          assignmentRules: [{ manufacturerRegex: 'kept', modelRegex: 'kept' }],
+          assignmentRules: [
+            {
+              conditions: [
+                { field: 'vendor', regex: 'kept' },
+                { field: 'model', regex: 'kept' },
+              ],
+            },
+          ],
         }),
         id: 'class-plc',
       }),
@@ -455,7 +462,9 @@ describe('collection safety hooks', () => {
     )
 
     const ruleless = { find: vi.fn().mockResolvedValue({ docs: [{ id: 'class-1', name: 'PLC' }] }) }
-    expect(await findMatchingAssetClass(ruleless as never, 'Siemens', 'S7-1500')).toBeUndefined()
+    expect(
+      await findMatchingAssetClass(ruleless as never, { vendor: 'Siemens', model: 'S7-1500' }),
+    ).toBeUndefined()
 
     const created: unknown[] = []
     const empty = {

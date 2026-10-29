@@ -545,7 +545,12 @@ export const OtterProfiles: CollectionConfig = {
         name,
         label,
         type: 'text' as const,
-        admin: { placeholder },
+        admin: {
+          placeholder,
+          ...(name === 'assetOwner'
+            ? { components: { Field: '@/components/AssetOwnerField' } }
+            : {}),
+        },
       })),
     },
     {

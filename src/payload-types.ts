@@ -252,17 +252,54 @@ export interface AssetClass {
    */
   assignmentPriority: number;
   /**
-   * Both case-insensitive regular expressions must match. Rules are evaluated in their displayed order.
+   * Every condition in a rule must match. Rules are checked in order, and the first matching class at the highest priority is assigned.
    */
   assignmentRules?:
     | {
-        manufacturerRegex: string;
-        modelRegex: string;
+        conditions?:
+          | {
+              field:
+                | 'assetOwner'
+                | 'catalogNumber'
+                | 'description'
+                | 'firmwareVersion'
+                | 'hardwareVersion'
+                | 'location'
+                | 'model'
+                | 'name'
+                | 'operatingSystem'
+                | 'physicalKind'
+                | 'protocols'
+                | 'serialNumber'
+                | 'vendor'
+                | 'customField';
+              customField?: (string | null) | AssetField;
+              regex: string;
+              id?: string | null;
+            }[]
+          | null;
         id?: string | null;
       }[]
     | null;
   legacyKey?: string | null;
   ruleSeedVersion?: number | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Define optional fields that appear on every asset and import.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "asset-fields".
+ */
+export interface AssetField {
+  id: string;
+  label: string;
+  /**
+   * The type is fixed after this field is created.
+   */
+  type: 'text' | 'textarea' | 'number' | 'checkbox' | 'date';
+  description?: string | null;
   updatedAt: string;
   createdAt: string;
 }
@@ -843,23 +880,6 @@ export interface OtterSchedule {
   enabled?: boolean | null;
   nextRunAt?: string | null;
   lastRunAt?: string | null;
-  updatedAt: string;
-  createdAt: string;
-}
-/**
- * Define optional fields that appear on every asset and import.
- *
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "asset-fields".
- */
-export interface AssetField {
-  id: string;
-  label: string;
-  /**
-   * The type is fixed after this field is created.
-   */
-  type: 'text' | 'textarea' | 'number' | 'checkbox' | 'date';
-  description?: string | null;
   updatedAt: string;
   createdAt: string;
 }
@@ -1493,8 +1513,14 @@ export interface AssetClassesSelect<T extends boolean = true> {
   assignmentRules?:
     | T
     | {
-        manufacturerRegex?: T;
-        modelRegex?: T;
+        conditions?:
+          | T
+          | {
+              field?: T;
+              customField?: T;
+              regex?: T;
+              id?: T;
+            };
         id?: T;
       };
   legacyKey?: T;

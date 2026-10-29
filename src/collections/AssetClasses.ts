@@ -7,14 +7,37 @@ import {
   type Payload,
   type PayloadRequest,
 } from 'payload'
+import { relationship as validateRelationship } from 'payload/shared'
 import { isDeepStrictEqual } from 'node:util'
 
 import { adminOnly, relationshipID } from '../access/authorization'
 import defaultRuleSeed from '../data/default-asset-class-rules.json'
 
+const assignmentFields = {
+  assetOwner: 'Asset owner',
+  catalogNumber: 'Catalog / part number',
+  description: 'Description',
+  firmwareVersion: 'Firmware version',
+  hardwareVersion: 'Hardware version',
+  location: 'Physical location',
+  model: 'Model',
+  name: 'Name',
+  operatingSystem: 'Operating system',
+  physicalKind: 'Physical kind',
+  protocols: 'Protocols',
+  serialNumber: 'Serial number',
+  vendor: 'Vendor / manufacturer',
+} as const
+
+type AssignmentCondition = {
+  field: keyof typeof assignmentFields | 'customField'
+  customField?: string
+  regex: string
+}
 type AssignmentRule = {
-  manufacturerRegex: string
-  modelRegex: string
+  conditions?: AssignmentCondition[]
+  manufacturerRegex?: string
+  modelRegex?: string
 }
 
 type RuleSeed = {
@@ -53,17 +76,13 @@ export const validateAssignmentRegex = (value: null | string | undefined): strin
 
 export const findMatchingAssetClass = async (
   payload: Payload,
-  manufacturer: unknown,
-  model: unknown,
+  asset: Record<string, unknown>,
   req?: PayloadRequest,
 ) => {
-  if (typeof manufacturer !== 'string' || typeof model !== 'string') return undefined
-  if (!manufacturer.trim() || !model.trim()) return undefined
-
   type Matcher = {
     assetClass: Awaited<ReturnType<Payload['find']>>['docs'][number]
-    manufacturer: RegExp
-    model: RegExp
+    conditions: Array<{ field: string; regex: RegExp }>
+    legacy?: { manufacturer: RegExp; model: RegExp }
   }
   let matchers = req?.context.assetClassRuleMatchers as Matcher[] | undefined
   if (!matchers) {
@@ -75,21 +94,72 @@ export const findMatchingAssetClass = async (
       req,
       sort: ['assignmentPriority', 'name'],
     })
+    const definitions = await payload.find({
+      collection: 'asset-fields',
+      depth: 0,
+      overrideAccess: true,
+      pagination: false,
+      req,
+      where: { type: { in: ['text', 'textarea'] } },
+    })
+    const customFieldIDs = new Set(definitions.docs.map(({ id }) => String(id)))
     matchers = classes.docs.flatMap((assetClass) =>
-      (assetClass.assignmentRules || []).map((rule) => ({
+      ((assetClass.assignmentRules || []) as unknown as AssignmentRule[]).map((rule) => ({
         assetClass,
-        manufacturer: new RegExp(rule.manufacturerRegex, 'i'),
-        model: new RegExp(rule.modelRegex, 'i'),
+        conditions: (rule.conditions || []).map(({ customField, field, regex }) => {
+          const customID = relationshipID(customField)
+          if (customID) {
+            return {
+              field: customFieldIDs.has(String(customID))
+                ? `customFields.${customID}`
+                : '\u0000invalid',
+              regex: new RegExp(regex, 'i'),
+            }
+          }
+          return {
+            field: field && field in assignmentFields ? field : '\u0000invalid',
+            regex: new RegExp(regex, 'i'),
+          }
+        }),
+        ...(!rule.conditions?.length && rule.manufacturerRegex && rule.modelRegex
+          ? {
+              legacy: {
+                manufacturer: new RegExp(rule.manufacturerRegex, 'i'),
+                model: new RegExp(rule.modelRegex, 'i'),
+              },
+            }
+          : {}),
       })),
     )
     if (req) req.context.assetClassRuleMatchers = matchers
   }
 
-  const manufacturerValue = manufacturer.slice(0, MAX_MATCH_VALUE_LENGTH)
-  const modelValue = model.slice(0, MAX_MATCH_VALUE_LENGTH)
-  return matchers.find(
-    (matcher) => matcher.manufacturer.test(manufacturerValue) && matcher.model.test(modelValue),
-  )?.assetClass
+  const fieldValue = (field: string): string[] => {
+    const value = field.startsWith('customFields.')
+      ? (asset.customFields as Record<string, unknown> | undefined)?.[field.slice(13)]
+      : asset[field]
+    return (Array.isArray(value) ? value : [value])
+      .filter(
+        (item): item is string | number => typeof item === 'string' || typeof item === 'number',
+      )
+      .map((item) => String(item).slice(0, MAX_MATCH_VALUE_LENGTH))
+      .filter((item) => item.trim().length > 0)
+  }
+  return matchers.find((matcher) => {
+    const legacy = matcher.legacy
+    if (legacy) {
+      return (
+        fieldValue('vendor').some((value) => legacy.manufacturer.test(value)) &&
+        fieldValue('model').some((value) => legacy.model.test(value))
+      )
+    }
+    return (
+      matcher.conditions.length > 0 &&
+      matcher.conditions.every(({ field, regex }) =>
+        fieldValue(field).some((value) => regex.test(value)),
+      )
+    )
+  })?.assetClass
 }
 
 export const defaultAssetClasses = [
@@ -160,8 +230,17 @@ export const initializeAssetClasses = async (payload: Payload) => {
       data: {
         assignmentPriority: seededClass.priority,
         assignmentRules: assetClass.assignmentRules?.length
-          ? assetClass.assignmentRules
-          : seededClass.rules,
+          ? ((assetClass.assignmentRules as unknown as AssignmentRule[]).map((rule) =>
+              rule.conditions?.length || !rule.manufacturerRegex || !rule.modelRegex
+                ? rule
+                : {
+                    conditions: [
+                      { field: 'vendor', regex: rule.manufacturerRegex },
+                      { field: 'model', regex: rule.modelRegex },
+                    ],
+                  },
+            ) as never)
+          : (seededClass.rules as never),
         ruleSeedVersion: ruleSeed.version,
       },
       id: assetClass.id,
@@ -186,8 +265,7 @@ export const assignDefaultAssetClass: CollectionBeforeValidateHook = async ({
     !Array.isArray(originalDoc.fieldProvenance)
       ? (originalDoc.fieldProvenance as Record<string, { quality?: string }>)
       : {}
-  const manufacturer = Object.hasOwn(nextData, 'vendor') ? nextData.vendor : originalDoc?.vendor
-  const model = Object.hasOwn(nextData, 'model') ? nextData.model : originalDoc?.model
+  const assignmentData = { ...originalDoc, ...nextData }
   const withProvenance = (
     assetClass: number | string,
     origin: { quality: 'low' | 'medium'; source: 'asset-class-rule' | 'default' },
@@ -206,7 +284,7 @@ export const assignDefaultAssetClass: CollectionBeforeValidateHook = async ({
   }
 
   if (!existingClass || provenance.assetClass?.quality !== 'human') {
-    const matchedClass = await findMatchingAssetClass(req.payload, manufacturer, model, req)
+    const matchedClass = await findMatchingAssetClass(req.payload, assignmentData, req)
     if (matchedClass && String(matchedClass.id) !== String(existingClass || '')) {
       context.assetClassRuleAssignment = true
       req.context.assetClassRuleAssignment = true
@@ -244,7 +322,24 @@ export const reapplyAssetClassRules = async (req: PayloadRequest) => {
       overrideAccess: true,
       page,
       req,
-      select: { assetClass: true, fieldProvenance: true, model: true, vendor: true },
+      select: {
+        assetClass: true,
+        assetOwner: true,
+        catalogNumber: true,
+        customFields: true,
+        description: true,
+        fieldProvenance: true,
+        firmwareVersion: true,
+        hardwareVersion: true,
+        location: true,
+        model: true,
+        name: true,
+        operatingSystem: true,
+        physicalKind: true,
+        protocols: true,
+        serialNumber: true,
+        vendor: true,
+      },
       sort: 'id',
     })
     scanned += assets.docs.length
@@ -260,7 +355,7 @@ export const reapplyAssetClassRules = async (req: PayloadRequest) => {
         { quality?: unknown; source?: unknown } | undefined
       if (currentOrigin?.quality === 'human') continue
 
-      const matched = await findMatchingAssetClass(req.payload, asset.vendor, asset.model, req)
+      const matched = await findMatchingAssetClass(req.payload, asset, req)
       const target = matched || fallback
       const origin = matched
         ? { quality: 'medium' as const, source: 'asset-class-rule' as const }
@@ -382,26 +477,51 @@ export const AssetClasses: CollectionConfig = {
       type: 'array',
       admin: {
         description:
-          'Both case-insensitive regular expressions must match. Rules are evaluated in their displayed order.',
+          'Every condition in a rule must match. Rules are checked in order, and the first matching class at the highest priority is assigned.',
       },
       fields: [
         {
-          name: 'manufacturerRegex',
-          type: 'text',
-          admin: { placeholder: 'Siemens(?: AG)?' },
-          label: 'Manufacturer regex',
-          maxLength: MAX_REGEX_LENGTH,
-          required: true,
-          validate: validateAssignmentRegex,
-        },
-        {
-          name: 'modelRegex',
-          type: 'text',
-          admin: { placeholder: '.*S7-1500.*' },
-          label: 'Model regex',
-          maxLength: MAX_REGEX_LENGTH,
-          required: true,
-          validate: validateAssignmentRegex,
+          name: 'conditions',
+          type: 'array',
+          minRows: 1,
+          labels: { plural: 'Conditions', singular: 'Condition' },
+          fields: [
+            {
+              name: 'field',
+              type: 'select',
+              options: [
+                ...Object.entries(assignmentFields).map(([value, label]) => ({ label, value })),
+                { label: 'Custom field', value: 'customField' },
+              ],
+              required: true,
+            },
+            {
+              name: 'customField',
+              type: 'relationship',
+              relationTo: 'asset-fields',
+              filterOptions: { type: { in: ['text', 'textarea'] } },
+              admin: { condition: (_, siblingData) => siblingData?.field === 'customField' },
+              validate: async (
+                value: unknown,
+                args: Parameters<typeof validateRelationship>[1],
+              ) => {
+                const valid = await validateRelationship(value as never, args)
+                if (valid !== true) return valid
+                return (args.siblingData as { field?: string } | undefined)?.field ===
+                  'customField' && !value
+                  ? 'Select a custom asset field.'
+                  : true
+              },
+            },
+            {
+              name: 'regex',
+              type: 'text',
+              admin: { placeholder: '.*' },
+              maxLength: MAX_REGEX_LENGTH,
+              required: true,
+              validate: validateAssignmentRegex,
+            },
+          ],
         },
       ],
       label: 'Automatic assignment rules',

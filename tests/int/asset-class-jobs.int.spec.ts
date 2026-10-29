@@ -152,7 +152,14 @@ describe('asset-class rule jobs', () => {
         collection: 'asset-classes',
         id: assetClass.id,
         data: {
-          assignmentRules: [{ manufacturerRegex: '^Acme Controls$', modelRegex: '^Drive-.*$' }],
+          assignmentRules: [
+            {
+              conditions: [
+                { field: 'vendor', regex: '^Acme Controls$' },
+                { field: 'model', regex: '^Drive-.*$' },
+              ],
+            },
+          ],
         },
       })
       const firstJob = await queuedReapply(payload, assetClass.id)
@@ -182,7 +189,14 @@ describe('asset-class rule jobs', () => {
         collection: 'asset-classes',
         id: assetClass.id,
         data: {
-          assignmentRules: [{ manufacturerRegex: '^Other Vendor$', modelRegex: '^Other Model$' }],
+          assignmentRules: [
+            {
+              conditions: [
+                { field: 'vendor', regex: '^Other Vendor$' },
+                { field: 'model', regex: '^Other Model$' },
+              ],
+            },
+          ],
         },
       })
       const secondJob = await queuedReapply(payload, assetClass.id)

@@ -2,6 +2,7 @@ import { default as default_1bd814bbeb1f2e089fcf3d8859fcb6f3 } from '@/component
 import { default as default_e4eda90535596a882064b1deac0ab4f0 } from '@/components/SiteTreeView'
 import { default as default_2e07829097744f37849fa311510e1aee } from '@/components/AssetClassAssetsCell'
 import { default as default_73aa8a55bcc57156906af3c0f8537645 } from '@/components/AssetClassListView'
+import { default as default_3f76011ea90f707ace06549950e91439 } from '@/components/AssetOwnerField'
 import { default as default_f020c52e6ea8cb54738a31fe010f551d } from '@/components/CustomAssetFields'
 import { default as default_8c78f84184d3f470067b66c225a03900 } from '@/components/AssetListInteractions'
 import { default as default_9457ad88e2d5b6ca2f12d87d9c9f8443 } from '@/components/AssetView'
@@ -31,6 +32,7 @@ export const importMap = {
   '@/components/SiteTreeView#default': default_e4eda90535596a882064b1deac0ab4f0,
   '@/components/AssetClassAssetsCell#default': default_2e07829097744f37849fa311510e1aee,
   '@/components/AssetClassListView#default': default_73aa8a55bcc57156906af3c0f8537645,
+  '@/components/AssetOwnerField#default': default_3f76011ea90f707ace06549950e91439,
   '@/components/CustomAssetFields#default': default_f020c52e6ea8cb54738a31fe010f551d,
   '@/components/AssetListInteractions#default': default_8c78f84184d3f470067b66c225a03900,
   '@/components/AssetView#default': default_9457ad88e2d5b6ca2f12d87d9c9f8443,

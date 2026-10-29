@@ -91,7 +91,7 @@ describe('asset network fields', () => {
     expect(renderToStaticMarkup(createElement(() => emptyView))).toContain('Payload list')
   })
 
-  it('matches safe manufacturer and model regular expressions together', async () => {
+  it('matches each rule as AND conditions and classes as priority-ordered alternatives', async () => {
     expect(validateAssignmentRegex('Siemens(?: AG)?')).toBe(true)
     expect(validateAssignmentRegex('.*S7-1500.*')).toBe(true)
     expect(validateAssignmentRegex('(')).toBeTypeOf('string')
@@ -99,21 +99,66 @@ describe('asset network fields', () => {
     expect(validateAssignmentRegex('a'.repeat(257))).toContain('256')
 
     const plc = {
-      assignmentRules: [{ manufacturerRegex: 'Siemens', modelRegex: 'S7-1500.*' }],
+      assignmentPriority: 10,
+      assignmentRules: [
+        {
+          conditions: [
+            { field: 'vendor', regex: 'Siemens' },
+            { field: 'model', regex: 'S7-1500.*' },
+            { field: 'customField', customField: 'field-1', regex: '^production$' },
+          ],
+        },
+        { conditions: [{ field: 'vendor', regex: '^Acme$' }] },
+      ],
       id: 'plc-class',
       name: 'PLC',
     }
-    const payload = { find: vi.fn().mockResolvedValue({ docs: [plc] }) }
+    const payload = {
+      find: vi.fn().mockImplementation(({ collection }: { collection: string }) =>
+        Promise.resolve({
+          docs: collection === 'asset-fields' ? [{ id: 'field-1', type: 'text' }] : [plc],
+        }),
+      ),
+    }
     const req = { context: {} }
 
     await expect(
-      findMatchingAssetClass(payload as never, 'Siemens AG', 'SIMATIC S7-1500 CPU', req as never),
+      findMatchingAssetClass(
+        payload as never,
+        {
+          customFields: { 'field-1': 'Production' },
+          model: 'SIMATIC S7-1500 CPU',
+          vendor: 'Siemens AG',
+        },
+        req as never,
+      ),
     ).resolves.toBe(plc)
     await expect(
-      findMatchingAssetClass(payload as never, 'Siemens AG', 'Comfort Panel', req as never),
+      findMatchingAssetClass(
+        payload as never,
+        {
+          customFields: { 'field-1': 'Production' },
+          model: 'Comfort Panel',
+          vendor: 'Siemens AG',
+        },
+        req as never,
+      ),
     ).resolves.toBeUndefined()
-    await expect(findMatchingAssetClass(payload as never, '', 'S7-1500')).resolves.toBeUndefined()
-    expect(payload.find).toHaveBeenCalledTimes(1)
+    await expect(
+      findMatchingAssetClass(payload as never, { vendor: 'Acme' }, req as never),
+    ).resolves.toBe(plc)
+    await expect(
+      findMatchingAssetClass(
+        payload as never,
+        {
+          customFields: { 'field-1': 'Testing' },
+          model: 'S7-1500',
+          vendor: 'Siemens',
+        },
+        req as never,
+      ),
+    ).resolves.toBeUndefined()
+    expect(payload.find).toHaveBeenCalledTimes(2)
   })
 
   it('validates IP addresses and normalizes MAC addresses', () => {
