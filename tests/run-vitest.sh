@@ -43,7 +43,9 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+# shortcut: test-only per-thread TCMalloc fallback; remove when MongoDB supports the runner's kernel.
 CONTAINER_ID=$("$RUNTIME" run --detach --name "$CONTAINER" \
+  --env GLIBC_TUNABLES=glibc.pthread.rseq=1 \
   --publish 127.0.0.1::27017 docker.io/library/mongo:8 --replSet rs0 --bind_ip_all)
 wait_for_mongo() {
   local expression=$1 running details
