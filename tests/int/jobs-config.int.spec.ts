@@ -36,7 +36,11 @@ type Handler = (args: {
 }) => Promise<unknown>
 
 const request = () => ({
-  payload: { logger: { info: vi.fn(), warn: vi.fn() } },
+  context: {},
+  payload: {
+    find: vi.fn().mockResolvedValue({ docs: [] }),
+    logger: { info: vi.fn(), warn: vi.fn() },
+  },
 })
 
 const handler = (index: number) =>
@@ -187,6 +191,15 @@ describe('Payload job configuration', () => {
 
   it('reapplies asset classes only on the maintenance worker', async () => {
     const req = request()
+    mocks.worker = { queue: 'maintenance' }
+    await expect(
+      handler(2)({
+        input: { assetClassID: 'class-1', version: 1, catalogRevision: 'different-snapshot' },
+        job: { id: 'old-catalog' },
+        req,
+      }),
+    ).rejects.toThrow('worker metadata catalog differs')
+    mocks.worker = undefined
     await expect(
       handler(2)({
         input: { assetClassID: 'class-1', version: 1 },

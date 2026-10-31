@@ -16,6 +16,11 @@ export type ImportedObservation = {
 
 export type ImportedAsset = {
   catalogNumber?: string
+  partNumber?: string
+  orderNumber?: string
+  productFamily?: string
+  softwareVersion?: string
+  versionComponent?: string
   description?: string
   gatewayAddress?: string
   ipAddress?: string

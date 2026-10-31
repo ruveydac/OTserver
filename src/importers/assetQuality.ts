@@ -98,6 +98,7 @@ export const trackHumanAssetChanges = (
 ) => {
   const next = { ...data }
   delete next.fieldProvenance
+  delete next.metadataMatch
 
   const fieldProvenance = provenance(originalDoc?.fieldProvenance)
   let changed = false

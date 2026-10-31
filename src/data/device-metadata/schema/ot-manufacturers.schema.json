@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://otserver.org/schemas/ot-manufacturers.schema.json",
+  "title": "OT Manufacturer Registry",
+  "description": "Canonical manufacturers and nested matching rules. Rule evaluation is defined by the application, not JSON Schema.",
+  "type": "array",
+  "minItems": 1,
+  "items": {
+    "$ref": "#/$defs/manufacturer"
+  },
+  "$defs": {
+    "manufacturer": {
+      "type": "object",
+      "required": ["id", "data", "rules"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "UUID version 7",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+        },
+        "data": {
+          "$ref": "#/$defs/manufacturerData"
+        },
+        "rules": {
+          "$ref": "#/$defs/ruleGroup"
+        }
+      },
+      "additionalProperties": false
+    },
+    "manufacturerData": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "website": {
+          "type": "string",
+          "format": "uri"
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "description": {
+          "type": "string"
+        },
+        "rank": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "parentCompany": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hqCountry": {
+          "type": "string",
+          "minLength": 1
+        },
+        "primaryCategory": {
+          "type": "string",
+          "minLength": 1
+        },
+        "secondaryCategories": {
+          "$ref": "#/$defs/stringList"
+        },
+        "productTypes": {
+          "$ref": "#/$defs/stringList"
+        },
+        "keyProductFamilies": {
+          "$ref": "#/$defs/stringList"
+        },
+        "industrialProtocols": {
+          "$ref": "#/$defs/stringList"
+        },
+        "targetIndustries": {
+          "$ref": "#/$defs/stringList"
+        },
+        "geographicPresence": {
+          "type": "string",
+          "minLength": 1
+        },
+        "marketPresenceEvidence": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rankingScore": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "confidence": {
+          "type": "string",
+          "enum": ["High", "Medium", "Low"]
+        },
+        "evidenceUrls": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "uniqueItems": true
+        },
+        "lastVerified": {
+          "type": "string",
+          "format": "date"
+        }
+      },
+      "additionalProperties": false
+    },
+    "stringList": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "ruleGroup": {
+      "description": "Exactly one nonempty AND or OR group; child rules may be groups or conditions.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["any"],
+          "properties": {
+            "any": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/rule"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["all"],
+          "properties": {
+            "all": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/rule"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "rule": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/condition"
+        },
+        {
+          "$ref": "#/$defs/ruleGroup"
+        }
+      ]
+    },
+    "condition": {
+      "type": "object",
+      "required": ["field", "operator", "value"],
+      "properties": {
+        "field": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Input record field, e.g. manufacturer, vendor, product, or protocol."
+        },
+        "operator": {
+          "type": "string",
+          "enum": ["equals", "contains", "starts_with", "ends_with", "regex"]
+        },
+        "value": {
+          "type": "string"
+        },
+        "caseSensitive": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

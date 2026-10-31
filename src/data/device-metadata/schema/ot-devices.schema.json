@@ -1,0 +1,478 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://otserver.org/schemas/ot-devices.schema.json",
+  "title": "OT Device Catalog",
+  "description": "Product-level metadata for enriching OT asset inventories. Descriptive metadata must be English; exact vendor identifiers, protocol names, URLs, source locators, and verbatim evidence quotations retain source spelling and language. Each entry describes a device family, model, hardware variant, or specific version, not an individual installed asset. Installed versions, IP addresses, locations, and patch installation state belong in the asset inventory. manufacturer_id must resolve to the separate manufacturer registry. device_type_id must resolve to ot-device-types.schema.json and agree with data.device_type. The application checks references, identity uniqueness, and matching behavior; JSON Schema validates the document structure. Omitted metadata means unknown, not unsupported or not applicable.",
+  "type": "array",
+  "items": {
+    "$ref": "#/$defs/device"
+  },
+  "$defs": {
+    "uuidv7": {
+      "type": "string",
+      "description": "Persistent UUID version 7. Generate once and retain when metadata for the same identity is refreshed.",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+    },
+    "device": {
+      "type": "object",
+      "description": "One catalog identity with enrichment data and rules for recognizing it in an observed asset record. Several entries may match an asset, for example a general model entry and a version-specific entry; array order is not precedence.",
+      "required": ["id", "manufacturer_id", "device_type_id", "data", "rules"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7",
+          "description": "Unique catalog-entry identifier, not the identifier or serial number of an installed asset. Preserve it when updating metadata without changing the product/version identity."
+        },
+        "manufacturer_id": {
+          "$ref": "#/$defs/uuidv7",
+          "description": "Foreign key to the id of the canonical manufacturer in data/ot-manufacturers.json. This reference is authoritative even when data.manufacturer uses a brand or alias."
+        },
+        "device_type_id": {
+          "$ref": "#/$defs/uuidv7",
+          "description": "Stable group ID from ot-device-types.schema.json. Must agree with data.device_type. Product classification is independent of installed physical identity. The checker validates the reference."
+        },
+        "data": {
+          "$ref": "#/$defs/deviceData",
+          "description": "Product facts to attach to matching assets. Availability of a release or patch does not establish that it is installed on an asset."
+        },
+        "rules": {
+          "$ref": "#/$defs/ruleGroup",
+          "description": "Recognition criteria evaluated against observed asset fields after resolving the manufacturer and restricting candidates by manufacturer_id. Generated rules contain only identity qualifiers; manufacturer-name rules belong in the manufacturer registry. These rules do not evaluate update eligibility."
+        }
+      },
+      "additionalProperties": false
+    },
+    "deviceData": {
+      "type": "object",
+      "description": "Metadata within the scope of this entry's product family, model, part/order number, hardware revision, and optional version. At least one of product_family, model, part_number, or order_number is required. Omit unknown fields rather than using empty strings or null. Fields ending in _json contain actual JSON arrays or objects, not encoded JSON strings.",
+      "required": ["device_type"],
+      "anyOf": [
+        {
+          "required": ["product_family"]
+        },
+        {
+          "required": ["model"]
+        },
+        {
+          "required": ["part_number"]
+        },
+        {
+          "required": ["order_number"]
+        }
+      ],
+      "properties": {
+        "manufacturer": {
+          "type": "string",
+          "description": "Manufacturer or brand name as displayed by the source. It must resolve to the same registry entry as manufacturer_id; it is not a separate manufacturer identity."
+        },
+        "product_family": {
+          "$ref": "#/$defs/nonempty",
+          "description": "Vendor product line containing related models, for example SIMATIC S7-1500. A family-level entry does not imply that every model has identical capabilities or update compatibility."
+        },
+        "model": {
+          "$ref": "#/$defs/nonempty",
+          "description": "Vendor's model designation for the product, not an asset hostname, site label, or serial number. Preserve meaningful suffixes that distinguish variants."
+        },
+        "part_number": {
+          "$ref": "#/$defs/nonempty",
+          "description": "Vendor's part or material identifier for a product or component. Preserve leading zeros, punctuation, and variant suffixes; do not treat it as a number."
+        },
+        "order_number": {
+          "$ref": "#/$defs/nonempty",
+          "description": "Vendor's ordering code or SKU for a purchasable configuration. It may differ from the model or part number and may identify options or regional variants."
+        },
+        "hardware_revision": {
+          "$ref": "#/$defs/nonempty",
+          "description": "Physical hardware revision to which this entry applies, as labeled by the vendor. This is distinct from firmware version and may constrain compatible updates. Omission means unspecified, not all revisions confirmed compatible."
+        },
+        "device_type": {
+          "$ref": "https://otserver.org/schemas/ot-device-types.schema.json#/$defs/deviceTypeName",
+          "description": "Canonical English group name from ot-device-types.schema.json, agreeing with device_type_id. Select the primary documented product purpose, not a deployment role. Use Other when unknown. Evidence retains the original source wording, which need not equal this normalized label."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable product overview covering purpose, main capabilities, and distinguishing characteristics. Describe documented product capabilities, not an assumed deployment or site-specific process."
+        },
+        "device_function": {
+          "$ref": "#/$defs/nonempty",
+          "description": "Operational function the product is designed to perform, such as executing control logic, collecting remote telemetry, regulating motor speed, or providing operator visualization. Do not infer the actual role of an installed asset from product capability alone."
+        },
+        "protocols_json": {
+          "type": "array",
+          "description": "Documented communication protocols supported within this entry's hardware/version scope, such as Modbus TCP, PROFINET, or OPC UA. Capability does not mean a protocol is enabled or observed on an asset; absence of an item does not prove lack of support.",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/nonempty"
+          },
+          "uniqueItems": true
+        },
+        "serial_numbers_json": {
+          "type": "array",
+          "description": "Vendor-documented serial numbers that identify units covered by this catalog entry, for example an affected production batch. Preserve leading zeros. This is an applicability list, not an inventory of discovered assets; it does not automatically add matching rules.",
+          "items": {
+            "$ref": "#/$defs/nonempty"
+          },
+          "uniqueItems": true
+        },
+        "serial_ranges_json": {
+          "type": "array",
+          "description": "Vendor-documented inclusive serial-number ranges covered by this entry. Preserve the vendor's string representation. Serial ordering is vendor-specific; the application must interpret it rather than assuming numeric or lexical order. These ranges do not automatically add matching rules.",
+          "items": {
+            "type": "object",
+            "required": ["start", "end"],
+            "properties": {
+              "start": {
+                "$ref": "#/$defs/nonempty",
+                "description": "First included serial number under the vendor's numbering scheme."
+              },
+              "end": {
+                "$ref": "#/$defs/nonempty",
+                "description": "Last included serial number under the same numbering scheme as start."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "serial_formats_json": {
+          "type": "array",
+          "description": "Regular expressions describing serial-number formats associated with this product. The repository checker uses JavaScript regex syntax; anchor with ^ and $ when the entire serial must match. A format match alone does not establish manufacturer, model, or update applicability, and these patterns do not automatically add matching rules.",
+          "items": {
+            "$ref": "#/$defs/nonempty"
+          }
+        },
+        "version_component": {
+          "$ref": "#/$defs/nonempty",
+          "description": "Named component qualified by this entry's version, such as CPU runtime, communications module, or engineering software. Different components can have independent version sequences."
+        },
+        "version_kind": {
+          "$ref": "#/$defs/nonempty",
+          "description": "Type of version identifier supplied by the source, for example firmware, software, bootloader, or operating_system. Preserve source terminology; this field is not an enumerated lifecycle status."
+        },
+        "version": {
+          "$ref": "#/$defs/nonempty",
+          "description": "Source version string that qualifies this catalog identity. It is not necessarily the latest or recommended version, and is not proof of an asset's installed version. Preserve vendor formatting; do not assume Semantic Versioning or numeric ordering. Existing source expressions such as V21 or higher are literal text to the matching engine, not executable version ranges. Use releases_json for available releases and patches."
+        },
+        "version_release_date": {
+          "type": "string",
+          "format": "date",
+          "description": "Publication date of the specific version above, in YYYY-MM-DD form. Omit when only a month or year is known; do not invent a day or substitute the collection date."
+        },
+        "version_status": {
+          "$ref": "#/$defs/nonempty",
+          "description": "Source-reported status of the specific version above, for example current, superseded, beta, or withdrawn. Values retain vendor terminology and do not establish latest/recommended status without dated evidence."
+        },
+        "releases_json": {
+          "type": "array",
+          "description": "Known firmware/software releases and separately issued patches relevant to this product, including versions newer than data.version. Entries describe published versions and potential update targets, not updates already installed; check version_status for superseded or withdrawn items. The list may be incomplete and is not ordered by precedence. Evaluate each entry's component, branch, hardware, and version applicability before recommending an update; do not select a global maximum version or assume the last array item is latest.",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/release"
+          }
+        },
+        "lifecycle_status": {
+          "$ref": "#/$defs/nonempty",
+          "description": "Source-reported product lifecycle or availability status, such as active, discontinued, or end_of_support. This applies to the product scope of this entry, not asset health or the installed version's patch state. Preserve source terminology and use dated evidence."
+        },
+        "end_of_sale_date": {
+          "type": "string",
+          "format": "date",
+          "description": "Vendor-announced last date for ordering this product, in YYYY-MM-DD form. End of sale does not necessarily mean end of maintenance or security updates."
+        },
+        "end_of_support_date": {
+          "type": "string",
+          "format": "date",
+          "description": "Vendor-announced end of support for this entry's product/hardware/version scope, in YYYY-MM-DD form. Record service-level, contract, or regional qualifications in the supporting evidence; do not infer this date from end of sale."
+        },
+        "last_verified": {
+          "type": "string",
+          "format": "date",
+          "description": "Date on which this entry's product metadata was last checked against its sources, in YYYY-MM-DD form. It is not an asset last-seen date or a release date. Each releases_json item has its own verification date."
+        },
+        "source_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URI of the primary document or page supporting this product entry, preferably a vendor source. Use evidence_json URLs when individual fields come from other sources. This is not necessarily a firmware download URL."
+        },
+        "source_locator": {
+          "type": "string",
+          "description": "Location within source_url, such as a PDF page, section heading, table row, or document identifier, so a reviewer can find the supporting text."
+        },
+        "source_sha256": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$",
+          "description": "SHA-256 digest of the captured source document's bytes, encoded as 64 hexadecimal characters. Identifies the evidence snapshot; it is not the checksum of a firmware or patch package."
+        },
+        "evidence_json": {
+          "type": "object",
+          "description": "Supporting quotations keyed by a property name in deviceData, for example model, device_function, or end_of_support_date. Keys name fields, not arbitrary labels or JSON paths; the application checks supported names. Evidence for an individual release can be stored on that releases_json item.",
+          "additionalProperties": {
+            "$ref": "#/$defs/evidence"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "nonempty": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Known textual value containing at least one character. The repository checker additionally rejects whitespace-only strings; omit unknown values."
+    },
+    "release": {
+      "type": "object",
+      "description": "One published firmware/software release or separately identified patch for a named component. Full releases require version; patches require patch_id and may also report the resulting version. Source and verification date are required so latest/recommended claims can be traced and assessed for staleness. Product scope comes from the enclosing entry; narrower update applicability is recorded here and is not evaluated by the asset recognition rules.",
+      "required": [
+        "release_type",
+        "version_component",
+        "version_kind",
+        "source_url",
+        "last_verified"
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "release_type": {
+              "const": "release"
+            }
+          },
+          "required": ["version"]
+        },
+        {
+          "properties": {
+            "release_type": {
+              "const": "patch"
+            }
+          },
+          "required": ["patch_id"]
+        }
+      ],
+      "properties": {
+        "release_type": {
+          "type": "string",
+          "enum": ["release", "patch"],
+          "description": "release identifies a versioned firmware/software distribution; patch identifies a separately issued fix, hotfix, or update package. A full firmware release containing security fixes is still a release unless the vendor distributes it as a separate patch."
+        },
+        "version_component": {
+          "$ref": "#/$defs/nonempty",
+          "description": "Vendor-named component being updated, such as CPU runtime or communications module. Keep names consistent across releases of the same component."
+        },
+        "version_kind": {
+          "$ref": "#/$defs/nonempty",
+          "description": "Type of the updated component's version, for example firmware, software, bootloader, or operating_system. For a firmware patch use firmware here and patch in release_type."
+        },
+        "version": {
+          "$ref": "#/$defs/nonempty",
+          "description": "Exact vendor version delivered by this release, or resulting from this patch if documented. Required for full releases. Preserve prefixes, build identifiers, and punctuation; do not assume Semantic Versioning or numeric ordering."
+        },
+        "patch_id": {
+          "$ref": "#/$defs/nonempty",
+          "description": "Vendor-issued patch, hotfix, or knowledge-base identifier. Required for patches, including those that do not change the reported version. This is not a CVE identifier or a local installation record."
+        },
+        "release_branch": {
+          "$ref": "#/$defs/nonempty",
+          "description": "Vendor release train or maintenance branch, including the channel if relevant, such as 2.x LTS or 3.x beta. Different branches may each have a latest release. Omit if the vendor does not distinguish branches."
+        },
+        "release_date": {
+          "type": "string",
+          "format": "date",
+          "description": "Date the vendor published this release or patch, in YYYY-MM-DD form. This is not the download, discovery, verification, or installation date. Omit partial dates."
+        },
+        "version_status": {
+          "$ref": "#/$defs/nonempty",
+          "description": "Vendor-reported availability or support status of this release or patch, such as available, superseded, withdrawn, or beta. Preserve vendor wording; a listed release may no longer be offered for installation."
+        },
+        "is_latest": {
+          "type": "boolean",
+          "description": "Whether the source identifies this as the latest available item as of last_verified within the same release_type, component, version kind, branch/channel, and hardware/version applicability. Latest patch and latest full release are separate claims. true does not imply stable or recommended; false means checked and not latest; omission means unknown. Never infer this solely by sorting version strings or dates."
+        },
+        "is_recommended": {
+          "type": "boolean",
+          "description": "Whether the vendor recommends this release or patch for the stated applicability as of last_verified. The recommended target may differ from the latest one. false means checked and not recommended; omission means unknown."
+        },
+        "release_notes": {
+          "$ref": "#/$defs/nonempty",
+          "description": "Summary of documented changes, fixes, security improvements, known issues, and limitations. Explain what this update changes; use fixed_cves for explicitly resolved CVE identifiers and installation_notes for deployment requirements."
+        },
+        "release_notes_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URI of the vendor's detailed release notes, patch bulletin, or security advisory for this update."
+        },
+        "download_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Vendor download page or package URI for this update. It may require authentication or entitlement."
+        },
+        "download_sha256": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$",
+          "description": "SHA-256 digest of the exact update package bytes, encoded as 64 hexadecimal characters. Use only when the package variant is unambiguous. This checksum is distinct from data.source_sha256 and is not a substitute for publisher signature verification."
+        },
+        "applicable_versions": {
+          "type": "array",
+          "description": "Exact currently installed versions to which the vendor says this update applies. This is not a list of resulting versions. Preserve vendor strings; put ranges, exclusions, and additional conditions in applicability. Omission means eligibility is unknown, not that every version is supported.",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/nonempty"
+          },
+          "uniqueItems": true
+        },
+        "hardware_revisions": {
+          "type": "array",
+          "description": "Exact hardware revisions documented as compatible with this update within the enclosing product scope. Omission does not establish compatibility with every revision; record more complex restrictions in applicability.",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/nonempty"
+          },
+          "uniqueItems": true
+        },
+        "applicability": {
+          "$ref": "#/$defs/nonempty",
+          "description": "Vendor's conditions and exclusions for using this update, including affected version ranges, model/part variants, required options, and dependencies. Free text is supporting metadata, not an executable version-range expression. All stated constraints must be considered together before proposing an update."
+        },
+        "fixed_cves": {
+          "type": "array",
+          "description": "CVE identifiers explicitly reported as fixed by this release or patch. Do not include merely mentioned or still-affected CVEs. An omitted or incomplete list does not establish that a device is free of vulnerabilities.",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^CVE-[0-9]{4}-[0-9]{4,}$"
+          },
+          "uniqueItems": true
+        },
+        "installation_notes": {
+          "$ref": "#/$defs/nonempty",
+          "description": "Documented upgrade prerequisites and operational effects, such as intermediate firmware steps, engineering-tool requirements, backups, reboot or process-stop requirements, expected downtime, and rollback limitations. Omission means these requirements have not been recorded, not that an update is disruption-free."
+        },
+        "source_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URI of the source establishing this update and its status, preferably a vendor release page or advisory. Required even when the enclosing product has a different source_url."
+        },
+        "source_locator": {
+          "type": "string",
+          "description": "Page, section, table row, or bulletin identifier locating the update details within source_url."
+        },
+        "last_verified": {
+          "type": "string",
+          "format": "date",
+          "description": "Date these update details and any latest/recommended claims were checked against the source, in YYYY-MM-DD form. Consumers determine when claims need rechecking; the schema does not guarantee freshness."
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidence",
+          "description": "Supporting quotation for this release or patch, particularly latest/recommended status and applicability. When url is omitted, use this release's source_url. An omitted locator may use source_locator only when it refers to the same document."
+        }
+      },
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "object",
+      "description": "Source quotation supporting a metadata claim. Preserve the source wording rather than replacing it with an analyst conclusion. When url is omitted, use the owning product or release source_url. An omitted locator may use source_locator only when it refers to the same document.",
+      "required": ["quote"],
+      "properties": {
+        "quote": {
+          "$ref": "#/$defs/nonempty",
+          "description": "Verbatim excerpt supporting the field or release claim, including qualifications needed to interpret it correctly."
+        },
+        "locator": {
+          "type": "string",
+          "description": "Location of the quotation within its source, such as page number, heading, table cell, or JSON path. Overrides the owning entry's source_locator; if url names a different document, provide its own locator when known."
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URI of the quoted source. Overrides the owning product or release source_url when the claim comes from another document."
+        }
+      },
+      "additionalProperties": false
+    },
+    "ruleGroup": {
+      "description": "Exactly one nonempty OR (any) or AND (all) group. Children may be conditions or nested groups. The application evaluates these rules; JSON Schema only validates their shape.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["any"],
+          "properties": {
+            "any": {
+              "type": "array",
+              "description": "OR group: match when at least one child condition or group matches.",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/rule"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["all"],
+          "properties": {
+            "all": {
+              "type": "array",
+              "description": "AND group: match only when every child condition or group matches.",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/rule"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "rule": {
+      "description": "One observed-field condition or a nested Boolean group of conditions.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/condition"
+        },
+        {
+          "$ref": "#/$defs/ruleGroup"
+        }
+      ]
+    },
+    "condition": {
+      "type": "object",
+      "description": "String comparison against a single observed asset field. Missing, null, or non-string input does not match. The repository evaluator does not trim input, resolve aliases, or compare version ranges implicitly; express alternatives as explicit rules.",
+      "required": ["field", "operator", "value"],
+      "properties": {
+        "field": {
+          "type": "string",
+          "description": "Observed input field to compare, not a path into catalog data. device_name is the discovered product designation, not a site-assigned hostname. firmware_version and software_version are observed component versions; protocol is one observed protocol string. Alternate fields such as model and model_name require explicit alternative rules.",
+          "enum": [
+            "device_name",
+            "manufacturer",
+            "product_family",
+            "model",
+            "model_name",
+            "part_number",
+            "order_number",
+            "hardware_revision",
+            "device_type",
+            "serial_number",
+            "firmware_version",
+            "software_version",
+            "version",
+            "version_component",
+            "version_kind",
+            "protocol"
+          ]
+        },
+        "operator": {
+          "type": "string",
+          "description": "equals compares the whole string; contains checks a substring; starts_with and ends_with check a prefix or suffix. regex uses JavaScript RegExp syntax in the repository evaluator and searches unless anchored with ^ and $. None of these operators performs version ordering or range evaluation.",
+          "enum": ["equals", "contains", "starts_with", "ends_with", "regex"]
+        },
+        "value": {
+          "$ref": "#/$defs/nonempty",
+          "description": "Expected literal text, or the regex pattern when operator is regex. Use a JSON-escaped pattern without /pattern/ delimiters or embedded flags."
+        },
+        "caseSensitive": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether letter case affects matching. The repository evaluator treats omission as false, using lowercased literal comparisons or the regex i flag. The JSON Schema default is an annotation and does not itself populate this field."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

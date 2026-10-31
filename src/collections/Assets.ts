@@ -22,6 +22,7 @@ import { identityAction, migrateIdentity } from '../identity/actions'
 import { releaseDeletedAssetBindings } from '../identity/deletion'
 import { purdueLevels } from '../domain/purdue'
 import { vulnerabilityReviewAction } from '../vulnerabilities/reviews'
+import { matchAssetMetadata } from '../metadata/runtime'
 
 import { userSuppliedAssetFields } from '../domain/assetFields'
 export { userSuppliedAssetFields } from '../domain/assetFields'
@@ -49,7 +50,11 @@ const recordHumanChanges: CollectionBeforeChangeHook = ({ context, data, origina
         ? { ...(tracked.fieldProvenance as Record<string, unknown>) }
         : {}
     fieldProvenance.assetClass = ruleAssignment
-      ? { quality: 'medium', source: 'asset-class-rule' }
+      ? {
+          quality: 'medium',
+          source:
+            context.assetClassRuleSource || req.context.assetClassRuleSource || 'asset-class-rule',
+        }
       : { quality: 'low', source: 'default' }
     tracked.fieldProvenance = fieldProvenance
   }
@@ -121,6 +126,18 @@ export const Assets: CollectionConfig = {
       options: ['unknown', 'device', 'chassis', 'module'],
     },
     { name: 'catalogNumber', type: 'text', label: 'Catalog / part number' },
+    { name: 'partNumber', type: 'text', label: 'Reported part number' },
+    { name: 'orderNumber', type: 'text', label: 'Reported order number' },
+    { name: 'productFamily', type: 'text', label: 'Reported product family' },
+    { name: 'softwareVersion', type: 'text', label: 'Reported software version' },
+    { name: 'versionComponent', type: 'text', label: 'Reported version component' },
+    {
+      name: 'metadataMatch',
+      type: 'json',
+      label: 'Catalog match evidence',
+      access: { create: () => false, update: () => false },
+      admin: { readOnly: true, disableListFilter: true },
+    },
     {
       name: 'slotCapacity',
       type: 'number',
@@ -450,6 +467,10 @@ export const Assets: CollectionConfig = {
       protectAssetIdentity,
       sanitizeCustomFieldValues,
       recordHumanChanges,
+      async ({ data, originalDoc, req }) => ({
+        ...data,
+        metadataMatch: await matchAssetMetadata(req.payload, { ...originalDoc, ...data }, req),
+      }),
       assignVulnerabilityCount,
     ],
     beforeOperation: [applyAssetSearch],

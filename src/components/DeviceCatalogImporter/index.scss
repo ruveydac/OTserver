@@ -1,0 +1,21 @@
+.device-catalog-importer {
+  margin: 0 var(--gutter-h) 2rem;
+  max-width: 65rem;
+  color: var(--theme-text);
+  overflow-wrap: anywhere;
+
+  form {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+  input {
+    max-width: 100%;
+    min-height: 44px;
+  }
+  input:focus-visible {
+    outline: 2px solid var(--theme-text);
+    outline-offset: 3px;
+  }
+}

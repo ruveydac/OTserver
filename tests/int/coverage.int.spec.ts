@@ -470,7 +470,7 @@ describe('collection safety hooks', () => {
                     assignmentRules: [
                       { conditions: [{ field: 'vendor', regex: 'already current' }] },
                       { manufacturerRegex: 'partial legacy' },
-                      { manufacturerRegex: 'kept', modelRegex: 'kept' },
+                      { enabled: false, manufacturerRegex: 'kept', modelRegex: 'kept' },
                     ],
                     id: 'class-plc',
                     ruleSeedVersion: 0,
@@ -494,6 +494,7 @@ describe('collection safety hooks', () => {
             { conditions: [{ field: 'vendor', regex: 'already current' }] },
             { manufacturerRegex: 'partial legacy' },
             {
+              enabled: false,
               conditions: [
                 { field: 'vendor', regex: 'kept' },
                 { field: 'model', regex: 'kept' },
@@ -650,7 +651,7 @@ describe('collection safety hooks', () => {
         },
         req: classReq(matching),
       }),
-    ).toEqual({})
+    ).toMatchObject({ fieldProvenance: { assetClass: { quality: 'low', source: 'default' } } })
 
     for (const fieldProvenance of ['junk', []]) {
       expect(

@@ -33,6 +33,8 @@ import {
 } from './collections/Identity'
 import { OtterProfiles, OtterRuns, OtterScanners, OtterSchedules } from './collections/Otter'
 import { ApplicationSettings } from './globals/ApplicationSettings'
+import { initializeMetadataCatalog } from './metadata/initialize'
+import { DeviceCatalog } from './collections/DeviceCatalog'
 
 const dirname = import.meta.dirname || path.resolve('src')
 
@@ -40,6 +42,7 @@ const initializeApplication = async (payload: Payload) => {
   await initializeSiteTypes(payload)
   await initializeAssetClasses(payload)
   await initializeAuthorization(payload)
+  await initializeMetadataCatalog(payload)
 
   const workerMode = process.env.OTSERVER_WORKER_MODE || 'standalone'
   if (workerMode !== 'standalone' && workerMode !== 'external')
@@ -98,6 +101,7 @@ export default buildConfig({
     SiteTypes,
     Sites,
     AssetClasses,
+    DeviceCatalog,
     Assets,
     NetworkEndpoints,
     ServiceBindings,

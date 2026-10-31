@@ -37,6 +37,11 @@ const sources: Record<string, DataQuality> = {
   unknown: 'low',
 }
 const allowedFields = new Set([
+  'partNumber',
+  'orderNumber',
+  'productFamily',
+  'softwareVersion',
+  'versionComponent',
   'catalogNumber',
   'description',
   'firmwareVersion',

@@ -12,10 +12,20 @@ import { isDeepStrictEqual } from 'node:util'
 
 import { adminOnly, relationshipID } from '../access/authorization'
 import defaultRuleSeed from '../data/default-asset-class-rules.json'
+import { validateAssignmentRegex } from '../domain/assignmentRegex'
+import { metadataGroups, type MetadataMatch } from '../metadata/catalog'
+import { activeCatalog, matchAssetMetadata } from '../metadata/runtime'
+import type { AssetClass } from '../payload-types'
+export { validateAssignmentRegex } from '../domain/assignmentRegex'
 
 const assignmentFields = {
   assetOwner: 'Asset owner',
   catalogNumber: 'Catalog / part number',
+  partNumber: 'Reported part number',
+  orderNumber: 'Reported order number',
+  productFamily: 'Reported product family',
+  softwareVersion: 'Reported software version',
+  versionComponent: 'Reported version component',
   description: 'Description',
   firmwareVersion: 'Firmware version',
   hardwareVersion: 'Hardware version',
@@ -35,6 +45,7 @@ type AssignmentCondition = {
   regex: string
 }
 type AssignmentRule = {
+  enabled?: boolean
   conditions?: AssignmentCondition[]
   manufacturerRegex?: string
   modelRegex?: string
@@ -55,32 +66,13 @@ const MAX_MATCH_VALUE_LENGTH = 512
 
 const seedClass = (key: string) => ruleSeed.classes.find(({ classKey }) => classKey === key)
 
-export const validateAssignmentRegex = (value: null | string | undefined): string | true => {
-  if (!value) return 'Enter a regular expression.'
-  if (value.length > MAX_REGEX_LENGTH) {
-    return `Regular expressions are limited to ${MAX_REGEX_LENGTH} characters.`
-  }
-  if (/\\[1-9]/.test(value)) return 'Backreferences are not supported in assignment rules.'
-  if (
-    /\((?:[^()]|\\.)*(?:[*+]|\{\d+(?:,\d*)?\})(?:[^()]|\\.)*\)(?:[*+]|\{\d+(?:,\d*)?\})/.test(value)
-  ) {
-    return 'Nested quantified groups are not supported in assignment rules.'
-  }
-  try {
-    new RegExp(value, 'i')
-    return true
-  } catch {
-    return 'Enter a valid regular expression.'
-  }
-}
-
 export const findMatchingAssetClass = async (
   payload: Payload,
   asset: Record<string, unknown>,
   req?: PayloadRequest,
 ) => {
   type Matcher = {
-    assetClass: Awaited<ReturnType<Payload['find']>>['docs'][number]
+    assetClass: AssetClass
     conditions: Array<{ field: string; regex: RegExp }>
     legacy?: { manufacturer: RegExp; model: RegExp }
   }
@@ -103,34 +95,40 @@ export const findMatchingAssetClass = async (
       where: { type: { in: ['text', 'textarea'] } },
     })
     const customFieldIDs = new Set(definitions.docs.map(({ id }) => String(id)))
-    matchers = classes.docs.flatMap((assetClass) =>
-      ((assetClass.assignmentRules || []) as unknown as AssignmentRule[]).map((rule) => ({
-        assetClass,
-        conditions: (rule.conditions || []).map(({ customField, field, regex }) => {
-          const customID = relationshipID(customField)
-          if (customID) {
-            return {
-              field: customFieldIDs.has(String(customID))
-                ? `customFields.${customID}`
-                : '\u0000invalid',
-              regex: new RegExp(regex, 'i'),
-            }
-          }
-          return {
-            field: field && field in assignmentFields ? field : '\u0000invalid',
-            regex: new RegExp(regex, 'i'),
-          }
-        }),
-        ...(!rule.conditions?.length && rule.manufacturerRegex && rule.modelRegex
-          ? {
-              legacy: {
-                manufacturer: new RegExp(rule.manufacturerRegex, 'i'),
-                model: new RegExp(rule.modelRegex, 'i'),
-              },
-            }
-          : {}),
-      })),
-    )
+    const classDocs = classes.docs as AssetClass[]
+    if (req) req.context.assetClassRuleClasses = classDocs
+    matchers = classDocs
+      .filter((assetClass) => assetClass.assignmentEnabled !== false)
+      .flatMap((assetClass) =>
+        ((assetClass.assignmentRules || []) as unknown as AssignmentRule[])
+          .filter((rule) => rule.enabled !== false)
+          .map((rule) => ({
+            assetClass,
+            conditions: (rule.conditions || []).map(({ customField, field, regex }) => {
+              const customID = relationshipID(customField)
+              if (customID) {
+                return {
+                  field: customFieldIDs.has(String(customID))
+                    ? `customFields.${customID}`
+                    : '\u0000invalid',
+                  regex: new RegExp(regex, 'i'),
+                }
+              }
+              return {
+                field: field && field in assignmentFields ? field : '\u0000invalid',
+                regex: new RegExp(regex, 'i'),
+              }
+            }),
+            ...(!rule.conditions?.length && rule.manufacturerRegex && rule.modelRegex
+              ? {
+                  legacy: {
+                    manufacturer: new RegExp(rule.manufacturerRegex, 'i'),
+                    model: new RegExp(rule.modelRegex, 'i'),
+                  },
+                }
+              : {}),
+          })),
+      )
     if (req) req.context.assetClassRuleMatchers = matchers
   }
 
@@ -160,6 +158,50 @@ export const findMatchingAssetClass = async (
       )
     )
   })?.assetClass
+}
+
+export const resolveAssetClassification = async (
+  payload: Payload,
+  asset: Record<string, unknown>,
+  req?: PayloadRequest,
+  metadata?: MetadataMatch,
+) => {
+  const explicit = await findMatchingAssetClass(payload, asset, req)
+  const match = metadata ?? (await matchAssetMetadata(payload, asset, req))
+  const classes = req?.context.assetClassRuleClasses as AssetClass[] | undefined
+  const available =
+    classes ??
+    ((
+      await payload.find({
+        collection: 'asset-classes',
+        depth: 0,
+        pagination: false,
+        overrideAccess: true,
+        req,
+      })
+    ).docs as AssetClass[])
+  const mapped =
+    match.status === 'matched' && match.groupIDs.length === 1
+      ? available.filter(
+          (item) =>
+            item.assignmentEnabled !== false &&
+            item.catalogRulesEnabled !== false &&
+            item.catalogGroups?.some((id) => id === match.groupIDs[0]),
+        )
+      : []
+  const connected = mapped.length === 1 ? mapped[0] : undefined
+  const connectedPriority = connected?.catalogAssignmentPriority
+  if (
+    explicit &&
+    (!connected ||
+      connectedPriority == null ||
+      !Number.isFinite(connectedPriority) ||
+      !Number.isFinite(explicit.assignmentPriority) ||
+      connectedPriority >= explicit.assignmentPriority)
+  )
+    return { assetClass: explicit, source: 'asset-class-rule' as const }
+  if (connected) return { assetClass: connected, source: 'device-metadata' as const }
+  return undefined
 }
 
 export const defaultAssetClasses = [
@@ -234,6 +276,7 @@ export const initializeAssetClasses = async (payload: Payload) => {
               rule.conditions?.length || !rule.manufacturerRegex || !rule.modelRegex
                 ? rule
                 : {
+                    ...(rule.enabled === false ? { enabled: false } : {}),
                     conditions: [
                       { field: 'vendor', regex: rule.manufacturerRegex },
                       { field: 'model', regex: rule.modelRegex },
@@ -256,7 +299,12 @@ export const assignDefaultAssetClass: CollectionBeforeValidateHook = async ({
   req,
 }) => {
   const nextData = data || {}
-  if (Object.hasOwn(nextData, 'assetClass') && relationshipID(nextData.assetClass)) return nextData
+  delete req.context.assetClassRuleAssignment
+  delete req.context.assetClassDefaultAssignment
+  delete req.context.assetClassRuleSource
+  delete context.assetClassRuleAssignment
+  delete context.assetClassDefaultAssignment
+  delete context.assetClassRuleSource
 
   const existingClass = relationshipID(originalDoc?.assetClass)
   const provenance =
@@ -265,10 +313,20 @@ export const assignDefaultAssetClass: CollectionBeforeValidateHook = async ({
     !Array.isArray(originalDoc.fieldProvenance)
       ? (originalDoc.fieldProvenance as Record<string, { quality?: string }>)
       : {}
+  const humanClass =
+    existingClass && (!provenance.assetClass?.quality || provenance.assetClass.quality === 'human')
+  if (context.assetClassReclassification) {
+    delete nextData.assetClass
+    nextData.fieldProvenance = originalDoc?.fieldProvenance
+  } else if (Object.hasOwn(nextData, 'assetClass') && relationshipID(nextData.assetClass))
+    return nextData
   const assignmentData = { ...originalDoc, ...nextData }
   const withProvenance = (
     assetClass: number | string,
-    origin: { quality: 'low' | 'medium'; source: 'asset-class-rule' | 'default' },
+    origin: {
+      quality: 'low' | 'medium'
+      source: 'asset-class-rule' | 'device-metadata' | 'default'
+    },
   ) => {
     const currentProvenance = Object.hasOwn(nextData, 'fieldProvenance')
       ? nextData.fieldProvenance
@@ -283,19 +341,25 @@ export const assignDefaultAssetClass: CollectionBeforeValidateHook = async ({
     return { ...nextData, assetClass, fieldProvenance }
   }
 
-  if (!existingClass || provenance.assetClass?.quality !== 'human') {
-    const matchedClass = await findMatchingAssetClass(req.payload, assignmentData, req)
-    if (matchedClass && String(matchedClass.id) !== String(existingClass || '')) {
+  if (!humanClass) {
+    const matched = await resolveAssetClassification(req.payload, assignmentData, req)
+    if (matched) {
       context.assetClassRuleAssignment = true
       req.context.assetClassRuleAssignment = true
-      return withProvenance(matchedClass.id, {
+      context.assetClassRuleSource = matched.source
+      req.context.assetClassRuleSource = matched.source
+      return withProvenance(matched.assetClass.id, {
         quality: 'medium',
-        source: 'asset-class-rule',
+        source: matched.source,
       })
     }
   }
 
-  if (existingClass) return nextData
+  if (humanClass)
+    return {
+      ...nextData,
+      ...(context.assetClassReclassification ? { assetClass: existingClass } : {}),
+    }
 
   const legacyType = typeof nextData.assetType === 'string' ? nextData.assetType : 'other'
   const assetClass = await ensureAssetClass(req.payload, legacyType, req)
@@ -310,9 +374,12 @@ export const assignDefaultAssetClass: CollectionBeforeValidateHook = async ({
 export const reapplyAssetClassRules = async (req: PayloadRequest) => {
   const fallback = await ensureAssetClass(req.payload, 'other', req)
   delete req.context.assetClassRuleMatchers
+  delete req.context.assetClassRuleClasses
   let page = 1
   let scanned = 0
   let updated = 0
+  let matchedCount = 0
+  let ambiguousCount = 0
 
   for (;;) {
     const assets = await req.payload.find({
@@ -333,6 +400,12 @@ export const reapplyAssetClassRules = async (req: PayloadRequest) => {
         hardwareVersion: true,
         location: true,
         model: true,
+        productFamily: true,
+        partNumber: true,
+        orderNumber: true,
+        softwareVersion: true,
+        versionComponent: true,
+        metadataMatch: true,
         name: true,
         operatingSystem: true,
         physicalKind: true,
@@ -353,25 +426,40 @@ export const reapplyAssetClassRules = async (req: PayloadRequest) => {
           : {}
       const currentOrigin = fieldProvenance.assetClass as
         { quality?: unknown; source?: unknown } | undefined
-      if (currentOrigin?.quality === 'human') continue
-
-      const matched = await findMatchingAssetClass(req.payload, asset, req)
-      const target = matched || fallback
+      const metadataMatch = await matchAssetMetadata(req.payload, asset, req)
+      if (metadataMatch.status === 'matched') matchedCount++
+      if (metadataMatch.status === 'ambiguous') ambiguousCount++
+      const humanClass =
+        relationshipID(asset.assetClass) &&
+        (!currentOrigin?.quality || currentOrigin.quality === 'human')
+      const matched = humanClass
+        ? undefined
+        : await resolveAssetClassification(req.payload, asset, req, metadataMatch)
+      const targetID = humanClass
+        ? relationshipID(asset.assetClass)
+        : (matched?.assetClass || fallback).id
       const origin = matched
-        ? { quality: 'medium' as const, source: 'asset-class-rule' as const }
-        : { quality: 'low' as const, source: 'default' as const }
+        ? { quality: 'medium' as const, source: matched.source }
+        : humanClass
+          ? currentOrigin
+          : { quality: 'low' as const, source: 'default' as const }
       if (
-        String(relationshipID(asset.assetClass)) === String(target.id) &&
-        currentOrigin?.quality === origin.quality &&
-        currentOrigin.source === origin.source
+        String(relationshipID(asset.assetClass)) === String(targetID) &&
+        currentOrigin?.quality === origin?.quality &&
+        currentOrigin?.source === origin?.source &&
+        isDeepStrictEqual(asset.metadataMatch, metadataMatch)
       )
         continue
 
-      fieldProvenance.assetClass = origin
+      if (origin) fieldProvenance.assetClass = origin
       await req.payload.update({
         collection: 'assets',
         context: { assetClassReclassification: true },
-        data: { assetClass: target.id, fieldProvenance },
+        data: {
+          assetClass: targetID == null ? undefined : String(targetID),
+          fieldProvenance,
+          metadataMatch,
+        },
         id: asset.id,
         overrideAccess: true,
         req,
@@ -383,7 +471,14 @@ export const reapplyAssetClassRules = async (req: PayloadRequest) => {
     page++
   }
 
-  return { scanned, updated }
+  return {
+    catalogRevision: (await activeCatalog(req.payload, req)).revision,
+    scanned,
+    updated,
+    matched: matchedCount,
+    ambiguous: ambiguousCount,
+    unchanged: scanned - updated,
+  }
 }
 
 const queueAssetClassReapply: CollectionAfterChangeHook = async ({
@@ -394,10 +489,16 @@ const queueAssetClassReapply: CollectionAfterChangeHook = async ({
   req,
 }) => {
   if (context.assetClassRuleSeed) return doc
-  const rulesChanged = !isDeepStrictEqual(doc.assignmentRules, previousDoc?.assignmentRules)
-  const priorityChanged = doc.assignmentPriority !== previousDoc?.assignmentPriority
+  const rulesChanged =
+    !isDeepStrictEqual(doc.assignmentRules, previousDoc?.assignmentRules) ||
+    !isDeepStrictEqual(doc.catalogGroups, previousDoc?.catalogGroups) ||
+    doc.catalogRulesEnabled !== previousDoc?.catalogRulesEnabled ||
+    doc.assignmentEnabled !== previousDoc?.assignmentEnabled
+  const priorityChanged =
+    doc.assignmentPriority !== previousDoc?.assignmentPriority ||
+    doc.catalogAssignmentPriority !== previousDoc?.catalogAssignmentPriority
   if (
-    (operation === 'create' && !doc.assignmentRules?.length) ||
+    (operation === 'create' && !doc.assignmentRules?.length && !doc.catalogGroups?.length) ||
     (!rulesChanged && !priorityChanged)
   )
     return doc
@@ -405,7 +506,11 @@ const queueAssetClassReapply: CollectionAfterChangeHook = async ({
   await req.payload.jobs.queue({
     task: 'reapply-asset-classes-v1',
     queue: 'maintenance',
-    input: { version: 1, assetClassID: String(doc.id) },
+    input: {
+      version: 1,
+      assetClassID: String(doc.id),
+      catalogRevision: (await activeCatalog(req.payload, req)).revision,
+    },
     req,
   })
   return doc
@@ -460,6 +565,41 @@ export const AssetClasses: CollectionConfig = {
     { name: 'name', type: 'text', index: true, required: true, unique: true },
     { name: 'description', type: 'textarea' },
     {
+      name: 'assignmentEnabled',
+      type: 'checkbox',
+      defaultValue: true,
+      label: 'Enable automatic classification',
+      admin: {
+        description:
+          'Disable all regex rules and catalog mappings for this class. Human assignments are preserved.',
+      },
+    },
+    {
+      name: 'catalogRulesEnabled',
+      type: 'checkbox',
+      defaultValue: true,
+      label: 'Use connected information for classification',
+      admin: {
+        description:
+          'Allows one unambiguous connected device type to assign this class when it is mapped below.',
+      },
+    },
+    {
+      name: 'catalogGroups',
+      type: 'select',
+      hasMany: true,
+      options: metadataGroups
+        .filter(({ key }) => key !== 'other')
+        .map(({ id, name }) => ({ value: id, label: name })),
+      label: 'Connected device types',
+      admin: {
+        description:
+          'Map imported device types to this class. Multiple classes mapping the same type are treated as ambiguous.',
+      },
+    },
+    { name: 'catalogMappingSeeded', type: 'checkbox', admin: { hidden: true } },
+    { name: 'catalogRevision', type: 'text', admin: { hidden: true } },
+    {
       name: 'assignmentPriority',
       type: 'number',
       admin: {
@@ -480,6 +620,7 @@ export const AssetClasses: CollectionConfig = {
           'Every condition in a rule must match. Rules are checked in order, and the first matching class at the highest priority is assigned.',
       },
       fields: [
+        { name: 'enabled', type: 'checkbox', defaultValue: true, label: 'Enabled' },
         {
           name: 'conditions',
           type: 'array',
@@ -526,6 +667,16 @@ export const AssetClasses: CollectionConfig = {
       ],
       label: 'Automatic assignment rules',
       labels: { plural: 'Rules', singular: 'Rule' },
+    },
+    {
+      name: 'catalogAssignmentPriority',
+      type: 'number',
+      admin: {
+        description:
+          'Optional priority for this class when assigned from connected device information. Lower numbers win; ties favor regex rules. Leave blank to use connected information only when no regex rule matches.',
+      },
+      label: 'Connected information priority',
+      min: 0,
     },
     { name: 'legacyKey', type: 'text', admin: { hidden: true }, unique: true },
     { name: 'ruleSeedVersion', type: 'number', admin: { hidden: true } },

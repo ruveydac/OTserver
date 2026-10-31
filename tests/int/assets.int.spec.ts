@@ -73,6 +73,7 @@ describe('asset network fields', () => {
     expect(renderToStaticMarkup(cell)).toContain(
       '/manage/collections/assets?where%5BassetClass%5D%5Bequals%5D=class-1',
     )
+    expect(AssetClassAssetsCell({ rowData: undefined } as never)).toBeNull()
   })
 
   it('renders the default list and empty asset-class state', async () => {
@@ -262,7 +263,7 @@ describe('asset network fields', () => {
           })
         }),
       },
-      initPageResult: { req: { user: null } },
+      initPageResult: { req: { context: {}, user: null } },
       routeSegments: ['collections', 'assets', 'asset-1'],
     } as unknown as DocumentViewServerProps
     const view = await AssetView(props)
@@ -283,6 +284,7 @@ describe('asset network fields', () => {
     expect(html).toContain('Edit asset')
     expect(html).toContain('aria-label="Asset sections"')
     expect(html).toContain('href="/admin/collections/assets/asset-1?tab=network"')
+    expect(html).toContain('href="/admin/collections/assets/asset-1?tab=connected"')
     expect(html).toContain('href="/admin/collections/assets/asset-1?tab=security"')
     expect(html).toContain('href="/admin/collections/assets/asset-1?tab=discovery"')
     expect(html).toContain('href="/admin/collections/assets/asset-1?tab=history"')
@@ -311,6 +313,12 @@ describe('asset network fields', () => {
     const discoveryHTML = renderToStaticMarkup(createElement(() => discoveryView))
     expect(discoveryHTML).toContain('<h2>Discovery evidence</h2>')
     expect(discoveryHTML).not.toContain('<h2>Change history</h2>')
+
+    const connectedView = await AssetView({ ...props, searchParams: { tab: 'connected' } })
+    const connectedHTML = renderToStaticMarkup(createElement(() => connectedView))
+    expect(connectedHTML).toContain('Connected manufacturer and device information')
+    expect(connectedHTML).toContain('No device catalog has been imported')
+    expect(connectedHTML).not.toContain('<h2>Hardware record</h2>')
 
     const historyView = await AssetView({ ...props, searchParams: { tab: 'history' } })
     const historyHTML = renderToStaticMarkup(createElement(() => historyView))

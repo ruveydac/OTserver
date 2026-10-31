@@ -67,6 +67,40 @@ Main locations:
 - Automatic class assignment rules combine case-insensitive manufacturer and model regular
   expressions. Shipped defaults live in `src/data/default-asset-class-rules.json`; seed them once
   and preserve administrator changes. Human class assignments must outrank automatic matches.
+- Manufacturer/device reference data is import-only; do not bundle or automatically seed
+  catalog records. `src/data/device-metadata/` contains schemas, group definitions, and
+  their separate CC BY-NC attribution, not a product/manufacturer snapshot.
+  Administrators can import single/multiple manufacturer/device JSON files through
+  Settings > Device catalog (`POST /api/device-catalog/import`). Upsert complete records
+  by canonical UUID, preserve omitted IDs, and reject conflicting duplicates. Validate all
+  selected files against the shipped schemas and combined catalog before writing. The
+  bounded `device-catalog/active` database snapshot, audit event, and maintenance job commit
+  atomically. Generic snapshot mutations are denied. `src/metadata/runtime.ts` loads the
+  shared database revision for matching, references, startup, and workers. Without an import,
+  recognition returns unmatched with revision `unloaded`; administrator regex rules still
+  work. Never reset imported data on restart or code upgrades.
+  `src/metadata/catalog.ts` is the shared manufacturer-scoped recognizer. Missing qualifiers
+  do not match; never treat asset names as product names, combine firmware/software version
+  contexts, or derive matching input from prior catalog output. Preserve all matching products
+  and mark conflicting groups ambiguous. Catalog UUIDs never become physical asset identities.
+- Class assignment preserves human choices (including legacy untracked choices). Enabled regex
+  rules use `assignmentPriority`; one unambiguous connected catalog-group mapping is the fallback
+  unless its class has a configured `catalogAssignmentPriority`, in which case lower priority
+  numbers compete with regex rules and ties favor regex. Group UUID mappings are administrator-
+  managed on `asset-classes`, not hard-coded asset options. `assignmentEnabled` disables all
+  automatic classification for a class; `catalogRulesEnabled` disables its connected mappings;
+  `assignmentRules[].enabled` toggles individual regex rules. Missing flags mean enabled for old
+  records. Preserve edits and disabled flags on startup. Only clear built-in group mappings are
+  seeded once. Catalog revisions and rule/mapping/toggle/priority changes enqueue the existing
+  fenced maintenance reclassification job.
+- `assets.metadataMatch` is server-owned, site-scoped derived evidence containing the catalog
+  revision, matched manufacturer UUIDs, device UUIDs with their manufacturer/group UUID references,
+  status, and matched conditions. Recompute it on asset writes and reclassification, even for
+  human-classified assets. Show imported reference details on the separate Connected information
+  asset tab. Reclassification must preserve a human choice made after a page was read. Reference
+  capabilities, lifecycle dates, and published releases must not overwrite observed protocols,
+  installed versions, physical identity, operational lifecycle, Purdue levels, or vulnerability
+  decisions.
 
 ### Data quality and provenance
 
