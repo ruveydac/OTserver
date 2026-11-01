@@ -70,7 +70,6 @@ export interface Config {
     'site-types': SiteType;
     sites: Site;
     'asset-classes': AssetClass;
-    'device-catalog': DeviceCatalog;
     assets: Asset;
     'network-endpoints': NetworkEndpoint;
     'service-bindings': ServiceBinding;
@@ -82,18 +81,19 @@ export interface Config {
     'otter-profiles': OtterProfile;
     'otter-schedules': OtterSchedule;
     'otter-runs': OtterRun;
-    'asset-fields': AssetField;
     'user-roles': UserRole;
     users: User;
     'asset-observations': AssetObservation;
     'asset-vulnerability-reviews': AssetVulnerabilityReview;
     'topology-links': TopologyLink;
     vulnerabilities: Vulnerability;
-    'vulnerability-feeds': VulnerabilityFeed;
     'vulnerability-feed-uploads': VulnerabilityFeedUpload;
     'audit-logs': AuditLog;
     'worker-leases': WorkerLease;
     'worker-heartbeats': WorkerHeartbeat;
+    'device-catalog': DeviceCatalog;
+    'asset-fields': AssetField;
+    'vulnerability-feeds': VulnerabilityFeed;
     'payload-kv': PayloadKv;
     'payload-jobs': PayloadJob;
     'payload-locked-documents': PayloadLockedDocument;
@@ -105,7 +105,6 @@ export interface Config {
     'site-types': SiteTypesSelect<false> | SiteTypesSelect<true>;
     sites: SitesSelect<false> | SitesSelect<true>;
     'asset-classes': AssetClassesSelect<false> | AssetClassesSelect<true>;
-    'device-catalog': DeviceCatalogSelect<false> | DeviceCatalogSelect<true>;
     assets: AssetsSelect<false> | AssetsSelect<true>;
     'network-endpoints': NetworkEndpointsSelect<false> | NetworkEndpointsSelect<true>;
     'service-bindings': ServiceBindingsSelect<false> | ServiceBindingsSelect<true>;
@@ -117,18 +116,19 @@ export interface Config {
     'otter-profiles': OtterProfilesSelect<false> | OtterProfilesSelect<true>;
     'otter-schedules': OtterSchedulesSelect<false> | OtterSchedulesSelect<true>;
     'otter-runs': OtterRunsSelect<false> | OtterRunsSelect<true>;
-    'asset-fields': AssetFieldsSelect<false> | AssetFieldsSelect<true>;
     'user-roles': UserRolesSelect<false> | UserRolesSelect<true>;
     users: UsersSelect<false> | UsersSelect<true>;
     'asset-observations': AssetObservationsSelect<false> | AssetObservationsSelect<true>;
     'asset-vulnerability-reviews': AssetVulnerabilityReviewsSelect<false> | AssetVulnerabilityReviewsSelect<true>;
     'topology-links': TopologyLinksSelect<false> | TopologyLinksSelect<true>;
     vulnerabilities: VulnerabilitiesSelect<false> | VulnerabilitiesSelect<true>;
-    'vulnerability-feeds': VulnerabilityFeedsSelect<false> | VulnerabilityFeedsSelect<true>;
     'vulnerability-feed-uploads': VulnerabilityFeedUploadsSelect<false> | VulnerabilityFeedUploadsSelect<true>;
     'audit-logs': AuditLogsSelect<false> | AuditLogsSelect<true>;
     'worker-leases': WorkerLeasesSelect<false> | WorkerLeasesSelect<true>;
     'worker-heartbeats': WorkerHeartbeatsSelect<false> | WorkerHeartbeatsSelect<true>;
+    'device-catalog': DeviceCatalogSelect<false> | DeviceCatalogSelect<true>;
+    'asset-fields': AssetFieldsSelect<false> | AssetFieldsSelect<true>;
+    'vulnerability-feeds': VulnerabilityFeedsSelect<false> | VulnerabilityFeedsSelect<true>;
     'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
     'payload-jobs': PayloadJobsSelect<false> | PayloadJobsSelect<true>;
     'payload-locked-documents': PayloadLockedDocumentsSelect<false> | PayloadLockedDocumentsSelect<true>;
@@ -352,27 +352,6 @@ export interface AssetField {
    */
   type: 'text' | 'textarea' | 'number' | 'checkbox' | 'date';
   description?: string | null;
-  updatedAt: string;
-  createdAt: string;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "device-catalog".
- */
-export interface DeviceCatalog {
-  id: string;
-  revision: string;
-  manufacturerCount: number;
-  deviceCount: number;
-  catalog:
-    | {
-        [k: string]: unknown;
-      }
-    | unknown[]
-    | string
-    | number
-    | boolean
-    | null;
   updatedAt: string;
   createdAt: string;
 }
@@ -1221,36 +1200,6 @@ export interface Vulnerability {
   createdAt: string;
 }
 /**
- * Update the local vulnerability catalogs online or import original files transferred from a connected computer.
- *
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "vulnerability-feeds".
- */
-export interface VulnerabilityFeed {
-  id: string;
-  source: string;
-  status: 'idle' | 'queued' | 'running' | 'ready' | 'partial' | 'failed';
-  lastSyncedAt?: string | null;
-  documentCount?: number | null;
-  catalogVersion?: string | null;
-  dateReleased?: string | null;
-  error?: string | null;
-  state?:
-    | {
-        [k: string]: unknown;
-      }
-    | unknown[]
-    | string
-    | number
-    | boolean
-    | null;
-  jobID?: string | null;
-  lastImportMethod?: ('online' | 'offline') | null;
-  operationRevision?: number | null;
-  updatedAt: string;
-  createdAt: string;
-}
-/**
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "vulnerability-feed-uploads".
  */
@@ -1333,6 +1282,57 @@ export interface WorkerHeartbeat {
   owner: string;
   heartbeatAt: string;
   expiresAt: string;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "device-catalog".
+ */
+export interface DeviceCatalog {
+  id: string;
+  revision: string;
+  manufacturerCount: number;
+  deviceCount: number;
+  catalog:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Update the local vulnerability catalogs online or import original files transferred from a connected computer.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "vulnerability-feeds".
+ */
+export interface VulnerabilityFeed {
+  id: string;
+  source: string;
+  status: 'idle' | 'queued' | 'running' | 'ready' | 'partial' | 'failed';
+  lastSyncedAt?: string | null;
+  documentCount?: number | null;
+  catalogVersion?: string | null;
+  dateReleased?: string | null;
+  error?: string | null;
+  state?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  jobID?: string | null;
+  lastImportMethod?: ('online' | 'offline') | null;
+  operationRevision?: number | null;
   updatedAt: string;
   createdAt: string;
 }
@@ -1466,10 +1466,6 @@ export interface PayloadLockedDocument {
         value: string | AssetClass;
       } | null)
     | ({
-        relationTo: 'device-catalog';
-        value: string | DeviceCatalog;
-      } | null)
-    | ({
         relationTo: 'assets';
         value: string | Asset;
       } | null)
@@ -1498,10 +1494,6 @@ export interface PayloadLockedDocument {
         value: string | AssetImport;
       } | null)
     | ({
-        relationTo: 'asset-fields';
-        value: string | AssetField;
-      } | null)
-    | ({
         relationTo: 'user-roles';
         value: string | UserRole;
       } | null)
@@ -1520,6 +1512,14 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'worker-heartbeats';
         value: string | WorkerHeartbeat;
+      } | null)
+    | ({
+        relationTo: 'device-catalog';
+        value: string | DeviceCatalog;
+      } | null)
+    | ({
+        relationTo: 'asset-fields';
+        value: string | AssetField;
       } | null);
   globalSlug?: string | null;
   user: {
@@ -1623,19 +1623,6 @@ export interface AssetClassesSelect<T extends boolean = true> {
   catalogAssignmentPriority?: T;
   legacyKey?: T;
   ruleSeedVersion?: T;
-  updatedAt?: T;
-  createdAt?: T;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "device-catalog_select".
- */
-export interface DeviceCatalogSelect<T extends boolean = true> {
-  id?: T;
-  revision?: T;
-  manufacturerCount?: T;
-  deviceCount?: T;
-  catalog?: T;
   updatedAt?: T;
   createdAt?: T;
 }
@@ -1994,17 +1981,6 @@ export interface OtterRunsSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "asset-fields_select".
- */
-export interface AssetFieldsSelect<T extends boolean = true> {
-  label?: T;
-  type?: T;
-  description?: T;
-  updatedAt?: T;
-  createdAt?: T;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "user-roles_select".
  */
 export interface UserRolesSelect<T extends boolean = true> {
@@ -2138,25 +2114,6 @@ export interface VulnerabilitiesSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "vulnerability-feeds_select".
- */
-export interface VulnerabilityFeedsSelect<T extends boolean = true> {
-  source?: T;
-  status?: T;
-  lastSyncedAt?: T;
-  documentCount?: T;
-  catalogVersion?: T;
-  dateReleased?: T;
-  error?: T;
-  state?: T;
-  jobID?: T;
-  lastImportMethod?: T;
-  operationRevision?: T;
-  updatedAt?: T;
-  createdAt?: T;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "vulnerability-feed-uploads_select".
  */
 export interface VulnerabilityFeedUploadsSelect<T extends boolean = true> {
@@ -2224,6 +2181,49 @@ export interface WorkerHeartbeatsSelect<T extends boolean = true> {
   owner?: T;
   heartbeatAt?: T;
   expiresAt?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "device-catalog_select".
+ */
+export interface DeviceCatalogSelect<T extends boolean = true> {
+  id?: T;
+  revision?: T;
+  manufacturerCount?: T;
+  deviceCount?: T;
+  catalog?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "asset-fields_select".
+ */
+export interface AssetFieldsSelect<T extends boolean = true> {
+  label?: T;
+  type?: T;
+  description?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "vulnerability-feeds_select".
+ */
+export interface VulnerabilityFeedsSelect<T extends boolean = true> {
+  source?: T;
+  status?: T;
+  lastSyncedAt?: T;
+  documentCount?: T;
+  catalogVersion?: T;
+  dateReleased?: T;
+  error?: T;
+  state?: T;
+  jobID?: T;
+  lastImportMethod?: T;
+  operationRevision?: T;
   updatedAt?: T;
   createdAt?: T;
 }

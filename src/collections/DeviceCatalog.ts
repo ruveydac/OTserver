@@ -20,5 +20,10 @@ export const DeviceCatalog: CollectionConfig = {
     { name: 'manufacturerCount', type: 'number', required: true, admin: { readOnly: true } },
     { name: 'deviceCount', type: 'number', required: true, admin: { readOnly: true } },
     { name: 'catalog', type: 'json', required: true, admin: { hidden: true } },
+    {
+      name: 'catalogTables',
+      type: 'ui',
+      admin: { components: { Field: '@/components/DeviceCatalogTables' } },
+    },
   ],
 }

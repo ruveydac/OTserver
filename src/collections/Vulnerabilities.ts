@@ -89,7 +89,7 @@ export const VulnerabilityFeeds: CollectionConfig = {
     defaultColumns: ['source', 'status', 'lastSyncedAt', 'documentCount', 'error'],
     description:
       'Update the local vulnerability catalogs online or import original files transferred from a connected computer.',
-    group: 'Vulnerabilities',
+    group: 'Settings',
     hidden: hideFromNonAdmins,
     useAsTitle: 'source',
   },

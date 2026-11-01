@@ -1,8 +1,8 @@
 'use client'
 
-import { Button, useConfig } from '@payloadcms/ui'
+import { Button, Gutter, useConfig } from '@payloadcms/ui'
 import { useRouter } from 'next/navigation'
-import { useState, useSyncExternalStore, type FormEvent } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react'
 import './index.scss'
 
 const subscribe = () => () => {}
@@ -15,10 +15,12 @@ export default function DeviceCatalogImporter() {
     () => true,
     () => false,
   )
+  const [opened, setOpened] = useState(false)
   const [files, setFiles] = useState<File[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState('')
+  const fileInput = useRef<HTMLInputElement>(null)
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     setBusy(true)
@@ -60,50 +62,58 @@ export default function DeviceCatalogImporter() {
       setBusy(false)
     }
   }
+
+  useEffect(() => {
+    if (opened) fileInput.current?.focus()
+  }, [opened])
+
   return (
-    <section className="device-catalog-importer">
-      <h2>Import manufacturer and device JSON</h2>
-      <p>
-        No manufacturer or device data ships with the application. Import JSON to load the catalog
-        into the database, where it is shared with workers. The complete catalog is limited to 6 MiB
-        of compact JSON.
-      </p>
-      <p>
-        Select one or several files together. Each file can contain one record or an array of
-        records. IDs are the update key: existing records are replaced, new records are added, and
-        absent records are kept.
-      </p>
-      <p>
-        Manufacturer and device files can be mixed in one import. The entire selection is validated
-        before saving. Existing class mappings and human assignments are preserved.
-      </p>
-      <form onSubmit={submit} aria-busy={busy}>
-        <label htmlFor="device-catalog-files">JSON files (up to 50 files, 8 MiB total)</label>
-        <input
-          id="device-catalog-files"
-          type="file"
-          accept=".json,application/json"
-          multiple
-          disabled={!ready || busy}
-          onChange={(event) => {
-            setFiles(Array.from(event.target.files || []))
-            setError('')
-            setResult('')
+    <Gutter className="device-catalog-importer">
+      <div className="device-catalog-importer__buttons">
+        <Button
+          type="button"
+          buttonStyle="secondary"
+          extraButtonProps={{
+            'aria-controls': 'device-catalog-import',
+            'aria-expanded': opened,
           }}
-        />
-        <Button type="submit" disabled={!ready || busy || !files.length}>
-          {busy ? 'Importing catalog…' : 'Import JSON files'}
+          onClick={() => setOpened(!opened)}
+        >
+          Import JSON files
         </Button>
-      </form>
+      </div>
+      {busy || result ? (
+        <p role="status" aria-live="polite">
+          {busy ? 'Validating and saving the selected files…' : result}
+        </p>
+      ) : null}
       {error ? <p role="alert">{error}</p> : null}
-      <p role="status">
-        {result ||
-          (busy
-            ? 'Validating and saving the selected files…'
-            : files.length
-              ? `${files.length} files selected.`
-              : 'No files selected. Select JSON files to load or update the database catalog.')}
-      </p>
-    </section>
+      {opened ? (
+        <form
+          id="device-catalog-import"
+          className="device-catalog-importer__form"
+          aria-busy={busy}
+          onSubmit={submit}
+        >
+          <label htmlFor="device-catalog-files">JSON files (up to 50 files, 8 MiB total)</label>
+          <input
+            ref={fileInput}
+            id="device-catalog-files"
+            type="file"
+            accept=".json,application/json"
+            multiple
+            disabled={!ready || busy}
+            onChange={(event) => {
+              setFiles(Array.from(event.target.files || []))
+              setError('')
+              setResult('')
+            }}
+          />
+          <Button type="submit" disabled={!ready || busy || !files.length}>
+            {busy ? 'Importing catalog…' : 'Import selected files'}
+          </Button>
+        </form>
+      ) : null}
+    </Gutter>
   )
 }

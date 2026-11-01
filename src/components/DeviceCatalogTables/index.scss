@@ -1,0 +1,50 @@
+.device-catalog-tables {
+  margin: 2rem 0;
+
+  &__section + &__section {
+    margin-top: 2rem;
+  }
+
+  h2 {
+    align-items: baseline;
+    display: flex;
+    gap: 0.6rem;
+    margin: 0 0 0.75rem;
+  }
+
+  &__count {
+    color: var(--theme-elevation-500);
+    font-size: 0.9rem;
+    font-weight: 400;
+  }
+
+  &__empty {
+    color: var(--theme-elevation-600);
+  }
+
+  .table {
+    th,
+    td {
+      min-width: 8rem;
+    }
+
+    pre {
+      background: var(--theme-elevation-50);
+      border-radius: var(--style-radius-s);
+      margin: 0.5rem 0 0;
+      max-height: 16rem;
+      max-width: 32rem;
+      overflow: auto;
+      padding: 0.5rem;
+      white-space: pre-wrap;
+    }
+
+    summary {
+      cursor: pointer;
+    }
+  }
+
+  p {
+    color: var(--theme-elevation-600);
+  }
+}

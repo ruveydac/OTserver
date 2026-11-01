@@ -293,7 +293,7 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
 
 ### Vulnerability-feed operator reference
 
-Administrators use **Vulnerabilities > Vulnerability Feeds > Update feeds now** for an on-demand
+Administrators use **Settings > Vulnerability feeds > Update feeds now** for an on-demand
 refresh. Work continues in the maintenance queue after the browser closes. For isolated installations,
 set `OTSERVER_VULNERABILITY_FEEDS=off` in the application and any external maintenance worker;
 **Upload downloaded feeds** remains available without network access.

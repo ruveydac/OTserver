@@ -1,21 +1,48 @@
 .device-catalog-importer {
-  margin: 0 var(--gutter-h) 2rem;
-  max-width: 65rem;
-  color: var(--theme-text);
+  margin-block: 1rem 2rem;
   overflow-wrap: anywhere;
 
-  form {
+  &__buttons {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  &__form {
+    border-block-start: 1px solid var(--theme-elevation-300);
     display: flex;
     flex-direction: column;
     align-items: flex-start;
     gap: 1rem;
+    margin-block-start: 1rem;
+    max-width: 65rem;
+    padding-block: 1rem;
   }
+
+  label {
+    display: grid;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+
   input {
+    background: var(--theme-elevation-0);
+    border: 1px solid var(--theme-elevation-600);
+    color: var(--theme-text);
+    font: inherit;
     max-width: 100%;
+    min-width: 0;
+    padding: 0.5rem;
+  }
+
+  button,
+  input {
     min-height: 44px;
   }
-  input:focus-visible {
-    outline: 2px solid var(--theme-text);
+
+  :focus-visible {
+    outline: 2px solid currentColor;
     outline-offset: 3px;
   }
 }

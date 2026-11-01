@@ -2,7 +2,6 @@ import { default as default_1bd814bbeb1f2e089fcf3d8859fcb6f3 } from '@/component
 import { default as default_e4eda90535596a882064b1deac0ab4f0 } from '@/components/SiteTreeView'
 import { default as default_2e07829097744f37849fa311510e1aee } from '@/components/AssetClassAssetsCell'
 import { default as default_73aa8a55bcc57156906af3c0f8537645 } from '@/components/AssetClassListView'
-import { default as default_b592229da68d7e936626a45ff13c95fc } from '@/components/DeviceCatalogImporter'
 import { default as default_3f76011ea90f707ace06549950e91439 } from '@/components/AssetOwnerField'
 import { default as default_f020c52e6ea8cb54738a31fe010f551d } from '@/components/CustomAssetFields'
 import { default as default_8c78f84184d3f470067b66c225a03900 } from '@/components/AssetListInteractions'
@@ -16,6 +15,8 @@ import { default as default_c1520f8119081daafc04e2023c3ef070 } from '@/component
 import { default as default_1cf71388346ca687235889e34b2c8889 } from '@/components/OtterInterfaceField'
 import { default as default_75fff05379f2361cc5722c257b69b4b9 } from '@/components/OtterManagedSettingsField'
 import { default as default_d5e71aff688bb616206a98b246bfeca0 } from '@/components/OtterCredentialsField'
+import { default as default_53c4313c6188db5f3959fbb0619f45a8 } from '@/components/DeviceCatalogTables'
+import { default as default_b592229da68d7e936626a45ff13c95fc } from '@/components/DeviceCatalogImporter'
 import { default as default_f508ae1f898cb663ee56d6eff90b66ad } from '@/components/VulnerabilityFeedActions'
 import { default as default_db9ac62598c46d0f1db201f6af05442e } from '@/components/LogoutButton'
 import { Icon as Icon_ea112afe978e228c434ec2fb66c71b02 } from '@/components/Brand'
@@ -33,7 +34,6 @@ export const importMap = {
   '@/components/SiteTreeView#default': default_e4eda90535596a882064b1deac0ab4f0,
   '@/components/AssetClassAssetsCell#default': default_2e07829097744f37849fa311510e1aee,
   '@/components/AssetClassListView#default': default_73aa8a55bcc57156906af3c0f8537645,
-  '@/components/DeviceCatalogImporter#default': default_b592229da68d7e936626a45ff13c95fc,
   '@/components/AssetOwnerField#default': default_3f76011ea90f707ace06549950e91439,
   '@/components/CustomAssetFields#default': default_f020c52e6ea8cb54738a31fe010f551d,
   '@/components/AssetListInteractions#default': default_8c78f84184d3f470067b66c225a03900,
@@ -47,6 +47,8 @@ export const importMap = {
   '@/components/OtterInterfaceField#default': default_1cf71388346ca687235889e34b2c8889,
   '@/components/OtterManagedSettingsField#default': default_75fff05379f2361cc5722c257b69b4b9,
   '@/components/OtterCredentialsField#default': default_d5e71aff688bb616206a98b246bfeca0,
+  '@/components/DeviceCatalogTables#default': default_53c4313c6188db5f3959fbb0619f45a8,
+  '@/components/DeviceCatalogImporter#default': default_b592229da68d7e936626a45ff13c95fc,
   '@/components/VulnerabilityFeedActions#default': default_f508ae1f898cb663ee56d6eff90b66ad,
   '@/components/LogoutButton#default': default_db9ac62598c46d0f1db201f6af05442e,
   '@/components/Brand#Icon': Icon_ea112afe978e228c434ec2fb66c71b02,
