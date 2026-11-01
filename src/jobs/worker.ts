@@ -9,6 +9,10 @@ import { expireOtterLeases } from '../otter/controller'
 
 const OTTER_LEASE_SWEEP_MS = 15_000
 
+// Reclassifications are quick administrator-triggered refreshes. A separate drain keeps an
+// import's reclassification from waiting behind the long weekly maintenance job.
+const REAPPLY_TASK = 'reapply-asset-classes-v1'
+
 export const recoverQueue = async (payload: Payload, fence: WorkerFence) =>
   withWorkerFence(fence, async () => {
     // Ownership is acquired before resetting interrupted Payload claims. Completed imports remain the authority.
@@ -58,10 +62,33 @@ export const scheduleMaintenance = async (payload: Payload, fence: WorkerFence) 
     })
   })
 
+/** Runs reclassification jobs on their own loop, concurrently with the main maintenance loop. */
+const drainReapplyJobs = async (
+  payload: Payload,
+  fence: WorkerFence,
+  signal: AbortSignal,
+  stopped: () => boolean,
+) => {
+  while (!signal.aborted && !stopped()) {
+    await withWorkerFence(fence, () =>
+      payload.jobs.run({
+        queue: 'maintenance',
+        limit: 10,
+        sequential: true,
+        processingOrder: 'createdAt',
+        silent: true,
+        where: { taskSlug: { equals: REAPPLY_TASK } },
+      }),
+    )
+    await delay(1000, undefined, { signal }).catch(() => {})
+  }
+}
+
 export const runWorker = async (payload: Payload, queue: Queue, signal: AbortSignal) => {
   const fence = await acquireWorker(payload, queue)
   if (!fence) throw new Error(`Another ${queue} worker owns the queue.`)
   let lost = false
+  let stopped = false
   let heartbeat: Promise<void> = Promise.resolve()
   let timer: ReturnType<typeof setInterval> | undefined
   try {
@@ -81,6 +108,17 @@ export const runWorker = async (payload: Payload, queue: Queue, signal: AbortSig
       },
       queue === 'maintenance' ? OTTER_LEASE_SWEEP_MS : 20_000,
     )
+    // The drain and the main loop share the fence; Payload claims each job atomically, so the two
+    // runners cannot take the same job. Reclassifications stay quick even while the weekly
+    // maintenance job downloads vulnerability feeds for many minutes. Ownership loss aborts the
+    // drain with a guarded fence error; the supervisor restarts the whole worker.
+    if (queue === 'maintenance')
+      drainReapplyJobs(payload, fence, signal, () => lost || stopped).catch((error) =>
+        payload.logger.warn({
+          event: 'worker.reapply-drain-stopped',
+          error: safeFailure(error),
+        }),
+      )
     while (!signal.aborted && !lost) {
       if (queue === 'maintenance') await scheduleMaintenance(payload, fence)
       await withWorkerFence(fence, () =>
@@ -90,6 +128,7 @@ export const runWorker = async (payload: Payload, queue: Queue, signal: AbortSig
           sequential: true,
           processingOrder: 'createdAt',
           silent: true,
+          where: queue === 'maintenance' ? { taskSlug: { not_equals: REAPPLY_TASK } } : undefined,
         }),
       )
       await delay(1000, undefined, { signal }).catch(() => {})
@@ -99,6 +138,8 @@ export const runWorker = async (payload: Payload, queue: Queue, signal: AbortSig
     payload.logger.error({ event: 'worker.stopped', queue, error: safeFailure(error) })
     throw error
   } finally {
+    // Ends the drain loop when this worker run exits for any reason; the supervisor restarts it.
+    stopped = true
     if (timer) clearInterval(timer)
     await heartbeat
     if (!lost) await renewWorker(payload, fence, true).catch(() => {})

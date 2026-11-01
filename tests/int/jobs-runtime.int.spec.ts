@@ -237,8 +237,10 @@ describe('worker scheduling and execution', () => {
   it('runs one owned queue cycle and releases its heartbeat', async () => {
     const controller = new AbortController()
     const payload = makePayload()
-    payload.jobs.run.mockImplementationOnce(async () => {
-      controller.abort()
+    // The maintenance queue also drains reclassifications on its own loop, so only the main
+    // cycle (one job at a time) ends this run.
+    payload.jobs.run.mockImplementation(async (args: { limit: number }) => {
+      if (args.limit === 1) controller.abort()
     })
     await runWorker(payload as never, 'maintenance', controller.signal)
     expect(mocks.expireOtterLeases).toHaveBeenCalledWith(payload)
@@ -260,7 +262,7 @@ describe('worker scheduling and execution', () => {
     const job = new Promise<undefined>((resolve) => {
       releaseJob = () => resolve(undefined)
     })
-    payload.jobs.run.mockImplementationOnce(() => {
+    payload.jobs.run.mockImplementation(() => {
       markStarted()
       return job
     })

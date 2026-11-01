@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises'
 import { type Payload, type PayloadRequest, type RequiredDataFromCollectionSlug } from 'payload'
 
 import { writeAudit } from '../collections/AuditLogs'
@@ -6,7 +7,7 @@ import { recountAssetVulnerabilities } from './match'
 import { rawCollection } from '../integrations/payload/catalog'
 import { systemRequest } from '../integrations/payload/requests'
 import { MAX_DESCRIPTION } from './parsers'
-import { downloadFeed, feedText, type DownloadFeed } from './feedIO'
+import { downloadFeed, feedText, feedUnavailable, type DownloadFeed } from './feedIO'
 import { importNvdFeed } from './nvd'
 export * from './parsers'
 export * from './sources'
@@ -37,6 +38,10 @@ export const SYNC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000
 const BATCH_SIZE = 500
 export const MAX_CSAF_FEEDS = 500
 export const MAX_CSAF_DOCUMENTS = 50_000
+// Publishers can list a document in a ROLIE index that they never serve (CISA shipped such an
+// entry in its IT feed). A handful of those is skipped; more means a provider is broken and the
+// previous snapshot must survive instead.
+export const MAX_CSAF_UNAVAILABLE = 25
 
 export type SyncResult = {
   documentCount: number
@@ -202,11 +207,27 @@ const lastSynchronizedAt = async (payload: Payload): Promise<Date | undefined> =
 export const loadCsafSnapshot = async (
   download: DownloadFeed,
   previousState: Record<string, unknown>,
-): Promise<{ documents?: FeedDocument[]; state: Record<string, string> }> => {
-  const aggregator = parseCsafAggregator(JSON.parse(await feedText(download, CSAF_AGGREGATOR_URL)))
+): Promise<{
+  documents?: FeedDocument[]
+  state: Record<string, string>
+  unavailable: string[]
+}> => {
+  // CERT@VDE's edge intermittently answers 404 under burst. A 404 only proves a document is
+  // unserved after a second request, and a skipped document removes its advisories from the
+  // catalog, so it must not rest on one flaky response.
+  const fetchFeed = async (url: string) => {
+    try {
+      return await download(url)
+    } catch (error) {
+      if ((error as { status?: number }).status !== 404) throw error
+      await delay(2000)
+      return download(url)
+    }
+  }
+  const aggregator = parseCsafAggregator(JSON.parse(await feedText(fetchFeed, CSAF_AGGREGATOR_URL)))
   const feedURLs = new Set<string>(CISA_CSAF_FEED_URLS)
   for (const metadataURL of aggregator) {
-    const feeds = parseCsafProviderMetadata(JSON.parse(await feedText(download, metadataURL)))
+    const feeds = parseCsafProviderMetadata(JSON.parse(await feedText(fetchFeed, metadataURL)))
     for (const url of feeds) feedURLs.add(url)
   }
   if (feedURLs.size > MAX_CSAF_FEEDS) throw new Error('The CSAF feed limit was exceeded.')
@@ -214,7 +235,7 @@ export const loadCsafSnapshot = async (
   const entries = new Map<string, string>()
   const state: Record<string, string> = {}
   for (const feedURL of feedURLs) {
-    const feed = parseRolieFeed(JSON.parse(await feedText(download, feedURL)))
+    const feed = parseRolieFeed(JSON.parse(await feedText(fetchFeed, feedURL)))
     state[feedURL] = feed.updated
     for (const entry of feed.entries) entries.set(entry.url, entry.updated)
     if (entries.size > MAX_CSAF_DOCUMENTS) throw new Error('The CSAF document limit was exceeded.')
@@ -223,20 +244,34 @@ export const loadCsafSnapshot = async (
     Object.keys(state).length === Object.keys(previousState).length &&
     Object.entries(state).every(([url, updated]) => previousState[url] === updated)
   ) {
-    return { state }
+    return { state, unavailable: [] }
   }
 
   const documents: FeedDocument[] = []
+  const unavailable: string[] = []
   const urls = [...entries.keys()]
   for (let index = 0; index < urls.length; index += 10) {
     const parsed = await Promise.all(
-      urls
-        .slice(index, index + 10)
-        .map(async (url) => parseCsafDocument(JSON.parse(await feedText(download, url)))),
+      urls.slice(index, index + 10).map(async (url) => {
+        try {
+          return parseCsafDocument(JSON.parse(await feedText(fetchFeed, url)))
+        } catch (error) {
+          // Only a document the publisher itself does not serve is skippable. A failed download,
+          // bad checksum, or malformed document keeps the whole previous snapshot.
+          if (!feedUnavailable(error)) throw error
+          unavailable.push(url)
+          return []
+        }
+      }),
     )
     documents.push(...parsed.flat())
   }
-  return { documents: mergeCsafDocuments(documents), state }
+  if (unavailable.length > MAX_CSAF_UNAVAILABLE) {
+    throw new Error(
+      `The CSAF feeds list ${unavailable.length} documents the publishers do not serve; the previous snapshot was retained.`,
+    )
+  }
+  return { documents: mergeCsafDocuments(documents), state, unavailable }
 }
 
 const runSync = async (
@@ -314,6 +349,12 @@ const runSync = async (
       const previousFeed = await feedState(payload, 'csaf')
       const previousState = record(previousFeed?.state)
       const snapshot = await loadCsafSnapshot(download, previousState)
+      if (snapshot.unavailable.length)
+        payload.logger.warn({
+          event: 'csaf.unavailable-documents',
+          count: snapshot.unavailable.length,
+          sample: snapshot.unavailable.slice(0, 10),
+        })
       if (snapshot.documents) {
         await replaceCsafVulnerabilities(payload, snapshot.documents)
         loaded += snapshot.documents.length

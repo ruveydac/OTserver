@@ -64,18 +64,39 @@ const valueFor = (key: string, value: unknown) => {
   return <pre>{JSON.stringify(value, null, 2)}</pre>
 }
 
+// Long strings and block values (URL lists, JSON) span the grid like wide details elsewhere.
+const isWideValue = (key: string, value: unknown) =>
+  (typeof value === 'string' && value.length > 80) ||
+  (typeof value === 'object' && (Array.isArray(value) ? /url/i.test(key) : true))
+
 const dataDetails = (data: Record<string, unknown>) => (
   <dl className="asset-view__details">
     {Object.entries(data)
       .filter(([, value]) => value !== undefined && value !== null)
       .map(([key, value]) => (
-        <div className="asset-view__detail asset-view__detail--wide" key={key}>
+        <div
+          className={
+            isWideValue(key, value)
+              ? 'asset-view__detail asset-view__detail--wide'
+              : 'asset-view__detail'
+          }
+          key={key}
+        >
           <dt>{labelFor(key)}</dt>
           <dd>{valueFor(key, value)}</dd>
         </div>
       ))}
   </dl>
 )
+
+const evidenceDetails = (label: string, evidence: unknown) => (
+  <details className="asset-view__evidence">
+    <summary>{label}</summary>
+    <pre>{JSON.stringify(evidence, null, 2)}</pre>
+  </details>
+)
+
+const catalogCard = 'asset-view__section asset-view__section--wide asset-view__catalog-reference'
 
 export default function CatalogReference({
   asset,
@@ -94,59 +115,82 @@ export default function CatalogReference({
   const manufacturers = current
     ? referenceCatalog.manufacturers.filter(({ id }) => match.manufacturerIDs?.includes(id))
     : []
+  const status =
+    revision === 'unloaded'
+      ? 'No device catalog has been imported. An administrator can import manufacturer and device JSON under Settings > Device catalog.'
+      : !match
+        ? 'Catalog matching has not run for this asset yet.'
+        : !current
+          ? 'Catalog evidence is from an older revision. Background reclassification will refresh it.'
+          : match.status === 'ambiguous'
+            ? 'Conflicting catalog candidates. No catalog class is assigned automatically.'
+            : !products.length
+              ? 'No product matches the recorded manufacturer and product qualifiers.'
+              : 'Reference capabilities describe the product, not enabled services, installed updates, or its deployed function.'
   return (
-    <section className="asset-view__section asset-view__section--wide asset-view__catalog-reference">
-      <div className="asset-view__section-heading">
-        <h2>Connected manufacturer and device information</h2>
-      </div>
-      <p>
-        {revision === 'unloaded'
-          ? 'No device catalog has been imported. An administrator can import manufacturer and device JSON under Settings > Device catalog.'
-          : !match
-            ? 'Catalog matching has not run for this asset yet.'
-            : !current
-              ? 'Catalog evidence is from an older revision. Background reclassification will refresh it.'
-              : match.status === 'ambiguous'
-                ? 'Conflicting catalog candidates. No catalog class is assigned automatically.'
-                : !products.length
-                  ? 'No product matches the recorded manufacturer and product qualifiers.'
-                  : 'Reference capabilities describe the product, not enabled services, installed updates, or its deployed function.'}
-      </p>
-      {manufacturers.map((manufacturer) => {
-        return (
-          <article key={manufacturer.id}>
-            <h3>{manufacturer.data.name}</h3>
-            <p>
-              Manufacturer ID: <code>{manufacturer.id}</code>
-            </p>
-            {dataDetails(manufacturer.data)}
-            <details>
-              <summary>Manufacturer match evidence</summary>
-              <pre>{JSON.stringify(match?.manufacturerEvidence, null, 2)}</pre>
-            </details>
-          </article>
-        )
-      })}
+    <>
+      <section className={catalogCard}>
+        <div className="asset-view__section-heading">
+          <h2>Connected manufacturer and device information</h2>
+          {products.length ? (
+            <span>
+              {products.length} catalog candidate{products.length === 1 ? '' : 's'}
+            </span>
+          ) : null}
+        </div>
+        <p className="asset-view__muted" role="status">
+          {status}
+        </p>
+        <dl className="asset-view__details">
+          <div className="asset-view__detail">
+            <dt>Catalog revision</dt>
+            <dd>
+              <code>{match?.catalogRevision || revision}</code>
+            </dd>
+          </div>
+        </dl>
+      </section>
+      {manufacturers.map((manufacturer) => (
+        <section className={catalogCard} key={manufacturer.id}>
+          <div className="asset-view__section-heading">
+            <h2>{manufacturer.data.name}</h2>
+            <span>Manufacturer</span>
+          </div>
+          <dl className="asset-view__details">
+            <div className="asset-view__detail">
+              <dt>Manufacturer ID</dt>
+              <dd>
+                <code>{manufacturer.id}</code>
+              </dd>
+            </div>
+          </dl>
+          {dataDetails(manufacturer.data)}
+          {evidenceDetails('Manufacturer match evidence', match?.manufacturerEvidence)}
+        </section>
+      ))}
       {products.slice(0, 20).map((product) => {
         const evidence = match?.products.find(({ id }) => id === product.id)
         const manufacturerID = evidence?.manufacturerID || product.manufacturer_id
         return (
-          <article key={product.id}>
-            <h3>{String(product.data.model || product.data.product_family || product.id)}</h3>
+          <section className={catalogCard} key={product.id}>
+            <div className="asset-view__section-heading">
+              <h2>{String(product.data.model || product.data.product_family || product.id)}</h2>
+              <span>Device</span>
+            </div>
             <dl className="asset-view__details">
-              <div className="asset-view__detail asset-view__detail--wide">
+              <div className="asset-view__detail">
                 <dt>Device ID</dt>
                 <dd>
                   <code>{product.id}</code>
                 </dd>
               </div>
-              <div className="asset-view__detail asset-view__detail--wide">
+              <div className="asset-view__detail">
                 <dt>Manufacturer ID</dt>
                 <dd>
                   <code>{manufacturerID || 'Unavailable'}</code>
                 </dd>
               </div>
-              <div className="asset-view__detail asset-view__detail--wide">
+              <div className="asset-view__detail">
                 <dt>Device type ID</dt>
                 <dd>
                   <code>{product.device_type_id}</code>
@@ -154,34 +198,24 @@ export default function CatalogReference({
               </div>
             </dl>
             {dataDetails(product.data)}
-            <details>
-              <summary>Match and source evidence</summary>
-              <pre>
-                {JSON.stringify(
-                  {
-                    match: evidence?.evidence,
-                    manufacturer: match?.manufacturerEvidence,
-                    source: product.data.evidence_json,
-                  },
-                  null,
-                  2,
-                )}
-              </pre>
-            </details>
-          </article>
+            {evidenceDetails('Match and source evidence', {
+              match: evidence?.evidence,
+              manufacturer: match?.manufacturerEvidence,
+              source: product.data.evidence_json,
+            })}
+          </section>
         )
       })}
-      {products.length > 20 ? <p>Only the first 20 catalog candidates are shown.</p> : null}
-      <p>
-        Catalog revision: <code>{match?.catalogRevision || revision}</code>
-      </p>
-      <p>
+      {products.length > 20 ? (
+        <p role="status">Only the first 20 catalog candidates are shown.</p>
+      ) : null}
+      <p className="asset-view__note">
         Metadata schemas: {metadataLicense.attribution}.{' '}
         <a href={metadataLicense.licenseURL} target="_blank" rel="noopener noreferrer">
           {metadataLicense.license}
         </a>
         .
       </p>
-    </section>
+    </>
   )
 }

@@ -92,7 +92,9 @@ Main locations:
   `assignmentRules[].enabled` toggles individual regex rules. Missing flags mean enabled for old
   records. Preserve edits and disabled flags on startup. Only clear built-in group mappings are
   seeded once. Catalog revisions and rule/mapping/toggle/priority changes enqueue the existing
-  fenced maintenance reclassification job.
+  fenced maintenance reclassification job. The maintenance worker runs reapply jobs on a dedicated
+  concurrent drain so an import's reclassification completes in seconds instead of waiting behind
+  the weekly maintenance job's multi-minute vulnerability sync.
 - `assets.metadataMatch` is server-owned, site-scoped derived evidence containing the catalog
   revision, matched manufacturer UUIDs, device UUIDs with their manufacturer/group UUID references,
   status, and matched conditions. Recompute it on asset writes and reclassification, even for
@@ -246,7 +248,10 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
 - Match only recorded metadata. Never add an active vulnerability probe, exploit, or scanner check.
 - CSAF sources are the CERT@VDE aggregator and CISA OT/IT ROLIE feeds. Refresh CSAF as one complete
   snapshot, preserve the previous snapshot on any provider failure, and never overwrite NVD-owned
-  records with CSAF data.
+  records with CSAF data. Publishers sometimes index an advisory they never served (CISA's IT feed
+  listed `va-26-274-03.json`); a 404 confirmed by a second request is skipped, logged, and bounded
+  by `MAX_CSAF_UNAVAILABLE`, while any other failure still retains the previous snapshot. Offline,
+  such a gap requires the administrator's explicit `skipMissing` confirmation.
 - Count a CVE only when fuzzy vendor/product matching succeeds and a reported asset version satisfies
   an affected NVD CPE or CSAF product-tree exact version or range. Missing version evidence does not
   count.
@@ -313,8 +318,10 @@ Required files:
 NVD years can be imported in batches; unselected years and other sources remain intact. Coverage
 stays partial until all annual years from 2002 onward have been loaded. For CSAF, check the initial
 aggregator and CISA indexes, transfer files from the resulting missing-file links, and repeat until
-the snapshot is complete. Preserve `hostname/path/to/file.json` directories for repeated filenames,
-or use **Upload this file** beside the specific missing URL.
+the snapshot is complete. If a publisher lists an advisory it does not serve, **Import without these
+files** must be confirmed explicitly; only that confirmed gap is left out of the snapshot. Preserve
+`hostname/path/to/file.json` directories for repeated filenames, or use **Upload this file** beside
+the specific missing URL.
 
 Each upload is limited to 500 MiB, each selection to 8 GiB, and decompressed feeds to 2 GiB. Prefer
 compressed NVD files for large years. Staged files expire after seven days, except those needed by

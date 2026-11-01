@@ -2356,6 +2356,7 @@ export interface TaskVulnerabilityFeedSyncV1 {
       | number
       | boolean
       | null;
+    skipMissing?: boolean | null;
   };
   output?: unknown;
 }

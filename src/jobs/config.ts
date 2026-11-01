@@ -44,6 +44,7 @@ export const jobs: JobsConfig = {
         },
         { name: 'batchID', type: 'text' },
         { name: 'uploadIDs', type: 'json' },
+        { name: 'skipMissing', type: 'checkbox' },
       ],
       handler: async ({ input, req }) => {
         if (input.version !== 1 || currentWorker()?.queue !== 'maintenance')

@@ -40,6 +40,8 @@ import {
   parseNvdMeta,
   parseRolieFeed,
   mergeCsafDocuments,
+  loadCsafSnapshot,
+  MAX_CSAF_UNAVAILABLE,
   syncVulnerabilityFeeds,
   upsertVulnerabilities,
 } from '../../src/vulnerabilities/feeds'
@@ -373,6 +375,76 @@ describe('feed parsing', () => {
     expect(() => parseCsafProviderMetadata({ metadata_version: '2.0' })).toThrow('metadata')
     expect(() => parseRolieFeed({ feed: { entry: [], updated: 'invalid' } })).toThrow('ROLIE')
     expect(() => parseCsafDocument({ document: {}, vulnerabilities: [] })).toThrow('version 2.0')
+  })
+
+  it('skips CSAF documents the publisher lists but does not serve', async () => {
+    const unavailable = Object.assign(new Error('responded with 404.'), { status: 404 })
+    const routing = (document: (url: string) => Promise<Buffer>) => async (url: string) => {
+      if (url === CSAF_AGGREGATOR_URL) return Buffer.from(JSON.stringify(await csafAggregator()))
+      if (url.endsWith('/provider-metadata.json'))
+        return Buffer.from(JSON.stringify(await csafProviderMetadata()))
+      if (url.endsWith('/feed.json') || CISA_CSAF_FEED_URLS.includes(url as never))
+        return Buffer.from(JSON.stringify(await csafRolie()))
+      return document(url)
+    }
+
+    const snapshot = await loadCsafSnapshot(
+      routing(async (url) => {
+        // CISA's IT feed listed an advisory that its repository never served.
+        if (url.endsWith('example-2026-001.json')) throw unavailable
+        throw new Error(`${url} is unavailable`)
+      }),
+      {},
+    )
+    expect(snapshot.documents).toEqual([])
+    expect(snapshot.unavailable).toEqual([
+      'https://aggregator.certvde.com/.well-known/csaf-aggregator/example/white/2026/example-2026-001.json',
+    ])
+
+    // A 404 is only believed after a second request, so one flaky response keeps the advisory.
+    let attempts = 0
+    const flaky = await loadCsafSnapshot(
+      routing(async (url) => {
+        if (!url.endsWith('example-2026-001.json')) throw new Error(`${url} is unavailable`)
+        attempts += 1
+        if (attempts === 1) throw unavailable
+        return Buffer.from(JSON.stringify(await csafDocument()))
+      }),
+      {},
+    )
+    expect(flaky.documents).toHaveLength(1)
+    expect(flaky.unavailable).toEqual([])
+
+    // A refused connection or any other failure still keeps the previous snapshot intact.
+    await expect(
+      loadCsafSnapshot(
+        routing(async (url) => {
+          throw new Error(`${url} is unavailable`)
+        }),
+        {},
+      ),
+    ).rejects.toThrow('is unavailable')
+  })
+
+  it('retains the previous CSAF snapshot when publishers stop serving many documents', async () => {
+    const entries = Array.from({ length: MAX_CSAF_UNAVAILABLE + 1 }, (_, index) => ({
+      content: {
+        src: `https://aggregator.certvde.com/.well-known/csaf-aggregator/example/white/2026/example-${index}.json`,
+      },
+      updated: '2026-09-11T06:00:00Z',
+    }))
+    await expect(
+      loadCsafSnapshot(async (url) => {
+        if (url === CSAF_AGGREGATOR_URL) return Buffer.from(JSON.stringify(await csafAggregator()))
+        if (url.endsWith('/provider-metadata.json'))
+          return Buffer.from(JSON.stringify(await csafProviderMetadata()))
+        if (url.endsWith('/feed.json') || CISA_CSAF_FEED_URLS.includes(url as never))
+          return Buffer.from(
+            JSON.stringify({ feed: { entry: entries, updated: '2026-09-11T06:30:00Z' } }),
+          )
+        throw Object.assign(new Error(`${url} responded with 404.`), { status: 404 })
+      }, {}),
+    ).rejects.toThrow('do not serve')
   })
 
   it('maps every CSAF product-tree shape onto affected version constraints', () => {
