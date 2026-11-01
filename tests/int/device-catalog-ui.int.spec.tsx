@@ -28,6 +28,80 @@ vi.mock('@payloadcms/ui', () => ({
     )
   },
   Gutter: ({ children, ...props }: { children: ReactNode }) => <div {...props}>{children}</div>,
+  Pagination: ({
+    hasNextPage,
+    hasPrevPage,
+    onChange,
+    page,
+    totalPages,
+  }: {
+    hasNextPage: boolean
+    hasPrevPage: boolean
+    onChange: (page: number) => void
+    page: number
+    totalPages: number
+  }) => (
+    <div className="paginator">
+      <button disabled={!hasPrevPage} onClick={() => onChange(page - 1)}>
+        Previous
+      </button>
+      <span>{`${page} of ${totalPages}`}</span>
+      <button disabled={!hasNextPage} onClick={() => onChange(page + 1)}>
+        Next
+      </button>
+    </div>
+  ),
+  PerPage: ({
+    handleChange,
+    limit,
+    limits,
+  }: {
+    handleChange: (limit: number) => void
+    limit: number
+    limits: number[]
+  }) => (
+    <select
+      aria-label="Per page"
+      onChange={(event) => handleChange(Number(event.target.value))}
+      value={limit}
+    >
+      {limits.map((value) => (
+        <option key={value} value={value}>
+          {value}
+        </option>
+      ))}
+    </select>
+  ),
+  Table: ({
+    columns,
+    data,
+  }: {
+    columns: Array<{ accessor: string; Heading: ReactNode; renderedCells: ReactNode[] }>
+    data: Array<Record<string, unknown>>
+  }) => (
+    <div className="table">
+      <table>
+        <thead>
+          <tr>
+            {columns.map((column) => (
+              <th key={column.accessor} scope="col">
+                {column.Heading}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((row, index) => (
+            <tr data-id={String(row.id)} key={String(row.id ?? index)}>
+              {columns.map((column) => (
+                <td key={column.accessor}>{column.renderedCells[index]}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  ),
   useConfig: () => ({ config: { routes: { api: '/api' } } }),
   useField: () => ({ value: mocks.catalog }),
 }))
@@ -229,6 +303,48 @@ describe('device catalog tables', () => {
     expect(container.textContent).toContain('1 entry')
     expect(container.textContent).toContain('Manufacturer ID')
     expect(container.querySelectorAll('details')).toHaveLength(8)
+  })
+
+  it('paginates the table with the payload pagination controls', async () => {
+    mocks.catalog = {
+      manufacturers: Array.from({ length: 12 }, (_, index) => ({
+        id: `m${index}`,
+        data: { name: `Maker ${String(index).padStart(2, '0')}` },
+        rules: {},
+      })),
+    }
+    await render(createElement(DeviceCatalogTables, { field: {}, path: 'catalogTables' } as never))
+
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(10)
+    expect(container.textContent).toContain('1–10 of 12')
+    expect(button('Previous')!.hasAttribute('disabled')).toBe(true)
+
+    await click('Next')
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(2)
+    expect(container.textContent).toContain('11–12 of 12')
+    expect(button('Next')!.hasAttribute('disabled')).toBe(true)
+  })
+
+  it('changes the page size and returns to the first page', async () => {
+    mocks.catalog = {
+      manufacturers: Array.from({ length: 12 }, (_, index) => ({
+        id: `m${index}`,
+        data: { name: `Maker ${String(index).padStart(2, '0')}` },
+        rules: {},
+      })),
+    }
+    await render(createElement(DeviceCatalogTables, { field: {}, path: 'catalogTables' } as never))
+    await click('Next')
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(2)
+
+    await act(async () => {
+      const select = container.querySelector('select')!
+      select.value = '25'
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(12)
+    expect(container.textContent).toContain('1–12 of 12')
   })
 
   it('renders each table with its own empty message', async () => {

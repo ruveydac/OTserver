@@ -1,7 +1,8 @@
 'use client'
 
-import { useField } from '@payloadcms/ui'
-import type { UIFieldClientComponent } from 'payload'
+import { Pagination, PerPage, Table, useField } from '@payloadcms/ui'
+import type { ClientField, UIFieldClientComponent } from 'payload'
+import { useState } from 'react'
 
 import './index.scss'
 
@@ -15,6 +16,9 @@ type Catalog = {
   devices?: Entry[]
   manufacturers?: Entry[]
 }
+
+const PAGE_LIMITS = [5, 10, 25, 50, 100]
+const DEFAULT_LIMIT = 10
 
 const dataOf = (entry: Entry) =>
   entry.data && typeof entry.data === 'object' && !Array.isArray(entry.data) ? entry.data : {}
@@ -76,35 +80,49 @@ const columnsFor = (rows: Entry[], leading: string[] = []) => {
 }
 
 const CatalogTable = ({ rows, leading }: { rows: Entry[]; leading?: string[] }) => {
+  const [limit, setLimit] = useState(DEFAULT_LIMIT)
+  const [page, setPage] = useState(1)
   const columns = columnsFor(rows, leading)
+  const totalPages = Math.max(1, Math.ceil(rows.length / limit))
+  const currentPage = Math.min(page, totalPages)
+  const visibleRows = rows.slice((currentPage - 1) * limit, currentPage * limit)
+  const tableColumns = columns.map((column) => ({
+    accessor: column,
+    active: true,
+    Heading: labelFor(column),
+    field: { name: column, type: 'text' } as ClientField,
+    renderedCells: visibleRows.map((row) => {
+      const data = dataOf(row)
+      return renderValue(column, column in data ? data[column] : row[column])
+    }),
+  }))
+
   return (
-    <div className="table table--appearance-condensed">
-      <table cellPadding={0} cellSpacing={0}>
-        <thead>
-          <tr>
-            {columns.map((column) => (
-              <th key={column} scope="col">
-                {labelFor(column)}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, index) => {
-            const data = dataOf(row)
-            return (
-              <tr data-id={row.id ?? index} key={row.id ?? index}>
-                {columns.map((column) => (
-                  <td key={column}>
-                    {renderValue(column, column in data ? data[column] : row[column])}
-                  </td>
-                ))}
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </div>
+    <>
+      <Table appearance="condensed" columns={tableColumns} data={visibleRows} />
+      <div className="page-controls">
+        <Pagination
+          hasNextPage={currentPage < totalPages}
+          hasPrevPage={currentPage > 1}
+          nextPage={currentPage + 1}
+          onChange={setPage}
+          page={currentPage}
+          prevPage={currentPage - 1}
+          totalPages={totalPages}
+        />
+        <div className="page-controls__page-info">
+          {`${(currentPage - 1) * limit + 1}–${Math.min(currentPage * limit, rows.length)} of ${rows.length}`}
+        </div>
+        <PerPage
+          handleChange={(value) => {
+            setLimit(value)
+            setPage(1)
+          }}
+          limit={limit}
+          limits={PAGE_LIMITS}
+        />
+      </div>
+    </>
   )
 }
 
