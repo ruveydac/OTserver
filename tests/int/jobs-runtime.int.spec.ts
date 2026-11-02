@@ -159,7 +159,7 @@ describe('worker scheduling and execution', () => {
     }),
     jobs: {
       queue: vi.fn(async () => ({ id: 'maintenance-job' })),
-      run: vi.fn(async () => undefined),
+      run: vi.fn(async (_args: { limit: number }) => undefined),
     },
     logger: { error: vi.fn() },
     update: vi.fn(async () => ({ docs: [] })),
