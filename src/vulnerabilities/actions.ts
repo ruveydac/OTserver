@@ -22,9 +22,9 @@ const requireOnline = () => {
     throw new APIError('Online feed downloads are disabled. Upload downloaded feeds instead.', 409)
 }
 const batchFromRequest = async (req: PayloadRequest) => {
-  let data: { batchID?: unknown }
+  let data: { batchID?: unknown; skipMissing?: unknown }
   try {
-    data = (await req.json!()) as { batchID?: unknown }
+    data = (await req.json!()) as { batchID?: unknown; skipMissing?: unknown }
   } catch {
     throw new APIError('Send a JSON upload selection.', 400)
   }
@@ -33,7 +33,7 @@ const batchFromRequest = async (req: PayloadRequest) => {
     !/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(data.batchID)
   )
     throw new APIError('Invalid upload selection ID.', 400)
-  return data.batchID
+  return { batchID: data.batchID, skipMissing: data.skipMissing === true }
 }
 
 export const feedControl: PayloadHandler = async (req) => {
@@ -72,7 +72,8 @@ export const feedControl: PayloadHandler = async (req) => {
 export const checkOffline: PayloadHandler = async (req) => {
   await requireAdmin(req)
   try {
-    return Response.json((await inspectOffline(req, await batchFromRequest(req))).selection)
+    const { batchID } = await batchFromRequest(req)
+    return Response.json((await inspectOffline(req, batchID)).selection)
   } catch (error) {
     throw new APIError(
       error instanceof Error ? error.message : 'Could not check the uploaded files.',
@@ -84,6 +85,7 @@ export const checkOffline: PayloadHandler = async (req) => {
 const queueFeedUpdate = async (
   req: PayloadRequest,
   offline?: Awaited<ReturnType<typeof inspectOffline>>,
+  skipMissing = false,
 ) => {
   const source = offline?.selection.source
   // Both enqueue paths contend on the same catalog document. Worker fencing serializes execution.
@@ -132,7 +134,12 @@ const queueFeedUpdate = async (
           method: offline ? 'offline' : 'online',
           submittedBy: String(req.user!.id),
           ...(offline
-            ? { batchID: offline.selection.batchID, source, uploadIDs: offline.uploadIDs }
+            ? {
+                batchID: offline.selection.batchID,
+                source,
+                uploadIDs: offline.uploadIDs,
+                ...(skipMissing ? { skipMissing: true } : {}),
+              }
             : {}),
         },
       })
@@ -200,18 +207,19 @@ export const refreshFeeds: PayloadHandler = async (req) => {
 
 export const importOffline: PayloadHandler = async (req) => {
   await requireAdmin(req)
+  const { batchID, skipMissing } = await batchFromRequest(req)
   let offline: Awaited<ReturnType<typeof inspectOffline>>
   try {
-    offline = await inspectOffline(req, await batchFromRequest(req))
+    offline = await inspectOffline(req, batchID)
   } catch (error) {
     throw new APIError(
       error instanceof Error ? error.message : 'Could not check the uploaded files.',
       400,
     )
   }
-  if (offline.selection.missing.length)
+  if (offline.selection.missing.length && !(skipMissing && offline.selection.source === 'csaf'))
     throw new APIError('Upload the missing files before importing.', 400)
-  const job = await queueFeedUpdate(req, offline)
+  const job = await queueFeedUpdate(req, offline, skipMissing)
   return Response.json({ jobID: String(job.id) }, { status: 202 })
 }
 
@@ -222,6 +230,7 @@ export type FeedJobInput = {
   source?: FeedSource | null
   batchID?: string | null
   uploadIDs?: unknown
+  skipMissing?: boolean | null
 }
 
 export const executeFeedUpdate = async (payload: Payload, input: FeedJobInput) => {
@@ -251,7 +260,7 @@ export const executeFeedUpdate = async (payload: Payload, input: FeedJobInput) =
     const offline = await inspectOffline(req, input.batchID, input.uploadIDs)
     if (offline.selection.source !== input.source)
       throw new APIError('The offline source changed.', 400)
-    await validateOfflineContents(offline)
+    await validateOfflineContents(offline, { skipMissing: input.skipMissing === true })
     return await syncVulnerabilityFeeds(payload, {
       force: true,
       failOnSourceError: true,

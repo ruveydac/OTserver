@@ -9,6 +9,12 @@ const DOWNLOAD_TIMEOUT_MS = 15 * 60 * 1000
 export type FeedBody = Buffer | AsyncIterable<Uint8Array>
 export type FeedOptions = { gzip?: boolean; sha256?: string }
 export type DownloadFeed = (url: string, options?: FeedOptions) => Promise<FeedBody>
+export const MISSING_OFFLINE_FILE = 'MISSING_OFFLINE_FILE'
+
+/** The publisher lists this feed but does not serve it: an HTTP 404, or a file left out offline. */
+export const feedUnavailable = (error: unknown): boolean =>
+  (error as { code?: string }).code === MISSING_OFFLINE_FILE ||
+  (error as { status?: number }).status === 404
 
 export async function* feedChunks(body: FeedBody): AsyncGenerator<Uint8Array> {
   if (Buffer.isBuffer(body)) {
@@ -63,7 +69,10 @@ export const downloadFeed: DownloadFeed = async (url, options) => {
     headers: { 'user-agent': 'OTserver vulnerability catalog sync' },
     signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
   })
-  if (!response.ok || !response.body) throw new Error(`${url} responded with ${response.status}.`)
+  if (!response.ok || !response.body)
+    throw Object.assign(new Error(`${url} responded with ${response.status}.`), {
+      status: response.status,
+    })
   return decodeFeed(
     verifyFeed(
       response.body as unknown as AsyncIterable<Uint8Array>,

@@ -3,6 +3,8 @@ import type { DocumentViewServerProps } from 'payload'
 import type { ReactNode } from 'react'
 
 import CopyButton from '@/components/AssetView/CopyButton'
+import CatalogReference from '@/components/AssetView/CatalogReference'
+import { activeCatalog } from '@/metadata/runtime'
 import DensityToggle from '@/components/AssetView/DensityToggle'
 import AssetVulnerabilityReviewActions from '@/components/AssetVulnerabilityReviewActions'
 import { VULNERABILITY_PAGE_SIZE } from '@/components/AssetVulnerabilitiesView'
@@ -34,6 +36,7 @@ const tabs = [
   { id: 'overview', label: 'Overview' },
   { id: 'network', label: 'Network' },
   { id: 'hardware', label: 'Hardware' },
+  { id: 'connected', label: 'Connected information' },
   { id: 'security', label: 'Security' },
   { id: 'discovery', label: 'Discovery' },
   { id: 'history', label: 'History' },
@@ -374,6 +377,8 @@ const AssetView = async (props: DocumentViewServerProps) => {
   })
 
   const request = props.initPageResult.req
+  const metadataSnapshot =
+    selectedTab === 'connected' ? await activeCatalog(props.payload, request) : undefined
   const authorization = await getAuthorization(request)
   const canReviewVulnerabilities = Boolean(
     authorization.isAdmin || authorization.writableSiteIDs.includes(idOf(asset.site)),
@@ -665,6 +670,16 @@ const AssetView = async (props: DocumentViewServerProps) => {
           { label: 'Baseline', value: asset.baselined ? 'Baselined' : 'Not baselined' },
         ]}
         title="Hardware record"
+      />
+      <Section
+        title="Reported product qualifiers"
+        details={[
+          { label: 'Product family', value: asset.productFamily },
+          { label: 'Part number', value: asset.partNumber },
+          { label: 'Order number', value: asset.orderNumber },
+          { label: 'Software version', value: asset.softwareVersion },
+          { label: 'Version component', value: asset.versionComponent },
+        ]}
       />
       {props.initPageResult.req.user ? (
         <DeviceIdentity
@@ -984,17 +999,21 @@ const AssetView = async (props: DocumentViewServerProps) => {
   )
 
   const mainContent =
-    selectedTab === 'network'
-      ? network
-      : selectedTab === 'hardware'
-        ? hardware
-        : selectedTab === 'security'
-          ? security
-          : selectedTab === 'discovery'
-            ? discovery
-            : selectedTab === 'history'
-              ? history
-              : overview
+    selectedTab === 'network' ? (
+      network
+    ) : selectedTab === 'hardware' ? (
+      hardware
+    ) : selectedTab === 'connected' ? (
+      <CatalogReference asset={asset} snapshot={metadataSnapshot} />
+    ) : selectedTab === 'security' ? (
+      security
+    ) : selectedTab === 'discovery' ? (
+      discovery
+    ) : selectedTab === 'history' ? (
+      history
+    ) : (
+      overview
+    )
 
   return (
     <main className="asset-view" data-density="comfortable">

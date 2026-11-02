@@ -7,6 +7,9 @@ import { getPayload, type Payload, type RequiredDataFromCollectionSlug } from 'p
 import { AssetClasses, reapplyAssetClassRules } from '../../src/collections/AssetClasses'
 import { acquireWorker, renewWorker } from '../../src/jobs/ownership'
 import { withWorkerFence } from '../../src/integrations/payload/workerContext'
+import { unloadedCatalog } from '../../src/metadata/runtime'
+
+const matchDeviceMetadata = unloadedCatalog.match
 
 const queuedReapply = async (payload: Payload, assetClassID: string) => {
   const jobs = await payload.find({
@@ -68,6 +71,7 @@ describe('asset-class rule jobs', () => {
                 assetClass: 'other',
                 fieldProvenance: { assetClass: { quality: 'human', source: 'human' } },
                 id: 'human',
+                metadataMatch: matchDeviceMetadata({ vendor: 'Acme', model: 'Drive' }),
                 model: 'Drive',
                 vendor: 'Acme',
               },
@@ -77,6 +81,7 @@ describe('asset-class rule jobs', () => {
                   assetClass: { quality: 'medium', source: 'asset-class-rule' },
                 },
                 id: 'current',
+                metadataMatch: matchDeviceMetadata({ vendor: 'Acme', model: 'Drive' }),
                 model: 'Drive',
                 vendor: 'Acme',
               },
@@ -84,7 +89,13 @@ describe('asset-class rule jobs', () => {
             hasNextPage: true,
           }
         return {
-          docs: [{ assetClass: 'drive', fieldProvenance: 'invalid', id: 'fallback' }],
+          docs: [
+            {
+              assetClass: 'drive',
+              fieldProvenance: { assetClass: { quality: 'medium', source: 'asset-class-rule' } },
+              id: 'fallback',
+            },
+          ],
           hasNextPage: false,
         }
       }),
@@ -92,8 +103,12 @@ describe('asset-class rule jobs', () => {
     }
 
     await expect(reapplyAssetClassRules({ context: {}, payload } as never)).resolves.toEqual({
+      catalogRevision: matchDeviceMetadata({}).catalogRevision,
       scanned: 3,
       updated: 1,
+      matched: 0,
+      ambiguous: 0,
+      unchanged: 2,
     })
     expect(update).toHaveBeenCalledTimes(1)
     expect(update).toHaveBeenCalledWith(
@@ -101,6 +116,7 @@ describe('asset-class rule jobs', () => {
         data: {
           assetClass: 'other',
           fieldProvenance: { assetClass: { quality: 'low', source: 'default' } },
+          metadataMatch: matchDeviceMetadata({}),
         },
         id: 'fallback',
       }),

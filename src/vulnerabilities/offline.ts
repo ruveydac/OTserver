@@ -19,7 +19,7 @@ import {
   parseRolieFeed,
   type DownloadFeed,
 } from './feeds'
-import { feedText, readFeed, verifyFeed } from './feedIO'
+import { feedText, readFeed, verifyFeed, MISSING_OFFLINE_FILE } from './feedIO'
 import { nvdDocuments } from './nvd'
 import {
   CISA_KEV_URL,
@@ -153,7 +153,10 @@ export const inspectOffline = async (
     const actual =
       url.endsWith('.json.gz') && !find(url) && find(url.slice(0, -3)) ? url.slice(0, -3) : url
     const body = await open(actual)
-    if (!body) throw new APIError(`Missing offline file: ${url}`, 400)
+    if (!body)
+      throw Object.assign(new APIError(`Missing offline file: ${url}`, 400), {
+        code: MISSING_OFFLINE_FILE,
+      })
     return decodeFeed(body, { ...options, gzip: options.gzip && actual.endsWith('.gz') }, actual)
   }
   const json = async (url: string) => {
@@ -239,11 +242,13 @@ export const inspectOffline = async (
 }
 
 /** Preflight every selected file before any catalog mutation, including all linked CSAF documents. */
-export const validateOfflineContents = async ({
-  selection,
-  download,
-}: Awaited<ReturnType<typeof inspectOffline>>) => {
-  if (selection.missing.length)
+export const validateOfflineContents = async (
+  { selection, download }: Awaited<ReturnType<typeof inspectOffline>>,
+  { skipMissing = false }: { skipMissing?: boolean } = {},
+) => {
+  // A publisher can list a CSAF document it never serves, which no upload can satisfy. Only an
+  // explicit administrator confirmation may leave such an index entry out of the snapshot.
+  if (selection.missing.length && !(skipMissing && selection.source === 'csaf'))
     throw new APIError('The offline selection is incomplete. Check the missing-file list.', 400)
   if (selection.source === 'cisa-kev')
     parseCisaCatalog(JSON.parse(await feedText(download, CISA_KEV_URL)))

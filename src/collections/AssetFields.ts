@@ -75,7 +75,7 @@ export const AssetFields: CollectionConfig = {
   admin: {
     defaultColumns: ['label', 'type', 'updatedAt'],
     description: 'Define optional fields that appear on every asset and import.',
-    group: 'Configuration',
+    group: 'Settings',
     hidden: hideFromNonAdmins,
     useAsTitle: 'label',
   },

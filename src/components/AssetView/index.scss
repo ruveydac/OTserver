@@ -289,7 +289,7 @@
     }
 
     dt {
-      color: var(--theme-elevation-500);
+      color: var(--theme-elevation-800);
       font-size: 0.67rem;
       font-weight: 650;
       margin-bottom: 0.2rem;
@@ -427,6 +427,25 @@
         color: var(--theme-warning-700);
         font-size: 0.72rem;
         font-weight: 500;
+      }
+    }
+  }
+
+  &__catalog-reference {
+    overflow-wrap: anywhere;
+
+    details {
+      margin-top: 0.5rem;
+    }
+
+    summary {
+      cursor: pointer;
+      min-height: 44px;
+      padding: 0.5rem 0;
+
+      &:focus-visible {
+        outline: 2px solid var(--theme-text);
+        outline-offset: 3px;
       }
     }
   }

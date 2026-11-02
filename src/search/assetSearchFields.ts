@@ -9,6 +9,11 @@ type AssetSearchField = {
 
 // This browser-safe manifest drives both Lucene parsing and Payload filter serialization.
 export const assetSearchFields: Record<string, AssetSearchField> = {
+  productfamily: { kind: 'text', path: 'productFamily' },
+  partnumber: { kind: 'text', path: 'partNumber' },
+  ordernumber: { kind: 'text', path: 'orderNumber' },
+  softwareversion: { kind: 'text', path: 'softwareVersion' },
+  versioncomponent: { kind: 'text', path: 'versionComponent' },
   assetowner: { kind: 'text', path: 'assetOwner' },
   uuid: { kind: 'keyword', path: 'uuid' },
   lifecycle: { kind: 'keyword', path: 'lifecycle' },

@@ -139,4 +139,51 @@ describe('worker runtime boundaries', () => {
     await expect(catalogWrite({} as never, work)).resolves.toBe('catalog-result')
     expect(work).toHaveBeenCalledWith()
   })
+
+  it('drains reapply jobs on a separate maintenance loop', async () => {
+    const controller = new AbortController()
+    type RunArgs = { queue?: string; where?: { taskSlug?: Record<string, string | undefined> } }
+    const drainRuns: RunArgs[] = []
+    const mainRuns: RunArgs[] = []
+    const payload = {
+      jobs: {
+        queue: vi.fn(async () => undefined),
+        run: vi.fn(async (args: RunArgs) => {
+          if (args.where?.taskSlug?.equals === 'reapply-asset-classes-v1') drainRuns.push(args)
+          else mainRuns.push(args)
+          if (drainRuns.length && mainRuns.length) controller.abort()
+          return { remainingJobsFromQueried: 0 }
+        }),
+      },
+      find: vi.fn(async () => ({ docs: [] })),
+      logger: { error: vi.fn() },
+      update: vi.fn().mockResolvedValue({}),
+    }
+    mocks.acquireWorker.mockResolvedValueOnce({ ...fence, queue: 'maintenance' })
+    await runWorker(payload as never, 'maintenance', controller.signal)
+    expect(
+      mainRuns.every((args) => args.where?.taskSlug?.not_equals === 'reapply-asset-classes-v1'),
+    ).toBe(true)
+    expect(
+      drainRuns.every(
+        (args) =>
+          args.queue === 'maintenance' &&
+          args.where?.taskSlug?.equals === 'reapply-asset-classes-v1',
+      ),
+    ).toBe(true)
+  })
+
+  it('keeps the imports queue free of the reapply filter', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const payload = {
+      jobs: {
+        run: vi.fn(async () => ({ remainingJobsFromQueried: 0 })),
+      },
+      logger: { error: vi.fn() },
+      update: vi.fn().mockResolvedValue({}),
+    }
+    await runWorker(payload as never, 'imports', controller.signal)
+    expect(payload.jobs.run).not.toHaveBeenCalled()
+  })
 })

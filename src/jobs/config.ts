@@ -8,6 +8,7 @@ import { currentWorker } from '../integrations/payload/workerContext'
 import { reapplyAssetClassRules } from '../collections/AssetClasses'
 import { executeFeedUpdate } from '../vulnerabilities/actions'
 import { feedSources } from '../vulnerabilities/sources'
+import { activeCatalog } from '../metadata/runtime'
 
 export const jobs: JobsConfig = {
   access: { run: () => false, queue: () => false, cancel: () => false },
@@ -43,6 +44,7 @@ export const jobs: JobsConfig = {
         },
         { name: 'batchID', type: 'text' },
         { name: 'uploadIDs', type: 'json' },
+        { name: 'skipMissing', type: 'checkbox' },
       ],
       handler: async ({ input, req }) => {
         if (input.version !== 1 || currentWorker()?.queue !== 'maintenance')
@@ -118,10 +120,21 @@ export const jobs: JobsConfig = {
       inputSchema: [
         { name: 'version', type: 'number', required: true },
         { name: 'assetClassID', type: 'text', required: true },
+        { name: 'catalogRevision', type: 'text' },
       ],
       handler: async ({ input, req, job }) => {
         if (input.version !== 1 || currentWorker()?.queue !== 'maintenance')
           throw new JobCancelledError('Unsupported worker input or execution context.')
+        const snapshot = await activeCatalog(req.payload, req)
+        if (
+          'catalogRevision' in input &&
+          input.catalogRevision &&
+          input.catalogRevision !== snapshot.revision
+        )
+          throw new JobCancelledError(
+            'The worker metadata catalog differs from the queued revision. A newer import queues its own reclassification.',
+          )
+        req.context.deviceMetadataCatalog = snapshot
         const started = Date.now()
         try {
           const result = await reapplyAssetClassRules(req)
@@ -143,6 +156,8 @@ export const jobs: JobsConfig = {
           })
           if (!transientFailure(error)) throw new JobCancelledError(sanitized)
           throw new Error(sanitized)
+        } finally {
+          delete req.context.deviceMetadataCatalog
         }
         return { output: {} }
       },

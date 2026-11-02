@@ -81,18 +81,19 @@ export interface Config {
     'otter-profiles': OtterProfile;
     'otter-schedules': OtterSchedule;
     'otter-runs': OtterRun;
-    'asset-fields': AssetField;
     'user-roles': UserRole;
     users: User;
     'asset-observations': AssetObservation;
     'asset-vulnerability-reviews': AssetVulnerabilityReview;
     'topology-links': TopologyLink;
     vulnerabilities: Vulnerability;
-    'vulnerability-feeds': VulnerabilityFeed;
     'vulnerability-feed-uploads': VulnerabilityFeedUpload;
     'audit-logs': AuditLog;
     'worker-leases': WorkerLease;
     'worker-heartbeats': WorkerHeartbeat;
+    'device-catalog': DeviceCatalog;
+    'asset-fields': AssetField;
+    'vulnerability-feeds': VulnerabilityFeed;
     'payload-kv': PayloadKv;
     'payload-jobs': PayloadJob;
     'payload-locked-documents': PayloadLockedDocument;
@@ -115,18 +116,19 @@ export interface Config {
     'otter-profiles': OtterProfilesSelect<false> | OtterProfilesSelect<true>;
     'otter-schedules': OtterSchedulesSelect<false> | OtterSchedulesSelect<true>;
     'otter-runs': OtterRunsSelect<false> | OtterRunsSelect<true>;
-    'asset-fields': AssetFieldsSelect<false> | AssetFieldsSelect<true>;
     'user-roles': UserRolesSelect<false> | UserRolesSelect<true>;
     users: UsersSelect<false> | UsersSelect<true>;
     'asset-observations': AssetObservationsSelect<false> | AssetObservationsSelect<true>;
     'asset-vulnerability-reviews': AssetVulnerabilityReviewsSelect<false> | AssetVulnerabilityReviewsSelect<true>;
     'topology-links': TopologyLinksSelect<false> | TopologyLinksSelect<true>;
     vulnerabilities: VulnerabilitiesSelect<false> | VulnerabilitiesSelect<true>;
-    'vulnerability-feeds': VulnerabilityFeedsSelect<false> | VulnerabilityFeedsSelect<true>;
     'vulnerability-feed-uploads': VulnerabilityFeedUploadsSelect<false> | VulnerabilityFeedUploadsSelect<true>;
     'audit-logs': AuditLogsSelect<false> | AuditLogsSelect<true>;
     'worker-leases': WorkerLeasesSelect<false> | WorkerLeasesSelect<true>;
     'worker-heartbeats': WorkerHeartbeatsSelect<false> | WorkerHeartbeatsSelect<true>;
+    'device-catalog': DeviceCatalogSelect<false> | DeviceCatalogSelect<true>;
+    'asset-fields': AssetFieldsSelect<false> | AssetFieldsSelect<true>;
+    'vulnerability-feeds': VulnerabilityFeedsSelect<false> | VulnerabilityFeedsSelect<true>;
     'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
     'payload-jobs': PayloadJobsSelect<false> | PayloadJobsSelect<true>;
     'payload-locked-documents': PayloadLockedDocumentsSelect<false> | PayloadLockedDocumentsSelect<true>;
@@ -248,6 +250,46 @@ export interface AssetClass {
   name: string;
   description?: string | null;
   /**
+   * Disable all regex rules and catalog mappings for this class. Human assignments are preserved.
+   */
+  assignmentEnabled?: boolean | null;
+  /**
+   * Allows one unambiguous connected device type to assign this class when it is mapped below.
+   */
+  catalogRulesEnabled?: boolean | null;
+  /**
+   * Map imported device types to this class. Multiple classes mapping the same type are treated as ambiguous.
+   */
+  catalogGroups?:
+    | (
+        | '019a34b0-0000-7000-8000-000000000001'
+        | '019a34b0-0000-7000-8000-000000000002'
+        | '019a34b0-0000-7000-8000-000000000003'
+        | '019a34b0-0000-7000-8000-000000000004'
+        | '019a34b0-0000-7000-8000-000000000005'
+        | '019a34b0-0000-7000-8000-000000000006'
+        | '019a34b0-0000-7000-8000-000000000007'
+        | '019a34b0-0000-7000-8000-000000000008'
+        | '019a34b0-0000-7000-8000-000000000009'
+        | '019a34b0-0000-7000-8000-00000000000a'
+        | '019a34b0-0000-7000-8000-00000000000b'
+        | '019a34b0-0000-7000-8000-00000000000c'
+        | '019a34b0-0000-7000-8000-00000000000d'
+        | '019a34b0-0000-7000-8000-00000000000e'
+        | '019a34b0-0000-7000-8000-00000000000f'
+        | '019a34b0-0000-7000-8000-000000000010'
+        | '019a34b0-0000-7000-8000-000000000011'
+        | '019a34b0-0000-7000-8000-000000000012'
+        | '019a34b0-0000-7000-8000-000000000013'
+        | '019a34b0-0000-7000-8000-000000000014'
+        | '019a34b0-0000-7000-8000-000000000015'
+        | '019a34b0-0000-7000-8000-000000000016'
+        | '019a34b0-0000-7000-8000-000000000017'
+      )[]
+    | null;
+  catalogMappingSeeded?: boolean | null;
+  catalogRevision?: string | null;
+  /**
    * Lower numbers are evaluated first when rules from multiple classes match an asset.
    */
   assignmentPriority: number;
@@ -256,11 +298,17 @@ export interface AssetClass {
    */
   assignmentRules?:
     | {
+        enabled?: boolean | null;
         conditions?:
           | {
               field:
                 | 'assetOwner'
                 | 'catalogNumber'
+                | 'partNumber'
+                | 'orderNumber'
+                | 'productFamily'
+                | 'softwareVersion'
+                | 'versionComponent'
                 | 'description'
                 | 'firmwareVersion'
                 | 'hardwareVersion'
@@ -281,6 +329,10 @@ export interface AssetClass {
         id?: string | null;
       }[]
     | null;
+  /**
+   * Optional priority for this class when assigned from connected device information. Lower numbers win; ties favor regex rules. Leave blank to use connected information only when no regex rule matches.
+   */
+  catalogAssignmentPriority?: number | null;
   legacyKey?: string | null;
   ruleSeedVersion?: number | null;
   updatedAt: string;
@@ -315,6 +367,20 @@ export interface Asset {
   uuid?: string | null;
   physicalKind?: ('unknown' | 'device' | 'chassis' | 'module') | null;
   catalogNumber?: string | null;
+  partNumber?: string | null;
+  orderNumber?: string | null;
+  productFamily?: string | null;
+  softwareVersion?: string | null;
+  versionComponent?: string | null;
+  metadataMatch?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
   slotCapacity?: number | null;
   lifecycle?: ('active' | 'retired' | 'replaced' | 'merged') | null;
   baselined?: boolean | null;
@@ -1134,36 +1200,6 @@ export interface Vulnerability {
   createdAt: string;
 }
 /**
- * Update the local vulnerability catalogs online or import original files transferred from a connected computer.
- *
- * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "vulnerability-feeds".
- */
-export interface VulnerabilityFeed {
-  id: string;
-  source: string;
-  status: 'idle' | 'queued' | 'running' | 'ready' | 'partial' | 'failed';
-  lastSyncedAt?: string | null;
-  documentCount?: number | null;
-  catalogVersion?: string | null;
-  dateReleased?: string | null;
-  error?: string | null;
-  state?:
-    | {
-        [k: string]: unknown;
-      }
-    | unknown[]
-    | string
-    | number
-    | boolean
-    | null;
-  jobID?: string | null;
-  lastImportMethod?: ('online' | 'offline') | null;
-  operationRevision?: number | null;
-  updatedAt: string;
-  createdAt: string;
-}
-/**
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "vulnerability-feed-uploads".
  */
@@ -1246,6 +1282,57 @@ export interface WorkerHeartbeat {
   owner: string;
   heartbeatAt: string;
   expiresAt: string;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "device-catalog".
+ */
+export interface DeviceCatalog {
+  id: string;
+  revision: string;
+  manufacturerCount: number;
+  deviceCount: number;
+  catalog:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Update the local vulnerability catalogs online or import original files transferred from a connected computer.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "vulnerability-feeds".
+ */
+export interface VulnerabilityFeed {
+  id: string;
+  source: string;
+  status: 'idle' | 'queued' | 'running' | 'ready' | 'partial' | 'failed';
+  lastSyncedAt?: string | null;
+  documentCount?: number | null;
+  catalogVersion?: string | null;
+  dateReleased?: string | null;
+  error?: string | null;
+  state?:
+    | {
+        [k: string]: unknown;
+      }
+    | unknown[]
+    | string
+    | number
+    | boolean
+    | null;
+  jobID?: string | null;
+  lastImportMethod?: ('online' | 'offline') | null;
+  operationRevision?: number | null;
   updatedAt: string;
   createdAt: string;
 }
@@ -1407,10 +1494,6 @@ export interface PayloadLockedDocument {
         value: string | AssetImport;
       } | null)
     | ({
-        relationTo: 'asset-fields';
-        value: string | AssetField;
-      } | null)
-    | ({
         relationTo: 'user-roles';
         value: string | UserRole;
       } | null)
@@ -1429,6 +1512,14 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'worker-heartbeats';
         value: string | WorkerHeartbeat;
+      } | null)
+    | ({
+        relationTo: 'device-catalog';
+        value: string | DeviceCatalog;
+      } | null)
+    | ({
+        relationTo: 'asset-fields';
+        value: string | AssetField;
       } | null);
   globalSlug?: string | null;
   user: {
@@ -1509,10 +1600,16 @@ export interface SitesSelect<T extends boolean = true> {
 export interface AssetClassesSelect<T extends boolean = true> {
   name?: T;
   description?: T;
+  assignmentEnabled?: T;
+  catalogRulesEnabled?: T;
+  catalogGroups?: T;
+  catalogMappingSeeded?: T;
+  catalogRevision?: T;
   assignmentPriority?: T;
   assignmentRules?:
     | T
     | {
+        enabled?: T;
         conditions?:
           | T
           | {
@@ -1523,6 +1620,7 @@ export interface AssetClassesSelect<T extends boolean = true> {
             };
         id?: T;
       };
+  catalogAssignmentPriority?: T;
   legacyKey?: T;
   ruleSeedVersion?: T;
   updatedAt?: T;
@@ -1537,6 +1635,12 @@ export interface AssetsSelect<T extends boolean = true> {
   uuid?: T;
   physicalKind?: T;
   catalogNumber?: T;
+  partNumber?: T;
+  orderNumber?: T;
+  productFamily?: T;
+  softwareVersion?: T;
+  versionComponent?: T;
+  metadataMatch?: T;
   slotCapacity?: T;
   lifecycle?: T;
   baselined?: T;
@@ -1877,17 +1981,6 @@ export interface OtterRunsSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "asset-fields_select".
- */
-export interface AssetFieldsSelect<T extends boolean = true> {
-  label?: T;
-  type?: T;
-  description?: T;
-  updatedAt?: T;
-  createdAt?: T;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "user-roles_select".
  */
 export interface UserRolesSelect<T extends boolean = true> {
@@ -2021,25 +2114,6 @@ export interface VulnerabilitiesSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "vulnerability-feeds_select".
- */
-export interface VulnerabilityFeedsSelect<T extends boolean = true> {
-  source?: T;
-  status?: T;
-  lastSyncedAt?: T;
-  documentCount?: T;
-  catalogVersion?: T;
-  dateReleased?: T;
-  error?: T;
-  state?: T;
-  jobID?: T;
-  lastImportMethod?: T;
-  operationRevision?: T;
-  updatedAt?: T;
-  createdAt?: T;
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "vulnerability-feed-uploads_select".
  */
 export interface VulnerabilityFeedUploadsSelect<T extends boolean = true> {
@@ -2107,6 +2181,49 @@ export interface WorkerHeartbeatsSelect<T extends boolean = true> {
   owner?: T;
   heartbeatAt?: T;
   expiresAt?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "device-catalog_select".
+ */
+export interface DeviceCatalogSelect<T extends boolean = true> {
+  id?: T;
+  revision?: T;
+  manufacturerCount?: T;
+  deviceCount?: T;
+  catalog?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "asset-fields_select".
+ */
+export interface AssetFieldsSelect<T extends boolean = true> {
+  label?: T;
+  type?: T;
+  description?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "vulnerability-feeds_select".
+ */
+export interface VulnerabilityFeedsSelect<T extends boolean = true> {
+  source?: T;
+  status?: T;
+  lastSyncedAt?: T;
+  documentCount?: T;
+  catalogVersion?: T;
+  dateReleased?: T;
+  error?: T;
+  state?: T;
+  jobID?: T;
+  lastImportMethod?: T;
+  operationRevision?: T;
   updatedAt?: T;
   createdAt?: T;
 }
@@ -2239,6 +2356,7 @@ export interface TaskVulnerabilityFeedSyncV1 {
       | number
       | boolean
       | null;
+    skipMissing?: boolean | null;
   };
   output?: unknown;
 }
@@ -2271,6 +2389,7 @@ export interface TaskReapplyAssetClassesV1 {
   input: {
     version: number;
     assetClassID: string;
+    catalogRevision?: string | null;
   };
   output?: unknown;
 }

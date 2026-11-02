@@ -1,0 +1,238 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://otserver.org/schemas/ot-device-types.schema.json",
+  "title": "OT device classification groups",
+  "description": "Stable English product groups. IDs and keys are permanent. Select the primary documented product purpose, not an installed role, Purdue level, physical identity, or certification. Safety takes precedence only for dedicated safety products, not ordinary products with an optional safety feature. Electrical protection is separate from functional safety. Unknown products use Other.",
+  "type": "array",
+  "items": {
+    "$ref": "#/$defs/deviceType"
+  },
+  "uniqueItems": true,
+  "$defs": {
+    "deviceTypeName": {
+      "type": "string",
+      "enum": [
+        "PLC",
+        "Functional safety",
+        "Robotics",
+        "HMI",
+        "RTU",
+        "Process and machine control",
+        "Network device",
+        "Industrial computer",
+        "I/O module",
+        "Drives and motion control",
+        "Sensor / actuator",
+        "Measurement and monitoring",
+        "Power supply and storage",
+        "Electrical protection",
+        "Power distribution",
+        "Electrical switching",
+        "Signal conditioning",
+        "Mechanical equipment",
+        "Cooling equipment",
+        "Building automation",
+        "Physical security",
+        "Fire detection and alarm",
+        "Infrastructure and accessories",
+        "Other"
+      ]
+    },
+    "deviceType": {
+      "oneOf": [
+        {
+          "const": {
+            "id": "019a34b0-0000-7000-8000-000000000001",
+            "key": "plc",
+            "name": "PLC",
+            "description": "Programmable logic controllers and dedicated industrial logic controllers."
+          }
+        },
+        {
+          "const": {
+            "id": "019a34b0-0000-7000-8000-000000000002",
+            "key": "safety",
+            "name": "Functional safety",
+            "description": "Dedicated safety controllers, safety I/O, safety relays, interlocks, and protective light curtains. Does not establish a safety certification."
+          }
+        },
+        {
+          "const": {
+            "id": "019a34b0-0000-7000-8000-000000000003",
+            "key": "robot",
+            "name": "Robotics",
+            "description": "Industrial, collaborative, and mobile robots, robot controllers, and robotic cells."
+          }
+        },
+        {
+          "const": {
+            "id": "019a34b0-0000-7000-8000-000000000004",
+            "key": "hmi",
+            "name": "HMI",
+            "description": "Operator panels, graphical terminals, and industrial displays."
+          }
+        },
+        {
+          "const": {
+            "id": "019a34b0-0000-7000-8000-000000000005",
+            "key": "rtu",
+            "name": "RTU",
+            "description": "Remote terminal units and flow computers."
+          }
+        },
+        {
+          "const": {
+            "id": "019a34b0-0000-7000-8000-000000000006",
+            "key": "control-system",
+            "name": "Process and machine control",
+            "description": "DCS, CNC, process, welding, and other specialized machine control systems, excluding dedicated PLCs and safety systems."
+          }
+        },
+        {
+          "const": {
+            "id": "019a34b0-0000-7000-8000-000000000007",
+            "key": "network-device",
+            "name": "Network device",
+            "description": "Switches, routers, gateways, radios, taps, and communication adapters or modules."
+          }
+        },
+        {
+          "const": {
+            "id": "019a34b0-0000-7000-8000-000000000008",
+            "key": "industrial-computer",
+            "name": "Industrial computer",
+            "description": "Industrial PCs, edge computers, thin clients, emulators, and prototyping computers. Does not imply an engineering or SCADA deployment."
+          }
+        },
+        {
+          "const": {
+            "id": "019a34b0-0000-7000-8000-000000000009",
+            "key": "io-module",
+            "name": "I/O module",
+            "description": "Remote, digital, analog, and special-purpose I/O and IO-Link masters, excluding dedicated safety I/O."
+          }
+        },
+        {
+          "const": {
+            "id": "019a34b0-0000-7000-8000-00000000000a",
+            "key": "drive-motion",
+            "name": "Drives and motion control",
+            "description": "Drives, frequency converters, motor starters, servo modules, and motion controllers."
+          }
+        },
+        {
+          "const": {
+            "id": "019a34b0-0000-7000-8000-00000000000b",
+            "key": "sensor-actuator",
+            "name": "Sensor / actuator",
+            "description": "Sensors, transmitters, valves, motors, and actuators, excluding dedicated safety devices."
+          }
+        },
+        {
+          "const": {
+            "id": "019a34b0-0000-7000-8000-00000000000c",
+            "key": "measurement",
+            "name": "Measurement and monitoring",
+            "description": "Meters, recorders, condition monitoring, machine vision, and environmental measurement equipment."
+          }
+        },
+        {
+          "const": {
+            "id": "019a34b0-0000-7000-8000-00000000000d",
+            "key": "power-supply",
+            "name": "Power supply and storage",
+            "description": "Power supplies, UPS devices, batteries, buffer and redundancy modules, converters, and chargers."
+          }
+        },
+        {
+          "const": {
+            "id": "019a34b0-0000-7000-8000-00000000000e",
+            "key": "electrical-protection",
+            "name": "Electrical protection",
+            "description": "Circuit breakers, protection relays, fuses, surge protection, and EMC filters. Not functional-safety classification."
+          }
+        },
+        {
+          "const": {
+            "id": "019a34b0-0000-7000-8000-00000000000f",
+            "key": "power-distribution",
+            "name": "Power distribution",
+            "description": "Switchgear, busbars, distribution units, and electrical distribution systems."
+          }
+        },
+        {
+          "const": {
+            "id": "019a34b0-0000-7000-8000-000000000010",
+            "key": "electrical-switching",
+            "name": "Electrical switching",
+            "description": "Contactors, general-purpose relays, transfer switches, and disconnectors."
+          }
+        },
+        {
+          "const": {
+            "id": "019a34b0-0000-7000-8000-000000000011",
+            "key": "signal-conditioning",
+            "name": "Signal conditioning",
+            "description": "Signal isolators, converters, amplifiers, and conditioning networks."
+          }
+        },
+        {
+          "const": {
+            "id": "019a34b0-0000-7000-8000-000000000012",
+            "key": "mechanical-equipment",
+            "name": "Mechanical equipment",
+            "description": "Pumps, compressors, conveyors, presses, test rigs, and other mechanical production equipment."
+          }
+        },
+        {
+          "const": {
+            "id": "019a34b0-0000-7000-8000-000000000013",
+            "key": "cooling",
+            "name": "Cooling equipment",
+            "description": "Industrial cooling and enclosure thermal management."
+          }
+        },
+        {
+          "const": {
+            "id": "019a34b0-0000-7000-8000-000000000014",
+            "key": "building-automation",
+            "name": "Building automation",
+            "description": "Building and room automation controllers and thermostats."
+          }
+        },
+        {
+          "const": {
+            "id": "019a34b0-0000-7000-8000-000000000015",
+            "key": "physical-security",
+            "name": "Physical security",
+            "description": "Access control, credentials, surveillance cameras, and intercoms."
+          }
+        },
+        {
+          "const": {
+            "id": "019a34b0-0000-7000-8000-000000000016",
+            "key": "fire-safety",
+            "name": "Fire detection and alarm",
+            "description": "Fire detectors, alarm panels, evacuation notification, and voice alarm systems."
+          }
+        },
+        {
+          "const": {
+            "id": "019a34b0-0000-7000-8000-000000000017",
+            "key": "accessory",
+            "name": "Infrastructure and accessories",
+            "description": "Chassis, racks, backplanes, connectors, cables, carriers, and other passive accessories."
+          }
+        },
+        {
+          "const": {
+            "id": "019a34b0-0000-7000-8000-000000000018",
+            "key": "other",
+            "name": "Other",
+            "description": "Insufficient evidence for a more specific classification. Do not infer a group from the manufacturer alone."
+          }
+        }
+      ]
+    }
+  }
+}
