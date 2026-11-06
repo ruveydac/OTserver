@@ -31,7 +31,14 @@ import {
   AssetInstallations,
   IdentityCases,
 } from './collections/Identity'
-import { OtterProfiles, OtterRuns, OtterScanners, OtterSchedules } from './collections/Otter'
+import {
+  OtterProfiles,
+  OtterReleases,
+  OtterRuns,
+  OtterScanners,
+  OtterSchedules,
+  OtterUpdates,
+} from './collections/Otter'
 import { ApplicationSettings } from './globals/ApplicationSettings'
 import { initializeMetadataCatalog } from './metadata/initialize'
 import { DeviceCatalog } from './collections/DeviceCatalog'
@@ -109,6 +116,8 @@ export default buildConfig({
     IdentityCases,
     AssetImports,
     OtterScanners,
+    OtterReleases,
+    OtterUpdates,
     OtterProfiles,
     OtterSchedules,
     OtterRuns,
@@ -139,7 +148,9 @@ export default buildConfig({
   upload: {
     requestSizeLimit: 520 * 1024 * 1024,
     abortOnLimit: true,
-    limits: { fileSize: Math.max(MAX_IMPORT_FILE_SIZE, MAX_OTTER_IMPORT_FILE_SIZE) },
+    limits: {
+      fileSize: Math.max(MAX_IMPORT_FILE_SIZE, MAX_OTTER_IMPORT_FILE_SIZE, 512 * 1024 * 1024),
+    },
     preserveExtension: true,
     safeFileNames: true,
   },

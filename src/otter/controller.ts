@@ -1,8 +1,19 @@
 import { APIError, type Endpoint, type Payload, type PayloadRequest } from 'payload'
 import { isIP } from 'node:net'
+import { createHash } from 'node:crypto'
+import { open } from 'node:fs/promises'
+import path from 'node:path'
+import { Readable } from 'node:stream'
 import { getAuthorization, relationshipID } from '../access/authorization'
 import { inTransaction } from '../integrations/payload/transactions'
-import type { OtterRun, OtterScanner, OtterSchedule } from '../payload-types'
+import { compareOtterVersions, MAX_OTTER_RELEASE_SIZE, OTTER_UPDATE_TARGETS } from './releases'
+import type {
+  OtterRelease,
+  OtterRun,
+  OtterScanner,
+  OtterSchedule,
+  OtterUpdate,
+} from '../payload-types'
 import {
   decryptOtterCredentials,
   encryptOtterCredentials,
@@ -45,6 +56,17 @@ const scannerReport = (input: Record<string, unknown>) => {
     (typeof input.version !== 'string' || input.version.length > 64)
   )
     throw new APIError('Scanner version is invalid.', 400)
+  if (
+    input.buildTarget !== undefined &&
+    (typeof input.buildTarget !== 'string' ||
+      !OTTER_UPDATE_TARGETS.includes(input.buildTarget as (typeof OTTER_UPDATE_TARGETS)[number]))
+  )
+    throw new APIError('Scanner build target is invalid.', 400)
+  if (
+    input.binaryDigest !== undefined &&
+    (typeof input.binaryDigest !== 'string' || !/^[a-f\d]{64}$/i.test(input.binaryDigest))
+  )
+    throw new APIError('Scanner executable digest is invalid.', 400)
   for (const key of ['capabilities', 'interfaces']) {
     const value = input[key]
     if (
@@ -115,6 +137,10 @@ const scannerReport = (input: Record<string, unknown>) => {
   }
   return {
     ...(typeof input.version === 'string' ? { version: input.version } : {}),
+    ...(typeof input.buildTarget === 'string' ? { buildTarget: input.buildTarget } : {}),
+    ...(typeof input.binaryDigest === 'string'
+      ? { binaryDigest: input.binaryDigest.toLowerCase() }
+      : {}),
     ...(Array.isArray(input.capabilities) ? { capabilities: input.capabilities as string[] } : {}),
     ...(Array.isArray(input.interfaces) ? { interfaces: input.interfaces as string[] } : {}),
     ...(typeof input.computerName === 'string' ? { computerName: input.computerName.trim() } : {}),
@@ -295,6 +321,8 @@ const runInput = async (
 }
 
 const isActiveRun = (run: OtterRun) => activeRunStatuses.includes(run.status)
+const activeUpdateStatuses = ['queued', 'downloading', 'verified', 'installing'] as const
+const terminalUpdateStatuses = ['completed', 'failed', 'rolled-back'] as const
 const leaseExpiredMessage =
   'Scanner lease expired because no heartbeat was received before the deadline. The scanner may have stopped or lost its controller connection.'
 
@@ -419,6 +447,17 @@ const assignJob = async (req: PayloadRequest, scanner: OtterScanner, now: Date) 
   }
 
   if (blocked) return undefined
+  const updates = await req.payload.find({
+    collection: 'otter-updates',
+    depth: 0,
+    limit: 1,
+    overrideAccess: true,
+    req,
+    where: {
+      and: [{ scanner: { equals: scanner.id } }, { status: { in: [...activeUpdateStatuses] } }],
+    },
+  })
+  if (updates.docs.length) return undefined
   const schedules = await req.payload.find({
     collection: 'otter-schedules',
     depth: 0,
@@ -688,7 +727,342 @@ export const getOtterScanner: Endpoint['handler'] = async (req) => {
     computerName: scanner.computerName,
     networkAdapters: Array.isArray(scanner.networkAdapters) ? scanner.networkAdapters : [],
     version: scanner.version,
+    buildTarget: scanner.buildTarget,
+    currentUpdate: relationshipID(scanner.currentUpdate),
   })
+}
+
+const releaseSummary = (release: OtterRelease) => ({
+  id: String(release.id),
+  version: String(release.version),
+  target: String(release.target),
+  filesize: Number(release.filesize),
+})
+
+export const listOtterReleases: Endpoint['handler'] = async (req) => {
+  await requireHuman(req)
+  const releases = await req.payload.find({
+    collection: 'otter-releases',
+    depth: 0,
+    limit: 500,
+    pagination: false,
+    overrideAccess: true,
+    req,
+    sort: '-createdAt',
+  })
+  return json({ releases: releases.docs.map((release) => releaseSummary(release)) })
+}
+
+export const queueOtterUpdates: Endpoint['handler'] = async (req) => {
+  await humanOrigin(req)
+  const data = await body(req)
+  if (
+    typeof data.releaseID !== 'string' ||
+    !Array.isArray(data.scannerIDs) ||
+    data.scannerIDs.length < 1 ||
+    data.scannerIDs.length > 100 ||
+    data.scannerIDs.some((id) => typeof id !== 'string' || !id) ||
+    new Set(data.scannerIDs).size !== data.scannerIDs.length
+  )
+    throw new APIError('Select one to 100 unique scanners and an Otter release.', 400)
+
+  const release = await req.payload.findByID({
+    collection: 'otter-releases',
+    depth: 0,
+    id: data.releaseID,
+    overrideAccess: true,
+    req,
+  })
+  const results = await inTransaction(req, async () => {
+    const queued: Array<{ id: string; scannerID: string; name: string }> = []
+    for (const id of data.scannerIDs as string[]) {
+      const scanner = await req.payload.findByID({
+        collection: 'otter-scanners',
+        depth: 0,
+        id,
+        overrideAccess: false,
+        req,
+      })
+      await requireHuman(req, scanner.site, true)
+      if (
+        !scanner.enabled ||
+        !scanner.enrolledAt ||
+        scanner.buildTarget !== release.target ||
+        !Array.isArray(scanner.capabilities) ||
+        !scanner.capabilities.includes('update-v1')
+      )
+        throw new APIError(
+          `${scanner.name} is not enrolled with a compatible update-capable Otter.`,
+          409,
+        )
+      if (
+        typeof scanner.version !== 'string' ||
+        compareOtterVersions(String(release.version), scanner.version) <= 0
+      )
+        throw new APIError(`${scanner.name} is already running this version or a newer one.`, 409)
+
+      const existing = await req.payload.find({
+        collection: 'otter-updates',
+        depth: 0,
+        limit: 1,
+        overrideAccess: true,
+        req,
+        where: {
+          and: [{ scanner: { equals: scanner.id } }, { status: { in: [...activeUpdateStatuses] } }],
+        },
+      })
+      if (existing.docs.length)
+        throw new APIError(`${scanner.name} already has an update queued or in progress.`, 409)
+
+      const update = await req.payload.create({
+        collection: 'otter-updates',
+        context: { otterUpdateWrite: true },
+        data: {
+          name: `${scanner.name} to ${release.version}`,
+          site: String(relationshipID(scanner.site)),
+          scanner: String(scanner.id),
+          release: String(release.id),
+          target: String(release.target),
+          targetVersion: String(release.version),
+          binaryDigest: String(release.binaryDigest),
+          binarySize: Number(release.filesize),
+          previousVersion: scanner.version,
+          status: 'queued',
+        },
+        overrideAccess: true,
+        req,
+      })
+      await req.payload.update({
+        collection: 'otter-scanners',
+        context: { otterScannerUpdate: true },
+        data: { currentUpdate: String(update.id) },
+        id: scanner.id,
+        overrideAccess: true,
+        req,
+      })
+      queued.push({ id: String(update.id), scannerID: String(scanner.id), name: scanner.name })
+    }
+    return queued
+  })
+  return json({ queued: results }, 202)
+}
+
+const setUpdateStatus = async (
+  req: PayloadRequest,
+  update: OtterUpdate,
+  status: OtterUpdate['status'],
+  message?: string,
+) => {
+  const now = new Date().toISOString()
+  const terminal = terminalUpdateStatuses.includes(
+    status as (typeof terminalUpdateStatuses)[number],
+  )
+  await req.payload.update({
+    collection: 'otter-updates',
+    context: { otterUpdateWrite: true },
+    data: {
+      status,
+      ...(message ? { message } : { message: null }),
+      ...(status === 'downloading' && !update.startedAt ? { startedAt: now } : {}),
+      ...(terminal ? { completedAt: now } : {}),
+    },
+    id: String(update.id),
+    overrideAccess: true,
+    req,
+  })
+  if (terminal) {
+    const scanner = await req.payload.findByID({
+      collection: 'otter-scanners',
+      depth: 0,
+      id: String(relationshipID(update.scanner)),
+      overrideAccess: true,
+      req,
+    })
+    if (String(relationshipID(scanner.currentUpdate)) === String(update.id))
+      await req.payload.update({
+        collection: 'otter-scanners',
+        context: { otterScannerUpdate: true },
+        data: { currentUpdate: null },
+        id: scanner.id,
+        overrideAccess: true,
+        req,
+      })
+  }
+  return status
+}
+
+const activeUpdateFor = async (req: PayloadRequest, scannerID: string) => {
+  const found = await req.payload.find({
+    collection: 'otter-updates',
+    depth: 0,
+    limit: 1,
+    overrideAccess: true,
+    req,
+    where: {
+      and: [{ scanner: { equals: scannerID } }, { status: { in: [...activeUpdateStatuses] } }],
+    },
+  })
+  return found.docs[0]
+}
+
+const pollOtterUpdate = async (req: PayloadRequest, scanner: OtterScanner) => {
+  const update = await activeUpdateFor(req, String(scanner.id))
+  if (!update) return undefined
+  if (
+    scanner.version === update.targetVersion &&
+    scanner.buildTarget === update.target &&
+    scanner.binaryDigest === update.binaryDigest
+  ) {
+    await setUpdateStatus(req, update, 'completed')
+    return {
+      action: 'idle',
+      retryAfterSeconds: 30,
+    }
+  }
+  if (scanner.buildTarget !== update.target) {
+    await setUpdateStatus(
+      req,
+      update,
+      'failed',
+      'Scanner platform no longer matches the selected release.',
+    )
+    return { action: 'idle', retryAfterSeconds: 30 }
+  }
+  if (
+    typeof scanner.version !== 'string' ||
+    compareOtterVersions(String(update.targetVersion), scanner.version) <= 0
+  ) {
+    await setUpdateStatus(
+      req,
+      update,
+      'failed',
+      'The selected release is not newer than the scanner.',
+    )
+    return { action: 'idle', retryAfterSeconds: 30 }
+  }
+  return {
+    action: 'update',
+    update: {
+      id: String(update.id),
+      version: String(update.targetVersion),
+      target: String(update.target),
+      binaryDigest: String(update.binaryDigest),
+      binarySize: Number(update.binarySize),
+    },
+  }
+}
+
+export const downloadOtterUpdate: Endpoint['handler'] = async (req) => {
+  const scanner = await scannerDocument(req)
+  const id = String(req.routeParams?.id || '')
+  const update = await req.payload.findByID({
+    collection: 'otter-updates',
+    depth: 0,
+    id,
+    overrideAccess: true,
+    req,
+  })
+  if (
+    String(relationshipID(update.scanner)) !== String(scanner.id) ||
+    !activeUpdateStatuses.includes(update.status as (typeof activeUpdateStatuses)[number])
+  )
+    throw new APIError('The update is no longer available to this scanner.', 404)
+  const release = await req.payload.findByID({
+    collection: 'otter-releases',
+    depth: 0,
+    id: String(relationshipID(update.release)),
+    overrideAccess: true,
+    req,
+  })
+  const filename = typeof release.filename === 'string' ? release.filename : ''
+  if (!filename || path.basename(filename) !== filename)
+    throw new APIError('The stored Otter release is unavailable.', 500)
+  const filepath = path.resolve(
+    process.env.OTSERVER_TEST_UPLOAD_DIR || 'import-files',
+    'otter-releases',
+    filename,
+  )
+  const root = path.resolve(
+    process.env.OTSERVER_TEST_UPLOAD_DIR || 'import-files',
+    'otter-releases',
+  )
+  if (!filepath.startsWith(`${root}${path.sep}`))
+    throw new APIError('The stored Otter release path is invalid.', 500)
+  const file = await open(filepath, 'r').catch(() => undefined)
+  if (!file) throw new APIError('The stored Otter release is unavailable.', 404)
+  try {
+    const metadata = await file.stat()
+    if (
+      !metadata.isFile() ||
+      metadata.size !== release.filesize ||
+      metadata.size > MAX_OTTER_RELEASE_SIZE
+    )
+      throw new APIError('The stored Otter release size does not match its verified record.', 500)
+    const digest = createHash('sha256')
+    for await (const chunk of file.createReadStream({ autoClose: false })) digest.update(chunk)
+    if (digest.digest('hex') !== release.binaryDigest)
+      throw new APIError('The stored Otter release failed its integrity check.', 500)
+    if (update.status === 'queued') await setUpdateStatus(req, update, 'downloading')
+    const stream = file.createReadStream({ start: 0, end: metadata.size - 1, autoClose: true })
+    return new Response(Readable.toWeb(stream) as ReadableStream, {
+      headers: {
+        'Cache-Control': 'no-store',
+        'Content-Length': String(metadata.size),
+        'Content-Type': 'application/octet-stream',
+        'X-Content-Type-Options': 'nosniff',
+      },
+    })
+  } catch (error) {
+    await file.close().catch(() => undefined)
+    await setUpdateStatus(
+      req,
+      update,
+      'failed',
+      'The stored release failed server-side integrity checks.',
+    )
+    throw error
+  }
+}
+
+export const reportOtterUpdate: Endpoint['handler'] = async (req) => {
+  const scanner = await scannerDocument(req)
+  const id = String(req.routeParams?.id || '')
+  const update = await req.payload.findByID({
+    collection: 'otter-updates',
+    depth: 0,
+    id,
+    overrideAccess: true,
+    req,
+  })
+  if (String(relationshipID(update.scanner)) !== String(scanner.id))
+    throw new APIError('The update is not assigned to this scanner.', 404)
+  const data = await body(req)
+  if (!['verified', 'installing', 'failed', 'rolled-back'].includes(String(data.status)))
+    throw new APIError('The update status is invalid.', 400)
+  const status = String(data.status) as OtterUpdate['status']
+  if (
+    (status === 'verified' && ['verified', 'installing'].includes(update.status)) ||
+    (status === 'installing' && update.status === 'installing')
+  )
+    return json({ id: String(update.id), status: update.status })
+  const allowed =
+    (status === 'verified' && update.status === 'downloading') ||
+    (status === 'installing' && update.status === 'verified') ||
+    (status === 'failed' &&
+      activeUpdateStatuses.includes(update.status as (typeof activeUpdateStatuses)[number])) ||
+    (status === 'rolled-back' && update.status === 'installing')
+  if (!allowed) throw new APIError('The update status transition is not allowed.', 409)
+  const reasons: Record<string, string> = {
+    downloadFailed: 'Otter could not download the selected release.',
+    signatureRejected: 'Otter rejected the downloaded executable signature or platform.',
+    installationFailed: 'Otter could not safely install the selected release.',
+    startupFailed: 'Otter could not start the updated executable.',
+  }
+  const message = status === 'failed' ? reasons[String(data.reason)] : undefined
+  if (status === 'failed' && !message)
+    throw new APIError('The update failure reason is invalid.', 400)
+  await setUpdateStatus(req, update, status, message)
+  return json({ id: String(update.id), status })
 }
 
 export const createOtterScanner: Endpoint['handler'] = async (req) => {
@@ -843,10 +1217,12 @@ export const pollOtter: Endpoint['handler'] = async (req) => {
       })
     const refreshed = {
       ...scanner,
+      ...validated,
       ...(heartbeatDue || changed ? { lastSeenAt: now.toISOString() } : {}),
     }
     const run = await assignJob(req, refreshed, now)
-    if (!run) return { action: 'idle', retryAfterSeconds: 30 }
+    if (!run)
+      return (await pollOtterUpdate(req, refreshed)) || { action: 'idle', retryAfterSeconds: 30 }
     return jobResponse(run, refreshed, req)
   })
   return json(response)
@@ -1120,6 +1496,14 @@ export const revokeOtterScanner: Endpoint['handler'] = async (req) => {
       req,
     })
     await requireHuman(req, scanner.site, true)
+    const update = await activeUpdateFor(req, String(scanner.id))
+    if (update)
+      await setUpdateStatus(
+        req,
+        update,
+        'failed',
+        'Scanner credentials were revoked before the update completed.',
+      )
     const activeID = relationshipID(scanner.currentRun)
     if (activeID)
       await req.payload.update({
@@ -1146,6 +1530,7 @@ export const revokeOtterScanner: Endpoint['handler'] = async (req) => {
         credentialHash: null,
         credentialExpiresAt: null,
         currentRun: null,
+        currentUpdate: null,
       },
     })
   })
@@ -1168,6 +1553,14 @@ export const reenrollOtterScanner: Endpoint['handler'] = async (req) => {
     })
     await requireHuman(req, scanner.site, true)
     await assertSiteAllowsImports(scanner.site, req)
+    const update = await activeUpdateFor(req, String(scanner.id))
+    if (update)
+      await setUpdateStatus(
+        req,
+        update,
+        'failed',
+        'Scanner was re-enrolled before the update completed.',
+      )
     const activeID = relationshipID(scanner.currentRun)
     if (activeID)
       await req.payload.update({
@@ -1190,6 +1583,7 @@ export const reenrollOtterScanner: Endpoint['handler'] = async (req) => {
       data: {
         enabled: true,
         currentRun: null,
+        currentUpdate: null,
         enrollmentTokenHash: tokenDigest(token),
         enrollmentExpiresAt: expiresAt,
         enrolledAt: null,
@@ -1204,6 +1598,10 @@ export const reenrollOtterScanner: Endpoint['handler'] = async (req) => {
 
 export const otterEndpoints: Endpoint[] = [
   { path: '/otter/v1/overview', method: 'get', handler: otterOverview },
+  { path: '/otter/v1/updates/releases', method: 'get', handler: listOtterReleases },
+  { path: '/otter/v1/updates', method: 'post', handler: queueOtterUpdates },
+  { path: '/otter/v1/updates/:id/binary', method: 'get', handler: downloadOtterUpdate },
+  { path: '/otter/v1/updates/:id/status', method: 'post', handler: reportOtterUpdate },
   { path: '/otter/v1/scanners/:id', method: 'get', handler: getOtterScanner },
   { path: '/otter/v1/scanners', method: 'post', handler: createOtterScanner },
   { path: '/otter/v1/scanners/:id/revoke', method: 'post', handler: revokeOtterScanner },

@@ -1,6 +1,7 @@
 import { createPayloadRequest, getPayload, type Payload, type PayloadRequest } from 'payload'
-import { randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { createHash, randomUUID } from 'node:crypto'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 import config from '@/payload.config'
 import { siteTypeID } from '../siteType'
@@ -12,13 +13,17 @@ import { isRunLeaseExpired } from '../../src/otter/runLease'
 import {
   cancelOtterRun,
   createOtterScanner,
+  downloadOtterUpdate,
   enrollOtter,
   expireOtterLeases,
   finishOtterRun,
   getOtterScanner,
+  listOtterReleases,
   heartbeatOtterRun,
   otterOverview,
   pollOtter,
+  queueOtterUpdates,
+  reportOtterUpdate,
   reenrollOtterScanner,
   revokeOtterScanner,
   rotateOtterCredential,
@@ -102,6 +107,9 @@ describe('Otter management controller', () => {
     let expiredRunID: string | undefined
     let badSnapshotRunID: string | undefined
     let noSecretRunID: string | undefined
+    let updateID: string | undefined
+    let releaseID: string | undefined
+    let releaseFilename: string | undefined
     let fallbackFailureRunID: string | undefined
     let scheduleID: string | undefined
     let importID: string | undefined
@@ -172,6 +180,21 @@ describe('Otter management controller', () => {
         collection: 'users',
         data: { email: adminEmail, password },
       })
+      const unsignedRelease = Buffer.from('unsigned executable')
+      await expect(
+        payload.create({
+          collection: 'otter-releases',
+          data: {},
+          draft: true,
+          file: {
+            data: unsignedRelease,
+            name: 'unsigned-otter',
+            size: unsignedRelease.length,
+            mimetype: 'application/octet-stream',
+          },
+          user: admin,
+        }),
+      ).rejects.toMatchObject({ status: 400 })
 
       const configuredURL = process.env.OTSERVER_PUBLIC_URL
       delete process.env.OTSERVER_PUBLIC_URL
@@ -405,6 +428,134 @@ describe('Otter management controller', () => {
         computerName: 'otter-host-1',
         networkAdapters: [expect.objectContaining({ name: 'eth0' })],
       })
+
+      const updateTarget = 'x86_64-unknown-linux-gnu'
+      const nextVersion = '0.9.1'
+      const updateBinary = Buffer.from('signed-release-fixture')
+      const updateDigest = createHash('sha256').update(updateBinary).digest('hex')
+      const uploadDirectory = path.resolve(
+        process.env.OTSERVER_TEST_UPLOAD_DIR || 'import-files',
+        'otter-releases',
+      )
+      await mkdir(uploadDirectory, { recursive: true })
+      releaseFilename = `${randomUUID()}.otter`
+      await writeFile(path.join(uploadDirectory, releaseFilename), updateBinary)
+      const release = await payload.db.collections['otter-releases'].collection.insertOne({
+        binaryDigest: updateDigest,
+        createdAt: new Date(),
+        filename: releaseFilename,
+        filesize: updateBinary.length,
+        mimeType: 'application/octet-stream',
+        target: updateTarget,
+        updatedAt: new Date(),
+        version: nextVersion,
+      })
+      releaseID = String(release.insertedId)
+      await pollOtter(
+        await request('/otter/v1/poll', {
+          body: {
+            binaryDigest: 'b'.repeat(64),
+            buildTarget: updateTarget,
+            capabilities: ['scan-v2', 'controller-v1', 'update-v1'],
+            interfaces: ['eth0'],
+            version: '0.9.0',
+          },
+          token: `Otter ${enrollment.credential}`,
+          origin: '',
+        }),
+      )
+      const releasesResponse = await listOtterReleases(
+        await request('/otter/v1/updates/releases', {
+          method: 'GET',
+          token: `JWT ${login.token}`,
+        }),
+      )
+      expect(await releasesResponse.json()).toMatchObject({
+        releases: [
+          expect.objectContaining({ id: releaseID, version: nextVersion, target: updateTarget }),
+        ],
+      })
+      const queuedResponse = await queueOtterUpdates(
+        await request('/otter/v1/updates', {
+          body: { releaseID, scannerIDs: [scannerID] },
+          token: `JWT ${login.token}`,
+        }),
+      )
+      expect(queuedResponse.status).toBe(202)
+      const queued = (await queuedResponse.json()) as { queued: Array<{ id: string }> }
+      updateID = queued.queued[0]!.id
+      const binaryResponse = await downloadOtterUpdate(
+        await routeRequest(
+          '/otter/v1/updates',
+          updateID,
+          `Otter ${enrollment.credential}`,
+          undefined,
+          '',
+        ),
+      )
+      expect(binaryResponse.status).toBe(200)
+      expect(Buffer.from(await binaryResponse.arrayBuffer())).toEqual(updateBinary)
+      for (const status of ['verified', 'installing'] as const)
+        await reportOtterUpdate(
+          await routeRequest(
+            '/otter/v1/updates',
+            updateID,
+            `Otter ${enrollment.credential}`,
+            { status },
+            '',
+          ),
+        )
+      for (const status of ['verified', 'installing'] as const) {
+        const repeated = await reportOtterUpdate(
+          await routeRequest(
+            '/otter/v1/updates',
+            updateID,
+            `Otter ${enrollment.credential}`,
+            { status },
+            '',
+          ),
+        )
+        expect(repeated.status).toBe(200)
+      }
+      await pollOtter(
+        await request('/otter/v1/poll', {
+          body: {
+            binaryDigest: updateDigest,
+            buildTarget: updateTarget,
+            capabilities: ['scan-v2', 'controller-v1', 'update-v1'],
+            interfaces: ['eth0'],
+            version: nextVersion,
+          },
+          token: `Otter ${enrollment.credential}`,
+          origin: '',
+        }),
+      )
+      const completed = await payload.findByID({
+        collection: 'otter-updates',
+        id: updateID,
+        overrideAccess: true,
+      })
+      expect(completed.status).toBe('completed')
+      const updateAudits = await payload.find({
+        collection: 'audit-logs',
+        limit: 20,
+        overrideAccess: true,
+        sort: 'createdAt',
+        where: {
+          and: [
+            { documentID: { equals: updateID } },
+            { targetCollection: { equals: 'otter-updates' } },
+          ],
+        },
+      })
+      expect(updateAudits.docs.map(({ action }) => action)).toEqual([
+        'create',
+        'update',
+        'update',
+        'update',
+        'update',
+      ])
+      expect(updateAudits.docs.some(({ actorType }) => actorType === 'otter')).toBe(true)
       await expect(
         getOtterScanner(
           await routeRequest('/otter/v1/scanners', scannerID!, `JWT ${readerLogin.token}`),
@@ -1529,6 +1680,23 @@ describe('Otter management controller', () => {
     } finally {
       if (oldQueuedImports === undefined) delete process.env.OTSERVER_QUEUED_IMPORTS
       else process.env.OTSERVER_QUEUED_IMPORTS = oldQueuedImports
+      if (updateID)
+        await payload
+          .delete({ collection: 'otter-updates', id: updateID, overrideAccess: true })
+          .catch(() => {})
+      if (releaseID)
+        await payload
+          .delete({ collection: 'otter-releases', id: releaseID, overrideAccess: true })
+          .catch(() => {})
+      if (releaseFilename)
+        await rm(
+          path.resolve(
+            process.env.OTSERVER_TEST_UPLOAD_DIR || 'import-files',
+            'otter-releases',
+            releaseFilename,
+          ),
+          { force: true },
+        )
       if (queuedImportID)
         await payload
           .delete({ collection: 'asset-imports', id: queuedImportID, overrideAccess: true })

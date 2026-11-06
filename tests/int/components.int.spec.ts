@@ -1141,7 +1141,14 @@ describe('remaining Otter component states', () => {
       })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ status: 'revoked' }) })
       .mockRejectedValueOnce('offline')
-    vi.stubGlobal('fetch', actions)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: RequestInfo | URL) =>
+        String(url).endsWith('/otter/v1/updates/releases')
+          ? Promise.resolve({ ok: true, json: async () => ({ releases: [] }) })
+          : actions(),
+      ),
+    )
     const component = createElement(OtterScannerActions)
 
     await render(component)

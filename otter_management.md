@@ -85,6 +85,33 @@ The controller endpoints are registered with Payload under `/api/otter/v1`. Appl
 database migrations as part of normal production upgrades; they establish partial unique indexes for
 scanner credentials and scheduled occurrence deduplication.
 
+### Signed releases and managed updates
+
+Administrators upload each raw Otter executable under **Otter → Otter Releases**. OTserver accepts
+only binaries with the pinned Ed25519 signature embedded by Otter's release process. Upload one
+executable per supported build target; archives and detached signatures are not accepted. Release
+records are immutable and audited.
+
+Operators with Otter Config and write access to a scanner's site can queue an update from that
+scanner's document or select individual scanners in the scanner list for a bulk update. Each scanner
+gets a separate audited update record. Bulk requests accept up to 100 scanners. A scanner finishes
+its active scan before it receives the update. The selected release must match its build target and
+be newer than its current version. The scanner must advertise `update-v1`.
+
+Existing installations running a client without `update-v1` need one manual upgrade first. Stop the
+existing controller, download the signed executable for its platform, verify it with
+`otserver-otter verify-binary`, then run that downloaded executable as the enrolled OS user with
+`controller --install --ack-authorized`. This installs the updater-capable binary while reusing the
+saved enrollment. On Linux, the one-time installation requests administrator authorization to install
+and verify a root-owned helper; do not run the controller itself as root. Later Linux updates use
+that helper without another prompt. Windows updates run as the scanner user.
+
+Otter verifies the signature, target, version, digest, and locally stored version floor before
+installation. Linux replaces the executable atomically and keeps the previous signed binary until the
+new controller confirms startup. Windows stages a private updater copy and restores the previous
+binary if startup is not confirmed. The client stores failed or rolled-back outcomes locally until
+OTserver can record them. Review assignments and outcomes under **Otter → Otter Updates**.
+
 ## Roles and site scope
 
 Enable **Otter Config** on a user role. Admin has this capability implicitly. The capability does
@@ -368,6 +395,38 @@ queued scanner uploads under **Settings > Application settings**; `OTSERVER_QUEU
 deployment fallback. Workers reload the scanner and fail closed if it was disabled, revoked, or
 expired before processing.
 
+### Update actions
+
+Polling returns an update only when the scanner has no active scan:
+
+```json
+{
+  "action": "update",
+  "update": {
+    "id": "UPDATE_ID",
+    "version": "0.9.1",
+    "target": "x86_64-unknown-linux-gnu",
+    "binaryDigest": "SHA256_HEX",
+    "binarySize": 123456
+  }
+}
+```
+
+The client downloads the assigned executable and reports progress through these endpoints:
+
+```text
+GET  /api/otter/v1/updates/releases
+POST /api/otter/v1/updates
+GET  /api/otter/v1/updates/:id/binary
+POST /api/otter/v1/updates/:id/status
+```
+
+The management request body is `{ "releaseID": "...", "scannerIDs": ["..."] }`. Client status
+reports use `verified`, `installing`, `failed`, or `rolled-back`; failure reasons are fixed
+allowlisted values. OTserver records `queued`, `downloading`, `verified`, `installing`, and terminal
+outcomes in the audited **Otter Updates** collection. A matching version, target, and executable
+digest in a later scanner poll completes the assignment.
+
 ### Management actions
 
 ```text
@@ -427,6 +486,11 @@ and test replica set) cover:
     cancellation, upload auth/metadata, credential redaction, and five-minute reconnection. Add protocol
     interoperability cases to the Otter lab. Update its README/AGENTS safety rules and the
     interoperability tests in this repository in the coordinated change.
+11. For managed self-updates, advertise `update-v1` only when the client verifies the embedded pinned
+    Ed25519 signature, target, version floor, and digest before installation. Persist update handoff
+    and terminal outcomes; retain a verified rollback executable until the new controller confirms
+    startup. Keep Linux privilege limited to the signed helper and coordinate release handling with
+    this document.
 
 The controller protocol is versioned independently (`/otter/v1`). A future breaking change requires
 a new controller protocol version; it does not by itself require changing
