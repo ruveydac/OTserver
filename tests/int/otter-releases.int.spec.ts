@@ -27,6 +27,8 @@ import { acquireWorker, renewWorker } from '../../src/jobs/ownership'
 import { withWorkerFence } from '../../src/integrations/payload/workerContext'
 import { readApplicationSettings } from '../../src/application/settings'
 import {
+  compareOtterVersions,
+  parseOtterVersion,
   unpackOtterRelease,
   verifyOtterRelease,
   OTTER_UPDATE_TARGETS,
@@ -183,6 +185,38 @@ const github = (version = '98.2.0') => {
 }
 
 describe('signed Otter release uploads', () => {
+  it('parses and orders stable and prerelease versions', () => {
+    expect(parseOtterVersion('v1.2+build.7')).toEqual({
+      major: 1,
+      minor: 2,
+      patch: 0,
+      prerelease: [],
+    })
+    expect(() => parseOtterVersion('1.0.0-01')).toThrow('version')
+
+    for (const [left, right, result] of [
+      ['1.0.0', '2.0.0', -1],
+      ['2.0.0', '1.0.0', 1],
+      ['1.1.0', '1.2.0', -1],
+      ['1.2.0', '1.1.0', 1],
+      ['1.0.1', '1.0.2', -1],
+      ['1.0.2', '1.0.1', 1],
+      ['1.0.0-alpha', '1.0.0', -1],
+      ['1.0.0', '1.0.0-alpha', 1],
+      ['1.0.0', '1.0.0', 0],
+      ['1.0.0-alpha', '1.0.0-alpha.1', -1],
+      ['1.0.0-alpha.1', '1.0.0-alpha', 1],
+      ['1.0.0-alpha.2', '1.0.0-alpha.10', -1],
+      ['1.0.0-alpha.10', '1.0.0-alpha.2', 1],
+      ['1.0.0-alpha.1', '1.0.0-alpha.beta', -1],
+      ['1.0.0-alpha.beta', '1.0.0-alpha.1', 1],
+      ['1.0.0-alpha.beta', '1.0.0-alpha.gamma', -1],
+      ['1.0.0-alpha.gamma', '1.0.0-alpha.beta', 1],
+      ['1.0.0-alpha.beta', '1.0.0-alpha.beta', 0],
+    ] as const)
+      expect(compareOtterVersions(left, right)).toBe(result)
+  })
+
   it('accepts unpacked Linux binaries, official archives and Windows binaries through Payload validation', async () => {
     const cases = [
       ['otserver-otter', 'application/octet-stream', 0, false],
@@ -259,6 +293,14 @@ describe('signed Otter release uploads', () => {
         }),
       ).rejects.toMatchObject({ status: 400 })
     }
+    await expect(verifyOtterRelease(Buffer.alloc(0))).rejects.toThrow('signed Otter executable')
+    const wrongLength = Buffer.from(binary)
+    wrongLength.writeBigUInt64LE(0n, wrongLength.length - 312 + 16)
+    await expect(verifyOtterRelease(wrongLength)).rejects.toThrow('length is invalid')
+    await expect(verifyOtterRelease(new Uint8Array(binary))).resolves.toMatchObject({
+      version: '98.1.0',
+      target: OTTER_UPDATE_TARGETS[0],
+    })
     await expect(verifyOtterRelease(signedBinary('98.1.0', 'unsupported'))).rejects.toThrow(
       'unsupported',
     )
@@ -282,6 +324,21 @@ describe('signed Otter release uploads', () => {
     for (const tar of [brokenChecksum, multiple, archive(binary).subarray(0, -512)])
       await expect(unpackOtterRelease(gzipSync(tar))).rejects.toThrow('official Linux archive')
     await expect(unpackOtterRelease(Buffer.from([0x1f, 0x8b, 0x08]))).rejects.toThrow('corrupt')
+    await expect(unpackOtterRelease(gzipSync(archive(Buffer.alloc(300))))).rejects.toThrow(
+      'official Linux archive',
+    )
+    const badOctal = archive(binary)
+    badOctal.write('x', 124)
+    await expect(unpackOtterRelease(gzipSync(badOctal))).rejects.toThrow('official Linux archive')
+    const badPrefix = archive(binary)
+    badPrefix[345] = 1
+    await expect(unpackOtterRelease(gzipSync(badPrefix))).rejects.toThrow('official Linux archive')
+    const badPadding = archive(binary)
+    badPadding[512 + binary.length] = 1
+    await expect(unpackOtterRelease(gzipSync(badPadding))).rejects.toThrow('official Linux archive')
+    expect(await unpackOtterRelease(gzipSync(archive(binary, 'otserver-otter', '\0')))).toEqual(
+      binary,
+    )
     expect(await unpackOtterRelease(gzipSync(archive(binary, './otserver-otter')))).toEqual(binary)
   })
 
@@ -436,6 +493,11 @@ describe('GitHub Otter release imports', () => {
     )
     expect(remote.fetch).toHaveBeenCalledTimes(2)
     remote.metadata.assets[0].browser_download_url = url
+    remote.metadata.assets[0].size += 1
+    await expect(executeOtterReleaseSync(payload, { submittedBy: admin.id })).rejects.toThrow(
+      'size does not match',
+    )
+    remote.metadata.assets[0].size = remote.files[0]!.length
     for (const binary of [
       signedBinary('98.3.0'),
       signedBinary('98.2.0+different-build'),
@@ -481,6 +543,11 @@ describe('GitHub Otter release imports', () => {
       }),
     )
     expect(JSON.stringify(warning.mock.calls)).not.toContain('do-not-log')
+    remote.fetch.mockRejectedValueOnce(new Error('Could not reach https://[invalid'))
+    await expect(executeOtterReleaseSync(payload, { submittedBy: admin.id })).rejects.toMatchObject(
+      { status: 503 },
+    )
+    expect(JSON.stringify(warning.mock.calls)).toContain('[invalid URL]')
     remote.fetch.mockResolvedValueOnce(
       new Response(null, { status: 403, headers: { 'x-ratelimit-remaining': '0' } }),
     )
@@ -513,6 +580,9 @@ describe('GitHub Otter release imports', () => {
     await expect(
       executeOtterReleaseSync(payload, { submittedBy: reader.id }),
     ).rejects.toMatchObject({ status: 403 })
+    await expect(
+      executeOtterReleaseSync(payload, { submittedBy: '000000000000000000000000' }),
+    ).rejects.toThrow('no longer exists')
     expect(await executeOtterReleaseSync(payload, {})).toEqual({ imported: 0, skipped: 0 })
     expect(remote.fetch).not.toHaveBeenCalled()
     await payload.updateGlobal({
