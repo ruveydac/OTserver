@@ -99,7 +99,9 @@ describe('Otter bulk updates', () => {
       'fetch',
       vi.fn((_url: string, options: { signal: AbortSignal }) => {
         signal = options.signal
-        return new Promise(() => undefined)
+        return new Promise((_, reject) => {
+          signal!.addEventListener('abort', () => reject('offline'))
+        })
       }),
     )
     await render()
@@ -127,6 +129,12 @@ describe('Otter bulk updates', () => {
     expect(container.textContent).toContain('No signed Otter executables have been uploaded')
     expect(container.querySelector('a')?.getAttribute('href')).toBe(
       '/admin/collections/otter-releases',
+    )
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ releases: null })))
+    await renderFresh()
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'Could not load signed Otter releases.',
     )
   })
 
@@ -185,5 +193,18 @@ describe('Otter bulk updates', () => {
     mocks.selection = { count: 1, selected: { scannerOne: false }, selectAll: 'some' }
     await renderFresh()
     expect(container.querySelector('button')?.disabled).toBe(true)
+
+    mocks.selection = {
+      count: 2,
+      selected: { scannerOne: true, scannerTwo: true },
+      selectAll: 'some',
+    }
+    mocks.action.mockResolvedValueOnce({ queued: [{ id: 'scannerOne' }, { id: 'scannerTwo' }] })
+    await renderFresh()
+    await click('Update selected Otters')
+    await click('Queue updates')
+    expect(container.querySelector('[role="status"]')?.textContent).toBe(
+      'Update queued for 2 scanners.',
+    )
   })
 })

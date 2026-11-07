@@ -108,6 +108,7 @@ describe('Otter management controller', () => {
     let badSnapshotRunID: string | undefined
     let noSecretRunID: string | undefined
     let updateID: string | undefined
+    let foreignUpdateID: string | undefined
     let releaseID: string | undefined
     let releaseFilename: string | undefined
     let fallbackFailureRunID: string | undefined
@@ -451,6 +452,41 @@ describe('Otter management controller', () => {
         version: nextVersion,
       })
       releaseID = String(release.insertedId)
+      const foreignUpdate = await payload.create({
+        collection: 'otter-updates',
+        context: { otterUpdateWrite: true },
+        data: {
+          name: 'Foreign scanner update',
+          site: site.id,
+          scanner: foreignScannerID,
+          release: releaseID,
+          target: updateTarget,
+          targetVersion: nextVersion,
+          binaryDigest: updateDigest,
+          binarySize: updateBinary.length,
+          status: 'queued',
+        },
+        overrideAccess: true,
+        user,
+      })
+      foreignUpdateID = foreignUpdate.id
+      const blockedScannerDelete = await payload.delete({
+        collection: 'otter-scanners',
+        where: { id: { equals: foreignScannerID } },
+        overrideAccess: false,
+        user,
+      })
+      expect(blockedScannerDelete.docs).toHaveLength(0)
+      expect(blockedScannerDelete.errors).toEqual([
+        expect.objectContaining({ id: foreignScannerID }),
+      ])
+      await payload.delete({
+        collection: 'otter-updates',
+        id: foreignUpdate.id,
+        overrideAccess: true,
+        user,
+      })
+      foreignUpdateID = undefined
       await pollOtter(
         await request('/otter/v1/poll', {
           body: {
@@ -475,6 +511,50 @@ describe('Otter management controller', () => {
           expect.objectContaining({ id: releaseID, version: nextVersion, target: updateTarget }),
         ],
       })
+      for (const invalidSelection of [
+        { releaseID, scannerIDs: [] },
+        { releaseID, scannerIDs: [scannerID, scannerID] },
+        { releaseID: 1, scannerIDs: [scannerID] },
+        { releaseID, scannerIDs: [null] },
+      ])
+        await expect(
+          queueOtterUpdates(
+            await request('/otter/v1/updates', {
+              body: invalidSelection,
+              token: `JWT ${login.token}`,
+            }),
+          ),
+        ).rejects.toMatchObject({ status: 400 })
+      await expect(
+        queueOtterUpdates(
+          await request('/otter/v1/updates', {
+            body: { releaseID, scannerIDs: [foreignScannerID] },
+            token: `JWT ${login.token}`,
+          }),
+        ),
+      ).rejects.toMatchObject({ status: 409 })
+      await payload.update({
+        collection: 'otter-scanners',
+        context: { otterScannerUpdate: true },
+        data: { version: nextVersion },
+        id: scannerID!,
+        overrideAccess: true,
+      })
+      await expect(
+        queueOtterUpdates(
+          await request('/otter/v1/updates', {
+            body: { releaseID, scannerIDs: [scannerID] },
+            token: `JWT ${login.token}`,
+          }),
+        ),
+      ).rejects.toMatchObject({ status: 409 })
+      await payload.update({
+        collection: 'otter-scanners',
+        context: { otterScannerUpdate: true },
+        data: { version: '0.9.0' },
+        id: scannerID!,
+        overrideAccess: true,
+      })
       const queuedResponse = await queueOtterUpdates(
         await request('/otter/v1/updates', {
           body: { releaseID, scannerIDs: [scannerID] },
@@ -484,6 +564,145 @@ describe('Otter management controller', () => {
       expect(queuedResponse.status).toBe(202)
       const queued = (await queuedResponse.json()) as { queued: Array<{ id: string }> }
       updateID = queued.queued[0]!.id
+      await expect(
+        queueOtterUpdates(
+          await request('/otter/v1/updates', {
+            body: { releaseID, scannerIDs: [scannerID] },
+            token: `JWT ${login.token}`,
+          }),
+        ),
+      ).rejects.toMatchObject({ status: 409 })
+      const wrongScannerReport = await routeRequest(
+        '/otter/v1/updates',
+        updateID,
+        `Otter ${enrollment.credential}`,
+        { status: 'verified' },
+      )
+      wrongScannerReport.context.otterScannerID = foreignScannerID!
+      await expect(reportOtterUpdate(wrongScannerReport)).rejects.toMatchObject({ status: 404 })
+      for (const status of ['unknown', 'rolled-back'] as const)
+        await expect(
+          reportOtterUpdate(
+            await routeRequest('/otter/v1/updates', updateID, `Otter ${enrollment.credential}`, {
+              status,
+            }),
+          ),
+        ).rejects.toMatchObject({ status: status === 'unknown' ? 400 : 409 })
+      await expect(
+        reportOtterUpdate(
+          await routeRequest('/otter/v1/updates', updateID, `Otter ${enrollment.credential}`, {
+            status: 'failed',
+            reason: 'unknown',
+          }),
+        ),
+      ).rejects.toMatchObject({ status: 400 })
+      const resetQueuedUpdate = async (version: string | null = '0.9.0') => {
+        await payload.update({
+          collection: 'otter-updates',
+          context: { otterUpdateWrite: true },
+          data: { status: 'queued', completedAt: null, message: null },
+          id: updateID!,
+          overrideAccess: true,
+        })
+        await payload.update({
+          collection: 'otter-scanners',
+          context: { otterScannerUpdate: true },
+          data: {
+            currentUpdate: updateID,
+            version,
+            buildTarget: updateTarget,
+          },
+          id: scannerID!,
+          overrideAccess: true,
+        })
+      }
+      const pollScanner = async (report: unknown = {}) =>
+        pollOtter(
+          await request('/otter/v1/poll', {
+            body: report,
+            token: `Otter ${enrollment.credential}`,
+            origin: '',
+          }),
+        )
+      expect(await (await pollScanner()).json()).toMatchObject({
+        action: 'update',
+        update: { id: updateID, version: nextVersion, target: updateTarget },
+      })
+      expect(
+        await (await pollScanner({ buildTarget: 'aarch64-unknown-linux-gnu' })).json(),
+      ).toMatchObject({ action: 'idle' })
+      expect(
+        await payload.findByID({ collection: 'otter-updates', id: updateID, depth: 0 }),
+      ).toMatchObject({
+        status: 'failed',
+        message: 'Scanner platform no longer matches the selected release.',
+      })
+      await resetQueuedUpdate(null)
+      expect(await (await pollScanner()).json()).toMatchObject({ action: 'idle' })
+      expect(
+        await payload.findByID({ collection: 'otter-updates', id: updateID, depth: 0 }),
+      ).toMatchObject({
+        status: 'failed',
+        message: 'The selected release is not newer than the scanner.',
+      })
+      await resetQueuedUpdate(nextVersion)
+      expect(await (await pollScanner()).json()).toMatchObject({ action: 'idle' })
+      await resetQueuedUpdate()
+
+      const wrongScannerDownload = await routeRequest(
+        '/otter/v1/updates',
+        updateID,
+        `Otter ${enrollment.credential}`,
+        undefined,
+        '',
+      )
+      wrongScannerDownload.context.otterScannerID = foreignScannerID!
+      await expect(downloadOtterUpdate(wrongScannerDownload)).rejects.toMatchObject({ status: 404 })
+
+      const releaseCollection = payload.db.collections['otter-releases'].collection
+      for (const [filename, status] of [
+        ['../escaped', 500],
+        ['..', 500],
+        ['missing-release-file', 404],
+      ] as const) {
+        await releaseCollection.updateOne({ _id: release.insertedId }, { $set: { filename } })
+        await expect(
+          downloadOtterUpdate(
+            await routeRequest(
+              '/otter/v1/updates',
+              updateID,
+              `Otter ${enrollment.credential}`,
+              undefined,
+              '',
+            ),
+          ),
+        ).rejects.toMatchObject({ status })
+      }
+      await releaseCollection.updateOne(
+        { _id: release.insertedId },
+        { $set: { filename: releaseFilename, filesize: updateBinary.length + 1 } },
+      )
+      await expect(
+        downloadOtterUpdate(
+          await routeRequest('/otter/v1/updates', updateID, `Otter ${enrollment.credential}`),
+        ),
+      ).rejects.toMatchObject({ status: 500 })
+      await resetQueuedUpdate()
+      await releaseCollection.updateOne(
+        { _id: release.insertedId },
+        { $set: { filesize: updateBinary.length, binaryDigest: 'f'.repeat(64) } },
+      )
+      await expect(
+        downloadOtterUpdate(
+          await routeRequest('/otter/v1/updates', updateID, `Otter ${enrollment.credential}`),
+        ),
+      ).rejects.toMatchObject({ status: 500 })
+      await resetQueuedUpdate()
+      await releaseCollection.updateOne(
+        { _id: release.insertedId },
+        { $set: { binaryDigest: updateDigest } },
+      )
+
       const binaryResponse = await downloadOtterUpdate(
         await routeRequest(
           '/otter/v1/updates',
@@ -536,6 +755,11 @@ describe('Otter management controller', () => {
         overrideAccess: true,
       })
       expect(completed.status).toBe('completed')
+      await expect(
+        downloadOtterUpdate(
+          await routeRequest('/otter/v1/updates', updateID, `Otter ${enrollment.credential}`),
+        ),
+      ).rejects.toMatchObject({ status: 404 })
       const updateAudits = await payload.find({
         collection: 'audit-logs',
         limit: 20,
@@ -550,10 +774,7 @@ describe('Otter management controller', () => {
       })
       expect(updateAudits.docs.map(({ action }) => action)).toEqual([
         'create',
-        'update',
-        'update',
-        'update',
-        'update',
+        ...Array(14).fill('update'),
       ])
       expect(updateAudits.docs.some(({ actorType }) => actorType === 'otter')).toBe(true)
       await expect(
@@ -904,6 +1125,16 @@ describe('Otter management controller', () => {
           }),
         ),
       ).rejects.toMatchObject({ status: 400 })
+      for (const body of [{ buildTarget: 'unsupported' }, { binaryDigest: 'not-a-digest' }])
+        await expect(
+          pollOtter(
+            await request('/otter/v1/poll', {
+              body,
+              token: `Otter ${enrollment.credential}`,
+              origin: '',
+            }),
+          ),
+        ).rejects.toMatchObject({ status: 400 })
 
       const scanData = JSON.parse(
         await readFile(
@@ -1483,6 +1714,20 @@ describe('Otter management controller', () => {
           origin: '',
         }),
       )
+      await payload.update({
+        collection: 'otter-updates',
+        context: { otterUpdateWrite: true },
+        data: { status: 'queued', completedAt: null, message: null },
+        id: updateID!,
+        overrideAccess: true,
+      })
+      await payload.update({
+        collection: 'otter-scanners',
+        context: { otterScannerUpdate: true },
+        data: { currentUpdate: updateID },
+        id: scannerID!,
+        overrideAccess: true,
+      })
       const revoked = await revokeOtterScanner(
         await routeRequest(
           '/otter/v1/scanners/revoke',
@@ -1504,6 +1749,20 @@ describe('Otter management controller', () => {
           }),
         ),
       ).rejects.toMatchObject({ status: 409 })
+      await payload.update({
+        collection: 'otter-updates',
+        context: { otterUpdateWrite: true },
+        data: { status: 'queued', completedAt: null, message: null },
+        id: updateID!,
+        overrideAccess: true,
+      })
+      await payload.update({
+        collection: 'otter-scanners',
+        context: { otterScannerUpdate: true },
+        data: { currentUpdate: updateID },
+        id: scannerID!,
+        overrideAccess: true,
+      })
       const reenrollment = await reenrollOtterScanner(
         await routeRequest(
           '/otter/v1/scanners/reenroll',
@@ -1683,6 +1942,10 @@ describe('Otter management controller', () => {
       if (updateID)
         await payload
           .delete({ collection: 'otter-updates', id: updateID, overrideAccess: true })
+          .catch(() => {})
+      if (foreignUpdateID)
+        await payload
+          .delete({ collection: 'otter-updates', id: foreignUpdateID, overrideAccess: true })
           .catch(() => {})
       if (releaseID)
         await payload

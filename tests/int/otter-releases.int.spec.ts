@@ -31,6 +31,7 @@ import {
   parseOtterVersion,
   unpackOtterRelease,
   verifyOtterRelease,
+  MAX_OTTER_RELEASE_SIZE,
   OTTER_UPDATE_TARGETS,
 } from '../../src/otter/releases'
 import {
@@ -307,6 +308,20 @@ describe('signed Otter release uploads', () => {
     await expect(verifyOtterRelease(signedBinary('not-a-version'))).rejects.toThrow('version')
   })
 
+  it('rejects oversized uploads and non-text signed metadata', async () => {
+    await expect(
+      unpackOtterRelease({ length: MAX_OTTER_RELEASE_SIZE + 1 } as unknown as Buffer),
+    ).rejects.toThrow('no larger than 512 MiB')
+
+    const binary = signedBinary()
+    const recordOffset = binary.length - 312
+    const message = Buffer.from(binary.subarray(recordOffset, recordOffset + 248))
+    message[24] = 1
+    message.copy(binary, recordOffset)
+    sign(null, message, keys.privateKey).copy(binary, recordOffset + 248)
+    await expect(verifyOtterRelease(binary)).rejects.toThrow('metadata is invalid')
+  })
+
   it('rejects unsafe, ambiguous, corrupt and truncated archives', async () => {
     const binary = signedBinary()
     for (const [name, type] of [
@@ -356,6 +371,16 @@ describe('signed Otter release uploads', () => {
         },
         req: await createLocalReq({ user: reader }, payload),
         overrideAccess: false,
+      }),
+    ).rejects.toMatchObject({ status: 403 })
+  })
+
+  it('rejects update records not written by the controller', async () => {
+    await expect(
+      payload.create({
+        collection: 'otter-updates',
+        data: {},
+        overrideAccess: true,
       }),
     ).rejects.toMatchObject({ status: 403 })
   })
@@ -450,6 +475,44 @@ describe('GitHub Otter release imports', () => {
       where: { documentLabel: { equals: 'Otter release import completed' } },
     })
     expect(audit.docs[0]).toMatchObject({ actorID: admin.id, changes: { skipped: { after: 3 } } })
+  })
+
+  it('skips only a matching release created concurrently', async () => {
+    const importWithConcurrentInsert = async (version: string, matchingDigest: boolean) => {
+      github(version)
+      const originalCreate = payload.create.bind(payload)
+      const duplicate = Object.assign(new Error('duplicate key'), { code: 11000 })
+      let injectDuplicate = true
+      const create = vi.spyOn(payload, 'create')
+      create.mockImplementation(async (args) => {
+        const input = args as { collection?: string; file?: { data?: Buffer } }
+        if (input.collection === 'otter-releases' && injectDuplicate) {
+          injectDuplicate = false
+          const verified = await verifyOtterRelease(input.file!.data!)
+          await payload.db.collections['otter-releases'].collection.insertOne({
+            binaryDigest: matchingDigest ? verified.binaryDigest : 'different-digest',
+            createdAt: new Date(),
+            filename: `concurrent-${randomUUID()}`,
+            target: verified.target,
+            updatedAt: new Date(),
+            version: verified.version,
+          })
+          throw duplicate
+        }
+        return originalCreate(args as never) as never
+      })
+      try {
+        return await executeOtterReleaseSync(payload, { submittedBy: admin.id })
+      } finally {
+        create.mockRestore()
+      }
+    }
+
+    await expect(importWithConcurrentInsert('98.5.0', true)).resolves.toEqual({
+      imported: 2,
+      skipped: 1,
+    })
+    await expect(importWithConcurrentInsert('98.6.0', false)).rejects.toThrow('duplicate key')
   })
 
   it('keeps successful platform imports after a later failure and resumes without duplicates', async () => {
@@ -575,6 +638,70 @@ describe('GitHub Otter release imports', () => {
     warning.mockRestore()
   })
 
+  it('bounds release downloads, rejects malformed metadata, and stops redirect loops', async () => {
+    const remote = github()
+    const warning = vi.spyOn(payload.logger, 'warn').mockImplementation(() => undefined as never)
+
+    remote.fetch.mockResolvedValueOnce(new Response('{'))
+    await expect(executeOtterReleaseSync(payload, { submittedBy: admin.id })).rejects.toThrow(
+      'invalid release metadata',
+    )
+
+    remote.fetch.mockResolvedValueOnce(new Response(JSON.stringify(remote.metadata)))
+    remote.fetch.mockResolvedValueOnce(
+      new Response(new ReadableStream({ start: (stream) => stream.close() }), {
+        headers: { 'content-length': String(MAX_OTTER_RELEASE_SIZE + 1) },
+      }),
+    )
+    await expect(executeOtterReleaseSync(payload, { submittedBy: admin.id })).rejects.toThrow(
+      'exceeds its size limit',
+    )
+
+    remote.fetch.mockResolvedValueOnce(new Response(JSON.stringify(remote.metadata)))
+    remote.fetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      body: (async function* () {
+        yield { length: MAX_OTTER_RELEASE_SIZE + 1 } as Uint8Array
+      })(),
+    } as unknown as Response)
+    await expect(executeOtterReleaseSync(payload, { submittedBy: admin.id })).rejects.toThrow(
+      'exceeds its size limit',
+    )
+
+    remote.fetch.mockResolvedValueOnce(new Response(JSON.stringify(remote.metadata)))
+    remote.fetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      body: (async function* () {
+        throw new Error('stream interrupted')
+      })(),
+    } as unknown as Response)
+    await expect(executeOtterReleaseSync(payload, { submittedBy: admin.id })).rejects.toMatchObject(
+      { status: 503 },
+    )
+    expect(warning).toHaveBeenCalledWith(
+      expect.objectContaining({ error: expect.stringContaining('stream interrupted') }),
+    )
+
+    remote.fetch.mockReset()
+    remote.fetch.mockResolvedValue(
+      new Response(null, {
+        status: 302,
+        headers: {
+          location: 'https://api.github.com/repos/ruveydac/otserver-otter/releases/latest',
+        },
+      }),
+    )
+    await expect(executeOtterReleaseSync(payload, { submittedBy: admin.id })).rejects.toThrow(
+      'too many release download redirects',
+    )
+    expect(remote.fetch).toHaveBeenCalledTimes(4)
+    warning.mockRestore()
+  })
+
   it('rechecks administrator permissions and the daily option before execution', async () => {
     const remote = github()
     await expect(
@@ -597,6 +724,24 @@ describe('GitHub Otter release imports', () => {
       where: { documentLabel: { equals: 'Otter release import completed' } },
     })
     expect(audit.docs[0].actorType).toBe('system')
+  })
+
+  it('allows an administrator to request a manual refresh while daily imports are disabled', async () => {
+    const response = await refreshOtterReleases(await createLocalReq({ user: admin }, payload))
+    expect(response.status).toBe(202)
+    expect(await response.json()).toMatchObject({ jobID: expect.any(String) })
+  })
+
+  it('maps queue conflicts to a retryable response and passes other queue errors through', async () => {
+    const queue = vi.spyOn(payload.jobs, 'queue')
+    const duplicate = Object.assign(new Error('duplicate request'), { code: 11000 })
+    queue.mockRejectedValueOnce(duplicate)
+    await expect(queueOtterReleaseSync(await request())).rejects.toMatchObject({ status: 409 })
+
+    const failure = new Error('queue unavailable')
+    queue.mockRejectedValueOnce(failure)
+    await expect(queueOtterReleaseSync(await request())).rejects.toBe(failure)
+    queue.mockRestore()
   })
 
   it('protects controls and status fields, deduplicates queue requests, and schedules once per day', async () => {

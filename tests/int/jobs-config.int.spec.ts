@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { JobCancelledError } from 'payload'
+import { APIError, JobCancelledError } from 'payload'
 
 const mocks = vi.hoisted(() => ({
   executeImport: vi.fn(),
@@ -83,6 +83,8 @@ describe('Payload job configuration', () => {
       Object.assign(new Error('Invalid signature'), { status: 400 }),
     )
     await expect(run(args)).rejects.toBeInstanceOf(JobCancelledError)
+    mocks.releases.mockRejectedValueOnce(new APIError('Invalid release signature.', 400))
+    await expect(run(args)).rejects.toMatchObject({ message: 'Invalid release signature.' })
     mocks.releases.mockRejectedValueOnce(new Error('Private database details'))
     await expect(run(args)).rejects.toThrow('integrity check')
     mocks.releases.mockRejectedValueOnce(

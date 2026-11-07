@@ -149,4 +149,47 @@ describe('Otter release import controls', () => {
       'Invalid executable signature',
     )
   })
+
+  it('uses fallback messages for incomplete and non-Error action failures', async () => {
+    let attempts = 0
+    const fetch = vi.fn(async (url: string) => {
+      if (url.endsWith('/refresh')) {
+        attempts += 1
+        if (attempts === 1) return response({}, false)
+        throw 'offline'
+      }
+      return response({ ...idle, enabled: true, lastCheckedAt: '2026-11-06T12:00:00Z' })
+    })
+    vi.stubGlobal('fetch', fetch)
+    await render()
+
+    expect(container.textContent).toContain('Daily imports are enabled')
+    expect(container.textContent).toContain('Last check:')
+
+    await click('Import releases now')
+    expect(container.querySelector('[role=alert]')?.textContent).toBe(
+      'The release import action failed.',
+    )
+    await click('Import releases now')
+    expect(container.querySelector('[role=alert]')?.textContent).toBe(
+      'The release import action failed.',
+    )
+  })
+
+  it('ignores status request failures after unmount', async () => {
+    let signal: AbortSignal | undefined
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, options: { signal: AbortSignal }) => {
+        signal = options.signal
+        return new Promise((_, reject) => {
+          signal!.addEventListener('abort', () => reject('offline'))
+        })
+      }),
+    )
+    await render()
+    await act(async () => root.unmount())
+    expect(signal?.aborted).toBe(true)
+    root = createRoot(container)
+  })
 })
