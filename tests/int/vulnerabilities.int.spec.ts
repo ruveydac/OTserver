@@ -958,7 +958,7 @@ describe('downloadFeed', () => {
     const sha256 = createHash('sha256').update(body).digest('hex')
     const compressedSha256 = createHash('sha256').update(gzipped).digest('hex')
     const server = createServer((request, response) => {
-      if (request.url === '/missing') {
+      if (request.url?.startsWith('/missing')) {
         response.writeHead(404).end()
         return
       }
@@ -993,7 +993,19 @@ describe('downloadFeed', () => {
       expect(
         (await readFeed(await downloadFeed(`${base}/feed.json.gz`, { gzip: true }))).toString(),
       ).toBe(body.toString())
-      await expect(downloadFeed(`${base}/missing`)).rejects.toThrow('responded with 404')
+      const warn = vi.fn()
+      const logger = { warn } as unknown as Payload['logger']
+      await expect(
+        downloadFeed(`${base}/missing?token=do-not-log`, undefined, logger),
+      ).rejects.toThrow('responded with 404')
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'vulnerability-feed.request-failed',
+          url: `${base}/missing`,
+          status: 404,
+        }),
+      )
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('do-not-log')
     } finally {
       await new Promise((resolve) => server.close(resolve))
     }

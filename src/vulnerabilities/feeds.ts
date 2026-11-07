@@ -277,7 +277,7 @@ export const loadCsafSnapshot = async (
 const runSync = async (
   payload: Payload,
   {
-    download = downloadFeed,
+    download = (url, options) => downloadFeed(url, options, payload.logger),
     force,
     req,
     failOnSourceError,

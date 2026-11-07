@@ -459,10 +459,28 @@ describe('GitHub Otter release imports', () => {
 
   it('handles GitHub redirects and retryable failures without following foreign locations', async () => {
     const remote = github()
+    const warning = vi.spyOn(payload.logger, 'warn').mockImplementation(() => undefined as never)
+    remote.fetch.mockResolvedValueOnce(
+      new Response(null, {
+        status: 302,
+        headers: {
+          location:
+            'https://github.com/ruveydac/otserver-otter/releases/download/v98.2.0/binary?token=do-not-log',
+        },
+      }),
+    )
     remote.fetch.mockResolvedValueOnce(new Response(null, { status: 503 }))
     await expect(executeOtterReleaseSync(payload, { submittedBy: admin.id })).rejects.toMatchObject(
       { status: 503 },
     )
+    expect(warning).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'otter-release.request-failed',
+        url: 'https://github.com/ruveydac/otserver-otter/releases/download/v98.2.0/binary',
+        status: 503,
+      }),
+    )
+    expect(JSON.stringify(warning.mock.calls)).not.toContain('do-not-log')
     remote.fetch.mockResolvedValueOnce(
       new Response(null, { status: 403, headers: { 'x-ratelimit-remaining': '0' } }),
     )
@@ -487,6 +505,7 @@ describe('GitHub Otter release imports', () => {
       imported: 3,
       skipped: 0,
     })
+    warning.mockRestore()
   })
 
   it('rechecks administrator permissions and the daily option before execution', async () => {

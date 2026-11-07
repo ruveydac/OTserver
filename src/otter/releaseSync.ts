@@ -20,6 +20,39 @@ const assets = [
   { name: 'otserver-otter.exe', target: 'x86_64-pc-windows-msvc' },
 ] as const
 
+const safeURL = (value: string): string => {
+  try {
+    const url = new URL(value)
+    url.username = ''
+    url.password = ''
+    url.search = ''
+    url.hash = ''
+    return url.toString()
+  } catch {
+    return '[invalid URL]'
+  }
+}
+
+const logRequestFailure = (
+  logger: Payload['logger'],
+  url: string,
+  error: unknown,
+  status?: number,
+) => {
+  const value = error as { code?: string | number; cause?: { code?: string | number } }
+  const code = value?.code ?? value?.cause?.code
+  logger.warn({
+    event: 'otter-release.request-failed',
+    url: safeURL(url),
+    ...(status === undefined ? {} : { status }),
+    ...(code === undefined ? {} : { code }),
+    error: (error instanceof Error ? error.message : String(error)).replace(
+      /https?:\/\/[^\s"'<>]+/g,
+      (value) => safeURL(value),
+    ),
+  })
+}
+
 const requireAdmin = async (req: PayloadRequest) => {
   if (!(await getAuthorization(req)).isAdmin)
     throw new APIError('Administrator access required.', 403)
@@ -129,7 +162,7 @@ export const refreshOtterReleases: PayloadHandler = async (req) => {
   return Response.json({ jobID: String(job!.id) }, { status: 202 })
 }
 
-const download = async (url: string, limit: number): Promise<Buffer> => {
+const download = async (url: string, limit: number, logger: Payload['logger']): Promise<Buffer> => {
   const signal = AbortSignal.timeout(5 * 60_000)
   for (let redirects = 0; redirects <= 3; redirects++) {
     const destination = new URL(url)
@@ -156,7 +189,8 @@ const download = async (url: string, limit: number): Promise<Buffer> => {
         redirect: 'manual',
         signal,
       })
-    } catch {
+    } catch (error) {
+      logRequestFailure(logger, url, error)
       throw new APIError('GitHub could not be reached. The release import will be retried.', 503)
     }
     if ([301, 302, 303, 307, 308].includes(response.status)) {
@@ -172,10 +206,12 @@ const download = async (url: string, limit: number): Promise<Buffer> => {
         response.status === 429 ||
         response.status >= 500 ||
         (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0')
-      throw new APIError(
+      const error = new APIError(
         `GitHub release download failed (HTTP ${response.status}).`,
         retryable ? 503 : 400,
       )
+      logRequestFailure(logger, url, error, response.status)
+      throw error
     }
     if (Number(response.headers.get('content-length')) > limit) {
       await response.body.cancel()
@@ -192,6 +228,7 @@ const download = async (url: string, limit: number): Promise<Buffer> => {
       }
     } catch (error) {
       if (error instanceof APIError) throw error
+      logRequestFailure(logger, url, error)
       throw new APIError(
         'The GitHub release download was interrupted. The import will be retried.',
         503,
@@ -202,10 +239,11 @@ const download = async (url: string, limit: number): Promise<Buffer> => {
   throw new APIError('GitHub returned too many release download redirects.', 400)
 }
 
-const latestRelease = async () => {
+const latestRelease = async (logger: Payload['logger']) => {
   const metadata = await download(
     'https://api.github.com/repos/ruveydac/otserver-otter/releases/latest',
     1024 * 1024,
+    logger,
   )
   let release: {
     tag_name: string
@@ -266,7 +304,7 @@ export const executeOtterReleaseSync = async (
       return { imported: 0, skipped: 0 }
     }
     await saveState(req, { lastCheckedAt: new Date().toISOString(), error: null })
-    const release = await latestRelease()
+    const release = await latestRelease(payload.logger)
     let imported = 0
     let skipped = 0
     for (const asset of release.assets) {
@@ -294,7 +332,7 @@ export const executeOtterReleaseSync = async (
         skipped++
         continue
       }
-      const downloaded = await download(asset.url, MAX_OTTER_RELEASE_SIZE)
+      const downloaded = await download(asset.url, MAX_OTTER_RELEASE_SIZE, payload.logger)
       if (downloaded.length !== asset.size)
         throw new APIError('The GitHub release asset size does not match its metadata.', 400)
       const binary = await unpackOtterRelease(downloaded)
