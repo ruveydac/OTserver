@@ -55,6 +55,30 @@ export const ApplicationSettings: GlobalConfig = {
       },
     },
     {
+      name: 'metadataImports',
+      label: 'Enable daily device metadata updates',
+      type: 'checkbox',
+      defaultValue: false,
+      admin: {
+        description:
+          'Check OTserver Metadata on GitHub every 24 hours and import validated manufacturer and device records. Existing records missing upstream are retained.',
+      },
+    },
+    {
+      name: 'metadataSync',
+      type: 'group',
+      access: { update: () => false },
+      admin: { hidden: true },
+      fields: [
+        { name: 'requestedAt', type: 'date' },
+        { name: 'lastCheckedAt', type: 'date' },
+        { name: 'lastSyncedAt', type: 'date' },
+        { name: 'commitSHA', type: 'text' },
+        { name: 'error', type: 'textarea' },
+        { name: 'jobID', type: 'text' },
+      ],
+    },
+    {
       name: 'otterReleaseSync',
       type: 'group',
       access: { update: () => false },

@@ -4,6 +4,7 @@ import { APIError, JobCancelledError } from 'payload'
 const mocks = vi.hoisted(() => ({
   executeImport: vi.fn(),
   maintenance: vi.fn(),
+  metadataSync: vi.fn(),
   reapplyAssetClasses: vi.fn(),
   feeds: vi.fn(),
   releases: vi.fn(),
@@ -26,6 +27,10 @@ vi.mock('../../src/vulnerabilities/actions', () => ({ executeFeedUpdate: mocks.f
 vi.mock('../../src/otter/releaseSync', () => ({
   OTTER_RELEASE_SYNC_TASK: 'otter-release-sync-v1',
   executeOtterReleaseSync: mocks.releases,
+}))
+vi.mock('../../src/metadata/sync', () => ({
+  METADATA_SYNC_TASK: 'device-metadata-sync-v1',
+  executeMetadataSync: mocks.metadataSync,
 }))
 
 vi.mock('../../src/integrations/payload/workerContext', () => ({
@@ -58,10 +63,30 @@ beforeEach(() => {
   mocks.worker = undefined
   mocks.executeImport.mockResolvedValue(undefined)
   mocks.maintenance.mockResolvedValue(undefined)
+  mocks.metadataSync.mockResolvedValue({ updated: true })
   mocks.reapplyAssetClasses.mockResolvedValue({ scanned: 4, updated: 2 })
 })
 
 describe('Payload job configuration', () => {
+  it('runs automatic metadata imports only on the maintenance worker', async () => {
+    const run = jobs.tasks!.find((task) => task.slug === 'device-metadata-sync-v1')!
+      .handler as unknown as Handler
+    const args = { input: { version: 1 }, job: { id: 'metadata-job' }, req: request() }
+    await expect(run(args)).rejects.toBeInstanceOf(JobCancelledError)
+    mocks.worker = { queue: 'maintenance' }
+    await expect(run({ ...args, input: { version: 2 } })).rejects.toBeInstanceOf(JobCancelledError)
+    expect(await run(args)).toEqual({ output: { updated: true } })
+    expect(mocks.metadataSync).toHaveBeenCalledWith(args.req.payload)
+    mocks.metadataSync.mockRejectedValueOnce(
+      Object.assign(new Error('GitHub unavailable'), { status: 503 }),
+    )
+    await expect(run(args)).rejects.toThrow('GitHub unavailable')
+    mocks.metadataSync.mockRejectedValueOnce(
+      Object.assign(new Error('Invalid metadata'), { status: 400 }),
+    )
+    await expect(run(args)).rejects.toBeInstanceOf(JobCancelledError)
+  })
+
   it('runs release imports only on the maintenance worker and retries temporary download failures', async () => {
     const run = jobs.tasks!.find((task) => task.slug === 'otter-release-sync-v1')!
       .handler as unknown as Handler

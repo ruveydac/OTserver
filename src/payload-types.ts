@@ -156,6 +156,7 @@ export interface Config {
   user: User;
   jobs: {
     tasks: {
+      'device-metadata-sync-v1': TaskDeviceMetadataSyncV1;
       'otter-release-sync-v1': TaskOtterReleaseSyncV1;
       'vulnerability-feed-sync-v1': TaskVulnerabilityFeedSyncV1;
       'import-v1': TaskImportV1;
@@ -1462,6 +1463,7 @@ export interface PayloadJob {
         completedAt: string;
         taskSlug:
           | 'inline'
+          | 'device-metadata-sync-v1'
           | 'otter-release-sync-v1'
           | 'vulnerability-feed-sync-v1'
           | 'import-v1'
@@ -1502,6 +1504,7 @@ export interface PayloadJob {
   taskSlug?:
     | (
         | 'inline'
+        | 'device-metadata-sync-v1'
         | 'otter-release-sync-v1'
         | 'vulnerability-feed-sync-v1'
         | 'import-v1'
@@ -2421,6 +2424,18 @@ export interface ApplicationSetting {
    * Import the latest stable GitHub release for all supported platforms every 24 hours. Scanner updates are assigned separately.
    */
   otterReleaseImports?: boolean | null;
+  /**
+   * Check OTserver Metadata on GitHub every 24 hours and import validated manufacturer and device records. Existing records missing upstream are retained.
+   */
+  metadataImports?: boolean | null;
+  metadataSync?: {
+    requestedAt?: string | null;
+    lastCheckedAt?: string | null;
+    lastSyncedAt?: string | null;
+    commitSHA?: string | null;
+    error?: string | null;
+    jobID?: string | null;
+  };
   otterReleaseSync?: {
     requestedAt?: string | null;
     lastCheckedAt?: string | null;
@@ -2446,6 +2461,17 @@ export interface ApplicationSetting {
  */
 export interface ApplicationSettingsSelect<T extends boolean = true> {
   otterReleaseImports?: T;
+  metadataImports?: T;
+  metadataSync?:
+    | T
+    | {
+        requestedAt?: T;
+        lastCheckedAt?: T;
+        lastSyncedAt?: T;
+        commitSHA?: T;
+        error?: T;
+        jobID?: T;
+      };
   otterReleaseSync?:
     | T
     | {
@@ -2471,6 +2497,18 @@ export interface CollectionsWidget {
     [k: string]: unknown;
   };
   width: 'full';
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskDevice-metadata-sync-v1".
+ */
+export interface TaskDeviceMetadataSyncV1 {
+  input: {
+    version: number;
+  };
+  output: {
+    updated: boolean;
+  };
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema

@@ -79,6 +79,9 @@ Main locations:
   shared database revision for matching, references, startup, and workers. Without an import,
   recognition returns unmatched with revision `unloaded`; administrator regex rules still
   work. Never reset imported data on restart or code upgrades.
+  Administrators can opt into daily OTserver Metadata updates in Settings > Application settings;
+  updates are pinned to a Git commit, validated like manual imports, and never delete records
+  missing from the upstream repository.
   `src/metadata/catalog.ts` is the shared manufacturer-scoped recognizer. Missing qualifiers
   do not match; never treat asset names as product names, combine firmware/software version
   contexts, or derive matching input from prior catalog output. Preserve all matching products

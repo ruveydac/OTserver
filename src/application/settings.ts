@@ -1,6 +1,15 @@
 import type { Payload, PayloadRequest } from 'payload'
 
 export type ApplicationSettings = {
+  metadataImports?: boolean | null
+  metadataSync?: {
+    requestedAt?: string | null
+    lastCheckedAt?: string | null
+    lastSyncedAt?: string | null
+    commitSHA?: string | null
+    error?: string | null
+    jobID?: string | null
+  } | null
   otterReleaseImports?: boolean | null
   otterReleaseSync?: {
     requestedAt?: string | null

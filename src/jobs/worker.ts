@@ -7,6 +7,7 @@ import { safeFailure } from './errors'
 import { systemRequest } from '../integrations/payload/requests'
 import { expireOtterLeases } from '../otter/controller'
 import { scheduleOtterReleaseSync } from '../otter/releaseSync'
+import { scheduleMetadataSync } from '../metadata/sync'
 
 const OTTER_LEASE_SWEEP_MS = 15_000
 
@@ -98,7 +99,7 @@ export const runWorker = async (payload: Payload, queue: Queue, signal: AbortSig
   let stopped = false
   let heartbeat: Promise<void> = Promise.resolve()
   let timer: ReturnType<typeof setInterval> | undefined
-  let nextReleaseCheck = 0
+  let nextUpdaterCheck = 0
   try {
     await recoverQueue(payload, fence)
     if (queue === 'maintenance') await withWorkerFence(fence, () => expireOtterLeases(payload))
@@ -130,9 +131,10 @@ export const runWorker = async (payload: Payload, queue: Queue, signal: AbortSig
     while (!signal.aborted && !lost) {
       if (queue === 'maintenance') {
         await scheduleMaintenance(payload, fence)
-        if (Date.now() >= nextReleaseCheck) {
+        if (Date.now() >= nextUpdaterCheck) {
           await withWorkerFence(fence, () => scheduleOtterReleaseSync(payload))
-          nextReleaseCheck = Date.now() + 60_000
+          await withWorkerFence(fence, () => scheduleMetadataSync(payload))
+          nextUpdaterCheck = Date.now() + 60_000
         }
       }
       await withWorkerFence(fence, () =>

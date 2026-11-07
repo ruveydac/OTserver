@@ -106,54 +106,56 @@ export const mergeMetadataFiles = (current: Catalog, input: unknown) => {
   return { catalog, counts }
 }
 
+export const applyMetadataFilesInTransaction = async (req: PayloadRequest, files: unknown) => {
+  const current = await activeCatalog(req.payload, req)
+  const merged = mergeMetadataFiles(current.catalog, files)
+  const changed = Object.values(merged.counts).some(({ added, updated }) => added || updated)
+  if (!changed) return { ...merged.counts, revision: current.revision, changed: false }
+  const revision = catalogRevision(merged.catalog)
+  const data = {
+    revision,
+    catalog: merged.catalog,
+    manufacturerCount: merged.catalog.manufacturers.length,
+    deviceCount: merged.catalog.devices.length,
+  }
+  const existing = await req.payload.find({
+    collection: 'device-catalog',
+    where: { id: { equals: 'active' } },
+    limit: 1,
+    depth: 0,
+    overrideAccess: true,
+    req,
+  })
+  // Generic catalog mutations are denied; only this validated import path writes it.
+  if (existing.docs.length)
+    await req.payload.update({
+      collection: 'device-catalog',
+      id: 'active',
+      data,
+      overrideAccess: true,
+      req,
+    })
+  else
+    await req.payload.create({
+      collection: 'device-catalog',
+      data: { id: 'active', ...data },
+      overrideAccess: true,
+      req,
+    })
+  await req.payload.jobs.queue({
+    task: 'reapply-asset-classes-v1',
+    queue: 'maintenance',
+    req,
+    input: { version: 1, assetClassID: 'device-catalog', catalogRevision: revision },
+  })
+  return { ...merged.counts, revision, changed: true }
+}
+
 export const importMetadata = async (req: PayloadRequest, files: unknown) => {
   if (!(await getAuthorization(req)).isAdmin)
     throw new APIError('Administrator access required.', 403)
   try {
-    return await inTransaction(req, async () => {
-      const current = await activeCatalog(req.payload, req)
-      const merged = mergeMetadataFiles(current.catalog, files)
-      const changed = Object.values(merged.counts).some(({ added, updated }) => added || updated)
-      if (!changed) return { ...merged.counts, revision: current.revision, changed: false }
-      const revision = catalogRevision(merged.catalog)
-      const data = {
-        revision,
-        catalog: merged.catalog,
-        manufacturerCount: merged.catalog.manufacturers.length,
-        deviceCount: merged.catalog.devices.length,
-      }
-      const existing = await req.payload.find({
-        collection: 'device-catalog',
-        where: { id: { equals: 'active' } },
-        limit: 1,
-        depth: 0,
-        overrideAccess: true,
-        req,
-      })
-      // Generic catalog mutations are denied; only this validated administrator action writes it.
-      if (existing.docs.length)
-        await req.payload.update({
-          collection: 'device-catalog',
-          id: 'active',
-          data,
-          overrideAccess: true,
-          req,
-        })
-      else
-        await req.payload.create({
-          collection: 'device-catalog',
-          data: { id: 'active', ...data },
-          overrideAccess: true,
-          req,
-        })
-      await req.payload.jobs.queue({
-        task: 'reapply-asset-classes-v1',
-        queue: 'maintenance',
-        req,
-        input: { version: 1, assetClassID: 'device-catalog', catalogRevision: revision },
-      })
-      return { ...merged.counts, revision, changed: true }
-    })
+    return await inTransaction(req, () => applyMetadataFilesInTransaction(req, files))
   } catch (error) {
     if ((error as { code?: number }).code === 11000 || (error as { code?: number }).code === 112)
       throw new APIError(
