@@ -78,6 +78,8 @@ export interface Config {
     'identity-cases': IdentityCase;
     'asset-imports': AssetImport;
     'otter-scanners': OtterScanner;
+    'otter-releases': OtterRelease;
+    'otter-updates': OtterUpdate;
     'otter-profiles': OtterProfile;
     'otter-schedules': OtterSchedule;
     'otter-runs': OtterRun;
@@ -113,6 +115,8 @@ export interface Config {
     'identity-cases': IdentityCasesSelect<false> | IdentityCasesSelect<true>;
     'asset-imports': AssetImportsSelect<false> | AssetImportsSelect<true>;
     'otter-scanners': OtterScannersSelect<false> | OtterScannersSelect<true>;
+    'otter-releases': OtterReleasesSelect<false> | OtterReleasesSelect<true>;
+    'otter-updates': OtterUpdatesSelect<false> | OtterUpdatesSelect<true>;
     'otter-profiles': OtterProfilesSelect<false> | OtterProfilesSelect<true>;
     'otter-schedules': OtterSchedulesSelect<false> | OtterSchedulesSelect<true>;
     'otter-runs': OtterRunsSelect<false> | OtterRunsSelect<true>;
@@ -152,6 +156,7 @@ export interface Config {
   user: User;
   jobs: {
     tasks: {
+      'otter-release-sync-v1': TaskOtterReleaseSyncV1;
       'vulnerability-feed-sync-v1': TaskVulnerabilityFeedSyncV1;
       'import-v1': TaskImportV1;
       'maintenance-v1': TaskMaintenanceV1;
@@ -733,6 +738,8 @@ export interface OtterScanner {
   enrolledAt?: string | null;
   lastSeenAt?: string | null;
   version?: string | null;
+  buildTarget?: string | null;
+  binaryDigest?: string | null;
   capabilities?:
     | {
         [k: string]: unknown;
@@ -764,6 +771,7 @@ export interface OtterScanner {
       }[]
     | null;
   currentRun?: (string | null) | OtterRun;
+  currentUpdate?: (string | null) | OtterUpdate;
   enrollmentTokenHash?: string | null;
   enrollmentExpiresAt?: string | null;
   credentialHash?: string | null;
@@ -948,6 +956,53 @@ export interface OtterSchedule {
   lastRunAt?: string | null;
   updatedAt: string;
   createdAt: string;
+}
+/**
+ * Audited manual update assignments and per-scanner outcomes.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "otter-updates".
+ */
+export interface OtterUpdate {
+  id: string;
+  name: string;
+  site: string | Site;
+  scanner: string | OtterScanner;
+  release: string | OtterRelease;
+  target: string;
+  targetVersion: string;
+  binaryDigest: string;
+  binarySize: number;
+  previousVersion?: string | null;
+  status: 'queued' | 'downloading' | 'verified' | 'installing' | 'completed' | 'failed' | 'rolled-back';
+  message?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Upload a signed executable or an official Linux .tar.gz release for managed scanner updates.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "otter-releases".
+ */
+export interface OtterRelease {
+  id: string;
+  version: string;
+  target: string;
+  binaryDigest: string;
+  updatedAt: string;
+  createdAt: string;
+  url?: string | null;
+  thumbnailURL?: string | null;
+  filename?: string | null;
+  mimeType?: string | null;
+  filesize: number;
+  width?: number | null;
+  height?: number | null;
+  focalX?: number | null;
+  focalY?: number | null;
 }
 /**
  * Assign read or write access to a site and every site underneath it.
@@ -1405,7 +1460,13 @@ export interface PayloadJob {
     | {
         executedAt: string;
         completedAt: string;
-        taskSlug: 'inline' | 'vulnerability-feed-sync-v1' | 'import-v1' | 'maintenance-v1' | 'reapply-asset-classes-v1';
+        taskSlug:
+          | 'inline'
+          | 'otter-release-sync-v1'
+          | 'vulnerability-feed-sync-v1'
+          | 'import-v1'
+          | 'maintenance-v1'
+          | 'reapply-asset-classes-v1';
         taskID: string;
         input?:
           | {
@@ -1439,7 +1500,15 @@ export interface PayloadJob {
       }[]
     | null;
   taskSlug?:
-    ('inline' | 'vulnerability-feed-sync-v1' | 'import-v1' | 'maintenance-v1' | 'reapply-asset-classes-v1') | null;
+    | (
+        | 'inline'
+        | 'otter-release-sync-v1'
+        | 'vulnerability-feed-sync-v1'
+        | 'import-v1'
+        | 'maintenance-v1'
+        | 'reapply-asset-classes-v1'
+      )
+    | null;
   queue?: string | null;
   waitUntil?: string | null;
   processing?: boolean | null;
@@ -1861,6 +1930,8 @@ export interface OtterScannersSelect<T extends boolean = true> {
   enrolledAt?: T;
   lastSeenAt?: T;
   version?: T;
+  buildTarget?: T;
+  binaryDigest?: T;
   capabilities?: T;
   interfaces?: T;
   computerName?: T;
@@ -1876,10 +1947,52 @@ export interface OtterScannersSelect<T extends boolean = true> {
         id?: T;
       };
   currentRun?: T;
+  currentUpdate?: T;
   enrollmentTokenHash?: T;
   enrollmentExpiresAt?: T;
   credentialHash?: T;
   credentialExpiresAt?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "otter-releases_select".
+ */
+export interface OtterReleasesSelect<T extends boolean = true> {
+  version?: T;
+  target?: T;
+  binaryDigest?: T;
+  updatedAt?: T;
+  createdAt?: T;
+  url?: T;
+  thumbnailURL?: T;
+  filename?: T;
+  mimeType?: T;
+  filesize?: T;
+  width?: T;
+  height?: T;
+  focalX?: T;
+  focalY?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "otter-updates_select".
+ */
+export interface OtterUpdatesSelect<T extends boolean = true> {
+  name?: T;
+  site?: T;
+  scanner?: T;
+  release?: T;
+  target?: T;
+  targetVersion?: T;
+  binaryDigest?: T;
+  binarySize?: T;
+  previousVersion?: T;
+  status?: T;
+  message?: T;
+  startedAt?: T;
+  completedAt?: T;
   updatedAt?: T;
   createdAt?: T;
 }
@@ -2305,6 +2418,18 @@ export interface PayloadMigrationsSelect<T extends boolean = true> {
 export interface ApplicationSetting {
   id: string;
   /**
+   * Import the latest stable GitHub release for all supported platforms every 24 hours. Scanner updates are assigned separately.
+   */
+  otterReleaseImports?: boolean | null;
+  otterReleaseSync?: {
+    requestedAt?: string | null;
+    lastCheckedAt?: string | null;
+    lastSyncedAt?: string | null;
+    version?: string | null;
+    error?: string | null;
+    jobID?: string | null;
+  };
+  /**
    * Leave blank to use OTSERVER_PUBLIC_URL from the deployment environment. Remote URLs require HTTPS.
    */
   controllerURL?: string | null;
@@ -2320,6 +2445,17 @@ export interface ApplicationSetting {
  * via the `definition` "application-settings_select".
  */
 export interface ApplicationSettingsSelect<T extends boolean = true> {
+  otterReleaseImports?: T;
+  otterReleaseSync?:
+    | T
+    | {
+        requestedAt?: T;
+        lastCheckedAt?: T;
+        lastSyncedAt?: T;
+        version?: T;
+        error?: T;
+        jobID?: T;
+      };
   controllerURL?: T;
   queuedImports?: T;
   updatedAt?: T;
@@ -2335,6 +2471,20 @@ export interface CollectionsWidget {
     [k: string]: unknown;
   };
   width: 'full';
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskOtter-release-sync-v1".
+ */
+export interface TaskOtterReleaseSyncV1 {
+  input: {
+    version: number;
+    submittedBy?: string | null;
+  };
+  output: {
+    imported?: number | null;
+    skipped?: number | null;
+  };
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema

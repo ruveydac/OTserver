@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { JobCancelledError } from 'payload'
+import { APIError, JobCancelledError } from 'payload'
 
 const mocks = vi.hoisted(() => ({
   executeImport: vi.fn(),
   maintenance: vi.fn(),
   reapplyAssetClasses: vi.fn(),
   feeds: vi.fn(),
+  releases: vi.fn(),
   worker: undefined as undefined | { queue: string },
 }))
 
@@ -22,6 +23,10 @@ vi.mock('../../src/collections/AssetClasses', () => ({
 }))
 
 vi.mock('../../src/vulnerabilities/actions', () => ({ executeFeedUpdate: mocks.feeds }))
+vi.mock('../../src/otter/releaseSync', () => ({
+  OTTER_RELEASE_SYNC_TASK: 'otter-release-sync-v1',
+  executeOtterReleaseSync: mocks.releases,
+}))
 
 vi.mock('../../src/integrations/payload/workerContext', () => ({
   currentWorker: () => mocks.worker,
@@ -57,6 +62,36 @@ beforeEach(() => {
 })
 
 describe('Payload job configuration', () => {
+  it('runs release imports only on the maintenance worker and retries temporary download failures', async () => {
+    const run = jobs.tasks!.find((task) => task.slug === 'otter-release-sync-v1')!
+      .handler as unknown as Handler
+    const args = {
+      input: { version: 1, submittedBy: 'admin' },
+      job: { id: 'release-job' },
+      req: request(),
+    }
+    await expect(run(args)).rejects.toBeInstanceOf(JobCancelledError)
+    mocks.worker = { queue: 'maintenance' }
+    await expect(run({ ...args, input: { version: 2 } })).rejects.toBeInstanceOf(JobCancelledError)
+    mocks.releases.mockResolvedValueOnce({ imported: 3, skipped: 0 })
+    expect(await run(args)).toEqual({ output: { imported: 3, skipped: 0 } })
+    mocks.releases.mockRejectedValueOnce(
+      Object.assign(new Error('GitHub unavailable'), { status: 503 }),
+    )
+    await expect(run(args)).rejects.toThrow('GitHub unavailable')
+    mocks.releases.mockRejectedValueOnce(
+      Object.assign(new Error('Invalid signature'), { status: 400 }),
+    )
+    await expect(run(args)).rejects.toBeInstanceOf(JobCancelledError)
+    mocks.releases.mockRejectedValueOnce(new APIError('Invalid release signature.', 400))
+    await expect(run(args)).rejects.toMatchObject({ message: 'Invalid release signature.' })
+    mocks.releases.mockRejectedValueOnce(new Error('Private database details'))
+    await expect(run(args)).rejects.toThrow('integrity check')
+    mocks.releases.mockRejectedValueOnce(
+      Object.assign(new Error('Private host'), { code: 'ECONNRESET' }),
+    )
+    await expect(run(args)).rejects.toThrow('temporary database or network failure')
+  })
   it('runs feed work only on the versioned maintenance task and preserves transient retries', async () => {
     const run = jobs.tasks!.find((task) => task.slug === 'vulnerability-feed-sync-v1')!
       .handler as unknown as Handler

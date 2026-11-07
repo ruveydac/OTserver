@@ -100,6 +100,26 @@ Open <http://localhost:3000/admin> and create the first administrator account.
 The named volumes retain the database and uploaded import files.
 For a pinned deployment, replace `latest` with an exact release tag (`X.Y.Z`).
 
+### Firewall rules
+
+<!-- prettier-ignore -->
+| Source | Destination / URL | Firewall rule | Purpose |
+| --- | --- | --- | --- |
+| Users | OTserver or HTTPS reverse proxy | TCP 443 to the proxy, then TCP 3000 to OTserver; direct TCP 3000 only on a trusted network | Web UI and API |
+| OTserver and workers | MongoDB | TCP 27017 on a private network only | Application data and jobs |
+| Otter scanners | HTTPS `OTSERVER_PUBLIC_URL` (`/api/otter/v1/*`, including `/api/otter/v1/updates/{id}/binary`, and `/api/asset-imports*`) | Outbound TCP 443; no inbound scanner rule | Enrollment, scans, uploads, and managed updates |
+| OTserver and maintenance worker | CISA KEV: `https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json`<br>NVD: `https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-YYYY.json.gz` and `https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-YYYY.meta` | DNS UDP/TCP 53 and outbound TCP 443, when online sync is enabled | CISA KEV and NVD catalogs |
+| OTserver and maintenance worker | CERT@VDE: `https://aggregator.certvde.com/.well-known/csaf-aggregator/aggregator.json`<br>CISA CSAF OT/IT indexes: `https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/cisa-csaf-ot-feed-tlp-white.json` and `https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/IT/white/cisa-csaf-it-feed-tlp-white.json`<br>ICS Advisory: `https://raw.githubusercontent.com/icsadvprj/ICS-Advisory-Project/main/ICS-CERT_ADV/CISA_ICS_ADV_Master.csv`<br>Also allow provider metadata, feed, and advisory URLs referenced by the CERT@VDE aggregator and CSAF indexes; hosts can vary. | DNS UDP/TCP 53 and outbound TCP 443, when online sync is enabled | CSAF and ICS Advisory catalogs |
+| OTserver and maintenance worker; admin browser for manual downloads | `https://api.github.com/repos/ruveydac/otserver-otter/releases/latest`; `https://github.com/ruveydac/otserver-otter/releases`; downloads may redirect to `release-assets.githubusercontent.com` or `objects.githubusercontent.com` | DNS UDP/TCP 53 and outbound TCP 443, when release imports or manual downloads are used | Otter release imports and manual downloads |
+
+Otter also needs access from the scanner to approved target networks for the configured discovery
+protocols. Ports depend on enabled probes; ARP, PROFINET DCP, and LLDP require the same Layer-2
+segment. See [Otter's supported discovery protocols](otserver-otter/README.md#what-it-discovers).
+
+Failed catalog and release requests are logged as warnings by the application logger, with the
+destination, status, and error. Query strings are omitted from logged URLs. Isolated deployments
+can upload feeds and signed Otter releases manually.
+
 ### Build your first inventory
 
 1. Create your site hierarchy under **Sites**.

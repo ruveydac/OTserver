@@ -1,6 +1,15 @@
 import type { Payload, PayloadRequest } from 'payload'
 
 export type ApplicationSettings = {
+  otterReleaseImports?: boolean | null
+  otterReleaseSync?: {
+    requestedAt?: string | null
+    lastCheckedAt?: string | null
+    lastSyncedAt?: string | null
+    version?: string | null
+    error?: string | null
+    jobID?: string | null
+  } | null
   controllerURL?: string | null
   queuedImports?: 'deployment' | 'enabled' | 'disabled' | null
 }

@@ -211,6 +211,17 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
   retries after the initial attempt. Persist attempt counts across restarts and retain the original
   export. Heartbeats continue through retry waits; exhausted uploads fail the run and retry only
   finishing, never restart the upload budget. Import processing failures are separate.
+- Otter releases accept signed raw Linux/Windows executables and official single-executable Linux
+  `.tar.gz` archives. Normalize archives before Payload generates upload data; include the detected
+  Linux `application/x-elf` MIME type. Verify the pinned embedded Ed25519 signature and store only
+  the executable with its verified version, target, digest, and size. Bound compressed and unpacked
+  sizes to 512 MiB; reject archive links, paths, extra members, and corrupt signatures.
+  Administrator-triggered and opt-in daily GitHub imports use `otter-release-sync-v1` on the fenced
+  maintenance worker, independently of weekly vulnerability maintenance. Import the latest stable
+  `ruveydac/otserver-otter` release for all three supported targets, preserve existing immutable
+  releases, and retry missing platforms after partial failure. The application settings document
+  serializes enqueue requests and protects server-owned sync status. Recheck manual submitter
+  permissions and the daily setting at execution. Importing releases never assigns scanner updates.
 
 ### Auditability
 
