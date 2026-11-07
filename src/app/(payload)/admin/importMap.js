@@ -12,6 +12,8 @@ import { default as default_8712540e86c8ec1b8842171d5455844e } from '@/component
 import { default as default_269ec8e6f70d6b068e7aa5ffa27b8110 } from '@/components/ImportInstructions'
 import { default as default_fc33955082dea31f4b0ec6d0cb077a17 } from '@/components/OtterScannerActions'
 import { default as default_c1520f8119081daafc04e2023c3ef070 } from '@/components/OtterEnrollment'
+import { default as default_88f44dbae57d7f69c3efa115d7e7fcb5 } from '@/components/OtterBulkUpdates'
+import { default as default_d2eff891bab6ced06a1d8428d5433c5a } from '@/components/OtterReleaseActions'
 import { default as default_1cf71388346ca687235889e34b2c8889 } from '@/components/OtterInterfaceField'
 import { default as default_75fff05379f2361cc5722c257b69b4b9 } from '@/components/OtterManagedSettingsField'
 import { default as default_d5e71aff688bb616206a98b246bfeca0 } from '@/components/OtterCredentialsField'
@@ -44,6 +46,8 @@ export const importMap = {
   '@/components/ImportInstructions#default': default_269ec8e6f70d6b068e7aa5ffa27b8110,
   '@/components/OtterScannerActions#default': default_fc33955082dea31f4b0ec6d0cb077a17,
   '@/components/OtterEnrollment#default': default_c1520f8119081daafc04e2023c3ef070,
+  '@/components/OtterBulkUpdates#default': default_88f44dbae57d7f69c3efa115d7e7fcb5,
+  '@/components/OtterReleaseActions#default': default_d2eff891bab6ced06a1d8428d5433c5a,
   '@/components/OtterInterfaceField#default': default_1cf71388346ca687235889e34b2c8889,
   '@/components/OtterManagedSettingsField#default': default_75fff05379f2361cc5722c257b69b4b9,
   '@/components/OtterCredentialsField#default': default_d5e71aff688bb616206a98b246bfeca0,

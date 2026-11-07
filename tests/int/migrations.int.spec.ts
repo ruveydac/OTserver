@@ -157,10 +157,13 @@ describe('versioned legacy identity migration', () => {
       const otterIndexes = migrations[2]!
       await otterIndexes.down(migrationArgs as never)
       await otterIndexes.up(migrationArgs as never)
-      const reviewIndexes = migrations.at(-1)!
+      const reviewIndexes = migrations.find(
+        ({ name }) => name === '20261019_120000_asset_vulnerability_reviews',
+      )!
       await reviewIndexes.down(migrationArgs as never)
       await reviewIndexes.up(migrationArgs as never)
-      await expect(migrations.at(-2)!.down({} as never)).rejects.toThrow('not reversible')
+      const siteTypes = migrations.find(({ name }) => name === '20261018_120000_site_types')!
+      await expect(siteTypes.down({} as never)).rejects.toThrow('not reversible')
     } finally {
       await payload.delete({ collection: 'assets', id: asset.id })
       await payload.delete({ collection: 'users', id: user.id })

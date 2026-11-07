@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   authorization: { isAdmin: true },
   delay: vi.fn(async () => undefined),
   expireOtterLeases: vi.fn(async () => undefined),
+  releaseSync: vi.fn(async () => undefined),
   renewWorker: vi.fn(),
   systemRequest: vi.fn(async () => ({ context: {} })),
 }))
@@ -21,6 +22,7 @@ vi.mock('../../src/jobs/ownership', () => ({
 }))
 
 vi.mock('../../src/jobs/maintenance', () => ({ SYNC_INTERVAL_MS: 10_000 }))
+vi.mock('../../src/otter/releaseSync', () => ({ scheduleOtterReleaseSync: mocks.releaseSync }))
 
 vi.mock('../../src/otter/controller', () => ({
   expireOtterLeases: mocks.expireOtterLeases,
@@ -237,13 +239,17 @@ describe('worker scheduling and execution', () => {
   it('runs one owned queue cycle and releases its heartbeat', async () => {
     const controller = new AbortController()
     const payload = makePayload()
+    let mainRuns = 0
     // The maintenance queue also drains reclassifications on its own loop, so only the main
     // cycle (one job at a time) ends this run.
     payload.jobs.run.mockImplementation(async (args: { limit: number }) => {
-      if (args.limit === 1) controller.abort()
+      if (args.limit === 1 && ++mainRuns === 2) controller.abort()
+      return undefined
     })
     await runWorker(payload as never, 'maintenance', controller.signal)
     expect(mocks.expireOtterLeases).toHaveBeenCalledWith(payload)
+    expect(mocks.releaseSync).toHaveBeenCalledWith(payload)
+    expect(mocks.releaseSync).toHaveBeenCalledTimes(1)
     expect(payload.jobs.run).toHaveBeenCalledWith(
       expect.objectContaining({ queue: 'maintenance', limit: 1, sequential: true }),
     )

@@ -24,6 +24,9 @@ import {
   CISA_KEV_URL,
   CSAF_AGGREGATOR_URL,
   downloadFeed,
+  feedText,
+  feedUnavailable,
+  MISSING_OFFLINE_FILE,
   readFeed,
   FIRST_NVD_YEAR,
   ICS_ADVISORY_URL,
@@ -958,7 +961,7 @@ describe('downloadFeed', () => {
     const sha256 = createHash('sha256').update(body).digest('hex')
     const compressedSha256 = createHash('sha256').update(gzipped).digest('hex')
     const server = createServer((request, response) => {
-      if (request.url === '/missing') {
+      if (request.url?.startsWith('/missing')) {
         response.writeHead(404).end()
         return
       }
@@ -993,9 +996,81 @@ describe('downloadFeed', () => {
       expect(
         (await readFeed(await downloadFeed(`${base}/feed.json.gz`, { gzip: true }))).toString(),
       ).toBe(body.toString())
-      await expect(downloadFeed(`${base}/missing`)).rejects.toThrow('responded with 404')
+      const warn = vi.fn()
+      const logger = { warn } as unknown as Payload['logger']
+      await expect(
+        downloadFeed(`${base}/missing?token=do-not-log`, undefined, logger),
+      ).rejects.toThrow('responded with 404')
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'vulnerability-feed.request-failed',
+          url: `${base}/missing`,
+          status: 404,
+        }),
+      )
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('do-not-log')
     } finally {
       await new Promise((resolve) => server.close(resolve))
+    }
+  })
+
+  it('reads buffered feeds, enforces limits, and recognizes missing offline files', async () => {
+    const data = Buffer.alloc(64 * 1024 + 1, 1)
+    expect(await readFeed(Buffer.alloc(0))).toHaveLength(0)
+    expect(await readFeed(data)).toEqual(data)
+    expect(await feedText(async () => Buffer.from('catalog'), '/catalog')).toBe('catalog')
+    expect(feedUnavailable(Object.assign(new Error(), { code: MISSING_OFFLINE_FILE }))).toBe(true)
+    expect(feedUnavailable(Object.assign(new Error(), { status: 404 }))).toBe(true)
+    expect(feedUnavailable(new Error('network unavailable'))).toBe(false)
+    await expect(readFeed(Buffer.from('oversized'), 4)).rejects.toThrow('byte limit')
+  })
+
+  it('redacts failed requests and logs errors while consuming response streams', async () => {
+    const warn = vi.fn()
+    const logger = { warn } as unknown as Payload['logger']
+    try {
+      const failure = Object.assign(
+        new Error('Could not reach https://user:pass@example.test/feed?token=private'),
+        { cause: { code: 'ECONNRESET' } },
+      )
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(failure))
+      await expect(downloadFeed('not a URL?token=secret', undefined, logger)).rejects.toBe(failure)
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'vulnerability-feed.request-failed',
+          url: '[invalid URL]',
+          code: 'ECONNRESET',
+          error: 'Could not reach https://example.test/feed',
+        }),
+      )
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('secret')
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('private')
+
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue('offline'))
+      await expect(downloadFeed('not a URL')).rejects.toBe('offline')
+
+      const empty = new Response(null, { status: 204 })
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(empty))
+      await expect(
+        downloadFeed('https://feed.example.test/empty', undefined, logger),
+      ).rejects.toThrow('responded with 204')
+
+      const broken = new Response(
+        new ReadableStream({ start: (controller) => controller.error(new Error('stream broke')) }),
+      )
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(broken))
+      await expect(
+        readFeed(await downloadFeed('https://feed.example.test/stream', undefined, logger)),
+      ).rejects.toThrow('stream broke')
+      expect(warn).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          event: 'vulnerability-feed.request-failed',
+          url: 'https://feed.example.test/stream',
+          status: 200,
+        }),
+      )
+    } finally {
+      vi.unstubAllGlobals()
     }
   })
 })

@@ -6,6 +6,7 @@ import { SYNC_INTERVAL_MS } from './maintenance'
 import { safeFailure } from './errors'
 import { systemRequest } from '../integrations/payload/requests'
 import { expireOtterLeases } from '../otter/controller'
+import { scheduleOtterReleaseSync } from '../otter/releaseSync'
 
 const OTTER_LEASE_SWEEP_MS = 15_000
 
@@ -45,7 +46,13 @@ export const scheduleMaintenance = async (payload: Payload, fence: WorkerFence) 
       collection: 'payload-jobs',
       limit: 1,
       sort: '-createdAt',
-      where: { and: [{ queue: { equals: 'maintenance' } }, { completedAt: { exists: false } }] },
+      where: {
+        and: [
+          { taskSlug: { equals: 'maintenance-v1' } },
+          { queue: { equals: 'maintenance' } },
+          { completedAt: { exists: false } },
+        ],
+      },
     })
     // Keep a terminal failure visible; the next seven-day slot (or admin retry) may queue again.
     if (
@@ -91,6 +98,7 @@ export const runWorker = async (payload: Payload, queue: Queue, signal: AbortSig
   let stopped = false
   let heartbeat: Promise<void> = Promise.resolve()
   let timer: ReturnType<typeof setInterval> | undefined
+  let nextReleaseCheck = 0
   try {
     await recoverQueue(payload, fence)
     if (queue === 'maintenance') await withWorkerFence(fence, () => expireOtterLeases(payload))
@@ -120,7 +128,13 @@ export const runWorker = async (payload: Payload, queue: Queue, signal: AbortSig
         }),
       )
     while (!signal.aborted && !lost) {
-      if (queue === 'maintenance') await scheduleMaintenance(payload, fence)
+      if (queue === 'maintenance') {
+        await scheduleMaintenance(payload, fence)
+        if (Date.now() >= nextReleaseCheck) {
+          await withWorkerFence(fence, () => scheduleOtterReleaseSync(payload))
+          nextReleaseCheck = Date.now() + 60_000
+        }
+      }
       await withWorkerFence(fence, () =>
         payload.jobs.run({
           queue,

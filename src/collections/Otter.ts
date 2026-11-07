@@ -2,9 +2,12 @@ import {
   APIError,
   type Access,
   type CollectionBeforeChangeHook,
+  type CollectionBeforeOperationHook,
   type CollectionBeforeDeleteHook,
   type CollectionConfig,
+  type CollectionBeforeValidateHook,
 } from 'payload'
+import path from 'node:path'
 import { getAuthorization, relationshipID } from '../access/authorization'
 import {
   encryptOtterCredentials,
@@ -16,6 +19,9 @@ import { activeRunStatuses } from '../otter/runLease'
 import { userSuppliedAssetFields } from '../domain/assetFields'
 import { sanitizeCustomFieldValues } from './AssetFields'
 import { assertSiteAllowsImports, filterImportSites } from '../application/importSites'
+import { adminOnly } from '../access/authorization'
+import { unpackOtterRelease, verifyOtterRelease } from '../otter/releases'
+import { otterReleaseControl, refreshOtterReleases } from '../otter/releaseSync'
 
 const canReadOtter: Access = async ({ req }) => {
   if (req.context.otterScannerID) return false
@@ -43,6 +49,46 @@ const canCreateOtter: Access = async ({ data, req }) => {
 
 const internal = { create: () => false, read: () => false, update: () => false }
 const serverReadOnly = { create: () => false, update: () => false }
+
+const prepareReleaseUpload: CollectionBeforeOperationHook = async ({ args, operation, req }) => {
+  if (operation !== 'create' || !req.file?.data) return args
+  const binary = await unpackOtterRelease(req.file.data)
+  if (binary !== req.file.data) req.file.name = 'otserver-otter'
+  req.file.data = binary
+  req.file.size = binary.length
+  if (binary.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46])))
+    req.file.mimetype = 'application/x-elf'
+  else if (binary.subarray(0, 2).toString('ascii') === 'MZ')
+    req.file.mimetype = 'application/x-msdownload'
+  return args
+}
+
+const verifyReleaseUpload: CollectionBeforeValidateHook = async ({ data, operation, req }) => {
+  if (operation !== 'create') throw new APIError('Otter releases are immutable.', 409)
+  if (!data || !req.file?.data) throw new APIError('Upload an Otter executable.', 400)
+  Object.assign(data, await verifyOtterRelease(req.file.data))
+  return data
+}
+
+const rejectReleaseMutation: CollectionBeforeChangeHook = ({ operation }) => {
+  if (operation !== 'create') throw new APIError('Otter releases are immutable.', 409)
+}
+
+const updateStatuses = [
+  'queued',
+  'downloading',
+  'verified',
+  'installing',
+  'completed',
+  'failed',
+  'rolled-back',
+] as const
+const activeOtterUpdateStatuses = ['queued', 'downloading', 'verified', 'installing'] as const
+
+const protectOtterUpdate: CollectionBeforeChangeHook = ({ req }) => {
+  if (req.context.otterUpdateWrite !== true)
+    throw new APIError('Otter update records are managed by the controller.', 403)
+}
 
 const validateScannerSettings: CollectionBeforeChangeHook = async ({
   data,
@@ -244,6 +290,17 @@ const preventDeletingOtterScannerWithDependents: CollectionBeforeDeleteHook = as
       'Cancel or finish this scanner’s queued and active runs before deleting it.',
       409,
     )
+
+  const updates = await req.payload.count({
+    collection: 'otter-updates',
+    overrideAccess: true,
+    req,
+    where: {
+      and: [{ scanner: { equals: id } }, { status: { in: [...activeOtterUpdateStatuses] } }],
+    },
+  })
+  if (updates.totalDocs > 0)
+    throw new APIError('Finish or fail this scanner’s active update before deleting it.', 409)
 }
 
 export const OtterScanners: CollectionConfig = {
@@ -256,8 +313,19 @@ export const OtterScanners: CollectionConfig = {
     update: canWriteOtter,
   },
   admin: {
-    components: { beforeList: ['@/components/OtterEnrollment'] },
-    defaultColumns: ['name', 'site', 'computerName', 'enabled', 'version', 'lastSeenAt'],
+    components: {
+      beforeList: ['@/components/OtterEnrollment'],
+      beforeListTable: ['@/components/OtterBulkUpdates'],
+    },
+    defaultColumns: [
+      'name',
+      'site',
+      'computerName',
+      'enabled',
+      'version',
+      'currentUpdate',
+      'lastSeenAt',
+    ],
     description: 'Enrolled Otter scanner agents and their bound sites.',
     group: 'Otter',
     useAsTitle: 'name',
@@ -291,6 +359,8 @@ export const OtterScanners: CollectionConfig = {
     { name: 'enrolledAt', type: 'date', access: serverReadOnly, admin: { readOnly: true } },
     { name: 'lastSeenAt', type: 'date', access: serverReadOnly, admin: { readOnly: true } },
     { name: 'version', type: 'text', access: serverReadOnly, admin: { readOnly: true } },
+    { name: 'buildTarget', type: 'text', access: serverReadOnly, admin: { readOnly: true } },
+    { name: 'binaryDigest', type: 'text', access: serverReadOnly, admin: { readOnly: true } },
     { name: 'capabilities', type: 'json', access: serverReadOnly, admin: { readOnly: true } },
     { name: 'interfaces', type: 'json', access: serverReadOnly, admin: { readOnly: true } },
     { name: 'computerName', type: 'text', access: serverReadOnly, admin: { readOnly: true } },
@@ -321,6 +391,13 @@ export const OtterScanners: CollectionConfig = {
       access: serverReadOnly,
       admin: { readOnly: true },
     },
+    {
+      name: 'currentUpdate',
+      type: 'relationship',
+      relationTo: 'otter-updates',
+      access: serverReadOnly,
+      admin: { readOnly: true },
+    },
     { name: 'enrollmentTokenHash', type: 'text', access: internal, admin: { hidden: true } },
     { name: 'enrollmentExpiresAt', type: 'date', access: internal, admin: { hidden: true } },
     { name: 'credentialHash', type: 'text', access: internal, admin: { hidden: true } },
@@ -331,6 +408,91 @@ export const OtterScanners: CollectionConfig = {
     beforeChange: [validateScannerSettings],
     beforeDelete: [preventDeletingOtterScannerWithDependents],
   },
+  lockDocuments: false,
+}
+
+export const OtterReleases: CollectionConfig = {
+  slug: 'otter-releases',
+  labels: { singular: 'Otter release', plural: 'Otter releases' },
+  access: { create: adminOnly, delete: () => false, read: adminOnly, update: () => false },
+  endpoints: [
+    { path: '/control', method: 'get', handler: otterReleaseControl },
+    { path: '/refresh', method: 'post', handler: refreshOtterReleases },
+  ],
+  admin: {
+    components: { beforeList: ['@/components/OtterReleaseActions'] },
+    defaultColumns: ['version', 'target', 'filesize', 'createdAt'],
+    description:
+      'Upload a signed executable or an official Linux .tar.gz release for managed scanner updates.',
+    group: 'Otter',
+    useAsTitle: 'version',
+  },
+  fields: [
+    { name: 'version', type: 'text', required: true, admin: { readOnly: true } },
+    { name: 'target', type: 'text', required: true, admin: { readOnly: true } },
+    { name: 'binaryDigest', type: 'text', required: true, admin: { readOnly: true } },
+    { name: 'filesize', type: 'number', required: true, admin: { readOnly: true } },
+  ],
+  hooks: {
+    beforeOperation: [prepareReleaseUpload],
+    beforeValidate: [verifyReleaseUpload],
+    beforeChange: [rejectReleaseMutation],
+  },
+  indexes: [{ fields: ['target', 'version'], unique: true }],
+  lockDocuments: false,
+  upload: {
+    staticDir: path.resolve(
+      process.env.OTSERVER_TEST_UPLOAD_DIR || 'import-files',
+      'otter-releases',
+    ),
+    mimeTypes: [
+      'application/octet-stream',
+      'application/x-elf',
+      'application/x-executable',
+      'application/x-pie-executable',
+      'application/x-sharedlib',
+      'application/x-msdownload',
+      'application/x-msdos-program',
+      'application/gzip',
+      'application/x-gzip',
+    ],
+    pasteURL: false,
+  },
+}
+
+export const OtterUpdates: CollectionConfig = {
+  slug: 'otter-updates',
+  labels: { singular: 'Otter update', plural: 'Otter updates' },
+  access: { create: () => false, delete: () => false, read: canReadOtter, update: () => false },
+  admin: {
+    defaultColumns: ['name', 'site', 'status', 'previousVersion', 'targetVersion', 'completedAt'],
+    description: 'Audited manual update assignments and per-scanner outcomes.',
+    group: 'Otter',
+    useAsTitle: 'name',
+  },
+  fields: [
+    { name: 'name', type: 'text', required: true },
+    { name: 'site', type: 'relationship', relationTo: 'sites', required: true, index: true },
+    {
+      name: 'scanner',
+      type: 'relationship',
+      relationTo: 'otter-scanners',
+      required: true,
+      index: true,
+    },
+    { name: 'release', type: 'relationship', relationTo: 'otter-releases', required: true },
+    { name: 'target', type: 'text', required: true },
+    { name: 'targetVersion', type: 'text', required: true },
+    { name: 'binaryDigest', type: 'text', required: true },
+    { name: 'binarySize', type: 'number', required: true },
+    { name: 'previousVersion', type: 'text' },
+    { name: 'status', type: 'select', options: [...updateStatuses], required: true, index: true },
+    { name: 'message', type: 'textarea', maxLength: 1000 },
+    { name: 'startedAt', type: 'date' },
+    { name: 'completedAt', type: 'date' },
+  ],
+  hooks: { beforeChange: [protectOtterUpdate] },
+  indexes: [{ fields: ['scanner', 'status', 'createdAt'] }],
   lockDocuments: false,
 }
 

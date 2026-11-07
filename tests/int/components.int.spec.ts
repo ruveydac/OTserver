@@ -1141,7 +1141,14 @@ describe('remaining Otter component states', () => {
       })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ status: 'revoked' }) })
       .mockRejectedValueOnce('offline')
-    vi.stubGlobal('fetch', actions)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: RequestInfo | URL) =>
+        String(url).endsWith('/otter/v1/updates/releases')
+          ? Promise.resolve({ ok: true, json: async () => ({ releases: [] }) })
+          : actions(),
+      ),
+    )
     const component = createElement(OtterScannerActions)
 
     await render(component)
@@ -1181,5 +1188,182 @@ describe('remaining Otter component states', () => {
     await act(async () => retryConfirmations[1]!.click())
     expect(container.textContent).toContain('The action failed.')
     expect(mocks.refresh).toHaveBeenCalled()
+  })
+
+  it('handles signed-release load failures and ignores responses after unmount', async () => {
+    mocks.documentID = 'scanner-1'
+    mocks.documentCanUpdate = true
+    mocks.collectionSlug = 'otter-scanners'
+    const component = createElement(OtterScannerActions)
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }))
+    await render(component)
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'Could not load signed Otter releases.',
+    )
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ releases: null }) }),
+    )
+    await renderFresh(component)
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'Could not load signed Otter releases.',
+    )
+
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue('offline'))
+    await renderFresh(component)
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'Could not load signed releases.',
+    )
+
+    let signal: AbortSignal | undefined
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, options: { signal: AbortSignal }) => {
+        signal = options.signal
+        return new Promise((_, reject) => {
+          signal!.addEventListener('abort', () => reject('offline'))
+        })
+      }),
+    )
+    await renderFresh(component)
+    await act(async () => root.unmount())
+    expect(signal?.aborted).toBe(true)
+    root = createRoot(container)
+  })
+
+  it('resolves scanner relationship values and reports failed manual runs', async () => {
+    mocks.documentID = 'profile-2'
+    mocks.collectionSlug = 'otter-profiles'
+    mocks.formFields = { scanner: { value: { value: 'scanner-2' } } }
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'queued' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const component = createElement(OtterScannerActions)
+    const click = async (label: string) =>
+      act(async () =>
+        [...container.querySelectorAll('button')]
+          .find((button) => button.textContent === label)!
+          .click(),
+      )
+
+    await render(component)
+    await click('Run now')
+    await click('Yes')
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      scannerID: 'scanner-2',
+      profileID: 'profile-2',
+    })
+
+    mocks.formFields = { scanner: { value: {} } }
+    await renderFresh(component)
+    await click('Run now')
+    await click('Yes')
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      scannerID: '',
+      profileID: 'profile-2',
+    })
+
+    mocks.formFields = {}
+    fetchMock.mockResolvedValueOnce({ ok: false, json: async () => ({}) })
+    await renderFresh(component)
+    await click('Run now')
+    await click('Yes')
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'The Otter action failed.',
+    )
+  })
+
+  it('selects and queues a signed release and closes the enrollment-token dialog', async () => {
+    mocks.documentID = 'scanner-1'
+    mocks.documentCanUpdate = true
+    mocks.collectionSlug = 'otter-scanners'
+    let updateCount = 0
+    const fetchMock = vi.fn(async (url: string) => ({
+      ok: true,
+      json: async () =>
+        url.endsWith('/updates/releases')
+          ? {
+              releases: [
+                { id: 'release-1', version: 'v1.0.0', target: 'linux-x86_64' },
+                { id: 'release-2', version: 'v1.1.0', target: 'windows-x86_64' },
+              ],
+            }
+          : url.endsWith('/reenroll')
+            ? {
+                enrollmentToken: 'single-use-token',
+                expiresAt: new Date().toISOString(),
+                controllerUrl: 'https://otserver.example',
+              }
+            : {
+                queued: Array.from({ length: ++updateCount === 1 ? 1 : 2 }, (_, index) => ({
+                  id: `scanner-${index + 1}`,
+                })),
+              },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    await render(createElement(OtterScannerActions))
+
+    const release = container.querySelector<HTMLSelectElement>('select')!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(
+        release,
+        'release-2',
+      )
+      release.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    await act(async () =>
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Update Otter')!
+        .click(),
+    )
+    await act(async () =>
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Queue update')!
+        .click(),
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/otter/v1/updates',
+      expect.objectContaining({
+        body: JSON.stringify({ releaseID: 'release-2', scannerIDs: ['scanner-1'] }),
+      }),
+    )
+    expect(container.textContent).toContain('Update queued for 1 scanner.')
+    await act(async () =>
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Update Otter')!
+        .click(),
+    )
+    await act(async () =>
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Queue update')!
+        .click(),
+    )
+    expect(container.textContent).toContain('Update queued for 2 scanners.')
+
+    await act(async () =>
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Re-enroll')!
+        .click(),
+    )
+    await act(async () =>
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Confirm')!
+        .click(),
+    )
+    expect(container.textContent).toContain('single-use-token')
+    await act(async () =>
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Close')!
+        .click(),
+    )
+    await act(async () =>
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Done')!
+        .click(),
+    )
   })
 })
