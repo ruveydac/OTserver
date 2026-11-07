@@ -161,7 +161,7 @@ describe('worker scheduling and execution', () => {
     }),
     jobs: {
       queue: vi.fn(async () => ({ id: 'maintenance-job' })),
-      run: vi.fn(async () => undefined),
+      run: vi.fn(async (_args: { limit: number }) => undefined),
     },
     logger: { error: vi.fn() },
     update: vi.fn(async () => ({ docs: [] })),
@@ -244,6 +244,7 @@ describe('worker scheduling and execution', () => {
     // cycle (one job at a time) ends this run.
     payload.jobs.run.mockImplementation(async (args: { limit: number }) => {
       if (args.limit === 1 && ++mainRuns === 2) controller.abort()
+      return undefined
     })
     await runWorker(payload as never, 'maintenance', controller.signal)
     expect(mocks.expireOtterLeases).toHaveBeenCalledWith(payload)

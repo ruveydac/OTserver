@@ -380,6 +380,7 @@ describe('signed Otter release uploads', () => {
       payload.create({
         collection: 'otter-updates',
         data: {},
+        draft: true,
         overrideAccess: true,
       }),
     ).rejects.toMatchObject({ status: 403 })
