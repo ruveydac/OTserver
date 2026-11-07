@@ -1,6 +1,8 @@
 import { createHash, createPublicKey, verify } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
+import { promisify } from 'node:util'
+import { gunzip } from 'node:zlib'
 import { APIError } from 'payload'
 
 export const MAX_OTTER_RELEASE_SIZE = 512 * 1024 * 1024
@@ -13,6 +15,52 @@ export const OTTER_UPDATE_TARGETS = [
 const trailerSize = 312
 const messageSize = 248
 const magic = Buffer.from('OTTER-SIGNED-v1\0', 'ascii')
+const unzip = promisify(gunzip)
+
+export const unpackOtterRelease = async (input: Buffer): Promise<Buffer> => {
+  if (input.length > MAX_OTTER_RELEASE_SIZE)
+    throw new APIError('Upload an Otter release no larger than 512 MiB.', 400)
+  if (input[0] !== 0x1f || input[1] !== 0x8b) return input
+
+  const invalid = () =>
+    new APIError('Upload an official Linux archive containing one otserver-otter executable.', 400)
+  let tar: Buffer
+  try {
+    tar = await unzip(input, { maxOutputLength: MAX_OTTER_RELEASE_SIZE + 10_240 })
+  } catch {
+    throw new APIError('The Linux archive is corrupt or its unpacked size exceeds 512 MiB.', 400)
+  }
+  if (tar.length < 1536 || tar.length % 512 !== 0) throw invalid()
+  const octal = (start: number, end: number) => {
+    const value = tar
+      .subarray(start, end)
+      .toString('utf8')
+      .replace(/[\0 ]+$/, '')
+      .trimStart()
+    if (!/^[0-7]+$/.test(value)) throw invalid()
+    return Number.parseInt(value, 8)
+  }
+  const name = tar.subarray(0, 100).toString('utf8').replace(/\0+$/, '')
+  const size = octal(124, 136)
+  const checksum = tar
+    .subarray(0, 512)
+    .reduce((sum, byte, index) => sum + (index >= 148 && index < 156 ? 32 : byte), 0)
+  const end = 512 + Math.ceil(size / 512) * 512
+  // Read the single official member in memory; archive paths and links never reach the filesystem.
+  if (
+    !['otserver-otter', './otserver-otter'].includes(name) ||
+    ![0, 48].includes(tar[156]) ||
+    tar.subarray(257, 262).toString('ascii') !== 'ustar' ||
+    tar.subarray(345, 500).some((byte) => byte !== 0) ||
+    checksum !== octal(148, 156) ||
+    size <= trailerSize ||
+    size > MAX_OTTER_RELEASE_SIZE ||
+    end + 1024 > tar.length ||
+    tar.subarray(512 + size).some((byte) => byte !== 0)
+  )
+    throw invalid()
+  return tar.subarray(512, 512 + size)
+}
 
 const text = (bytes: Buffer) => {
   const padded = bytes.toString('utf8')

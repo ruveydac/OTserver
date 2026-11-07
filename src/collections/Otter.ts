@@ -2,6 +2,7 @@ import {
   APIError,
   type Access,
   type CollectionBeforeChangeHook,
+  type CollectionBeforeOperationHook,
   type CollectionBeforeDeleteHook,
   type CollectionConfig,
   type CollectionBeforeValidateHook,
@@ -19,7 +20,8 @@ import { userSuppliedAssetFields } from '../domain/assetFields'
 import { sanitizeCustomFieldValues } from './AssetFields'
 import { assertSiteAllowsImports, filterImportSites } from '../application/importSites'
 import { adminOnly } from '../access/authorization'
-import { verifyOtterRelease } from '../otter/releases'
+import { unpackOtterRelease, verifyOtterRelease } from '../otter/releases'
+import { otterReleaseControl, refreshOtterReleases } from '../otter/releaseSync'
 
 const canReadOtter: Access = async ({ req }) => {
   if (req.context.otterScannerID) return false
@@ -47,6 +49,19 @@ const canCreateOtter: Access = async ({ data, req }) => {
 
 const internal = { create: () => false, read: () => false, update: () => false }
 const serverReadOnly = { create: () => false, update: () => false }
+
+const prepareReleaseUpload: CollectionBeforeOperationHook = async ({ args, operation, req }) => {
+  if (operation !== 'create' || !req.file?.data) return args
+  const binary = await unpackOtterRelease(req.file.data)
+  if (binary !== req.file.data) req.file.name = 'otserver-otter'
+  req.file.data = binary
+  req.file.size = binary.length
+  if (binary.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46])))
+    req.file.mimetype = 'application/x-elf'
+  else if (binary.subarray(0, 2).toString('ascii') === 'MZ')
+    req.file.mimetype = 'application/x-msdownload'
+  return args
+}
 
 const verifyReleaseUpload: CollectionBeforeValidateHook = async ({ data, operation, req }) => {
   if (operation !== 'create') throw new APIError('Otter releases are immutable.', 409)
@@ -400,9 +415,15 @@ export const OtterReleases: CollectionConfig = {
   slug: 'otter-releases',
   labels: { singular: 'Otter release', plural: 'Otter releases' },
   access: { create: adminOnly, delete: () => false, read: adminOnly, update: () => false },
+  endpoints: [
+    { path: '/control', method: 'get', handler: otterReleaseControl },
+    { path: '/refresh', method: 'post', handler: refreshOtterReleases },
+  ],
   admin: {
+    components: { beforeList: ['@/components/OtterReleaseActions'] },
     defaultColumns: ['version', 'target', 'filesize', 'createdAt'],
-    description: 'Verified signed Otter executables available for managed scanner updates.',
+    description:
+      'Upload a signed executable or an official Linux .tar.gz release for managed scanner updates.',
     group: 'Otter',
     useAsTitle: 'version',
   },
@@ -412,7 +433,11 @@ export const OtterReleases: CollectionConfig = {
     { name: 'binaryDigest', type: 'text', required: true, admin: { readOnly: true } },
     { name: 'filesize', type: 'number', required: true, admin: { readOnly: true } },
   ],
-  hooks: { beforeValidate: [verifyReleaseUpload], beforeChange: [rejectReleaseMutation] },
+  hooks: {
+    beforeOperation: [prepareReleaseUpload],
+    beforeValidate: [verifyReleaseUpload],
+    beforeChange: [rejectReleaseMutation],
+  },
   indexes: [{ fields: ['target', 'version'], unique: true }],
   lockDocuments: false,
   upload: {
@@ -420,7 +445,17 @@ export const OtterReleases: CollectionConfig = {
       process.env.OTSERVER_TEST_UPLOAD_DIR || 'import-files',
       'otter-releases',
     ),
-    mimeTypes: ['application/octet-stream', 'application/x-executable', 'application/x-msdownload'],
+    mimeTypes: [
+      'application/octet-stream',
+      'application/x-elf',
+      'application/x-executable',
+      'application/x-pie-executable',
+      'application/x-sharedlib',
+      'application/x-msdownload',
+      'application/x-msdos-program',
+      'application/gzip',
+      'application/x-gzip',
+    ],
     pasteURL: false,
   },
 }

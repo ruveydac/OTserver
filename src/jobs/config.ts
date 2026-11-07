@@ -1,4 +1,4 @@
-import { JobCancelledError, type JobsConfig } from 'payload'
+import { APIError, JobCancelledError, type JobsConfig } from 'payload'
 import { adminOnly, hideFromNonAdmins } from '../access/authorization'
 import { withAudit } from '../collections/AuditLogs'
 import { executeQueuedImport } from '../application/queuedImports'
@@ -9,6 +9,7 @@ import { reapplyAssetClassRules } from '../collections/AssetClasses'
 import { executeFeedUpdate } from '../vulnerabilities/actions'
 import { feedSources } from '../vulnerabilities/sources'
 import { activeCatalog } from '../metadata/runtime'
+import { executeOtterReleaseSync, OTTER_RELEASE_SYNC_TASK } from '../otter/releaseSync'
 
 export const jobs: JobsConfig = {
   access: { run: () => false, queue: () => false, cancel: () => false },
@@ -30,6 +31,31 @@ export const jobs: JobsConfig = {
       ],
     }),
   tasks: [
+    {
+      slug: OTTER_RELEASE_SYNC_TASK,
+      retries: { attempts: 2, backoff: { type: 'exponential', delay: 60_000 } },
+      inputSchema: [
+        { name: 'version', type: 'number', required: true },
+        { name: 'submittedBy', type: 'text' },
+      ],
+      outputSchema: [
+        { name: 'imported', type: 'number' },
+        { name: 'skipped', type: 'number' },
+      ],
+      handler: async ({ input, req }) => {
+        if (input.version !== 1 || currentWorker()?.queue !== 'maintenance')
+          throw new JobCancelledError('Unsupported worker input or execution context.')
+        try {
+          return { output: await executeOtterReleaseSync(req.payload, input) }
+        } catch (error) {
+          if (transientFailure(error)) throw new Error(safeFailure(error))
+          if ((error as { status?: number }).status === 503) throw error
+          throw new JobCancelledError(
+            error instanceof APIError ? error.message : safeFailure(error),
+          )
+        }
+      },
+    },
     {
       slug: 'vulnerability-feed-sync-v1',
       retries: { attempts: 2, backoff: { type: 'exponential', delay: 30_000 } },

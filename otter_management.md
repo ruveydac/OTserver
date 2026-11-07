@@ -87,10 +87,28 @@ scanner credentials and scheduled occurrence deduplication.
 
 ### Signed releases and managed updates
 
-Administrators upload each raw Otter executable under **Otter → Otter Releases**. OTserver accepts
-only binaries with the pinned Ed25519 signature embedded by Otter's release process. Upload one
-executable per supported build target; archives and detached signatures are not accepted. Release
-records are immutable and audited.
+Administrators upload Otter releases under **Otter > Otter releases**. Upload an unpacked Linux
+executable, the Windows `.exe`, or an official Linux `.tar.gz` archive. OTserver unpacks the single
+`otserver-otter` executable from a Linux archive and verifies its embedded, pinned Ed25519 signature.
+The uploaded file and unpacked executable are each limited to 512 MiB. Release records contain the
+verified executable, are immutable, and are audited. Unsigned executables and detached signatures
+are not accepted.
+
+**Import releases now** downloads the latest stable release from
+[`ruveydac/otserver-otter`](https://github.com/ruveydac/otserver-otter/releases) for Linux x86_64,
+Linux ARM64, and Windows x86_64. To check for releases every 24 hours, select **Enable daily Otter
+release imports** under **Settings > Application settings**; it is off by default. The first daily
+check runs when the maintenance worker next checks for due work, unless an import was requested
+within the last 24 hours. Only published stable releases are imported.
+
+Imports run on the existing maintenance worker and continue after the browser closes. External
+maintenance workers need read/write access to the same `import-files` volume as the web application.
+The release page shows the last check, last successful version, and any error. Temporary download
+failures retry twice; a later manual or daily import resumes missing platforms without duplicating
+stored releases. Successful platform imports are retained if another platform fails verification.
+Leave daily imports disabled on isolated installations and upload transferred release files instead.
+Release imports and vulnerability-feed downloads have independent settings. Importing a release
+makes it available for selection; operators still assign scanner updates explicitly.
 
 Operators with Otter Config and write access to a scanner's site can queue an update from that
 scanner's document or select individual scanners in the scanner list for a bulk update. Each scanner

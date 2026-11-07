@@ -11,6 +11,7 @@ vi.mock('../../src/jobs/ownership', () => ({
   renewWorker: mocks.renewWorker,
 }))
 vi.mock('../../src/jobs/maintenance', () => ({ SYNC_INTERVAL_MS: 60_000 }))
+vi.mock('../../src/otter/releaseSync', () => ({ scheduleOtterReleaseSync: vi.fn() }))
 vi.mock('../../src/integrations/payload/requests', () => ({
   systemRequest: mocks.systemRequest,
 }))

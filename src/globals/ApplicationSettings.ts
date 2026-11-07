@@ -45,6 +45,30 @@ export const ApplicationSettings: GlobalConfig = {
   },
   fields: [
     {
+      name: 'otterReleaseImports',
+      label: 'Enable daily Otter release imports',
+      type: 'checkbox',
+      defaultValue: false,
+      admin: {
+        description:
+          'Import the latest stable GitHub release for all supported platforms every 24 hours. Scanner updates are assigned separately.',
+      },
+    },
+    {
+      name: 'otterReleaseSync',
+      type: 'group',
+      access: { update: () => false },
+      admin: { hidden: true },
+      fields: [
+        { name: 'requestedAt', type: 'date' },
+        { name: 'lastCheckedAt', type: 'date' },
+        { name: 'lastSyncedAt', type: 'date' },
+        { name: 'version', type: 'text' },
+        { name: 'error', type: 'textarea' },
+        { name: 'jobID', type: 'text' },
+      ],
+    },
+    {
       name: 'controllerURL',
       label: 'Public controller URL',
       type: 'text',
