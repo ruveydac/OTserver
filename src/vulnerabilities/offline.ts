@@ -28,10 +28,13 @@ import {
   ICS_ADVISORY_URL,
   NVD_FEED_BASE_URL,
   FIRST_NVD_YEAR,
+  normalizeCustomCsafFeeds,
+  type CustomCsafFeed,
   type FeedSource,
 } from './sources'
 import { inTransaction } from '../integrations/payload/transactions'
 import { systemRequest } from '../integrations/payload/requests'
+import { readVulnerabilityFeedSettings } from '../application/settings'
 
 export const MAX_OFFLINE_FILES = MAX_CSAF_DOCUMENTS + MAX_CSAF_FEEDS + 101
 export const MAX_OFFLINE_BATCH_BYTES = 8 * 1024 * 1024 * 1024
@@ -74,9 +77,22 @@ export const inspectOffline = async (
   req: PayloadRequest,
   batchID: string,
   ids?: string[],
-): Promise<{ selection: OfflineSelection; download: DownloadFeed; uploadIDs: string[] }> => {
+  configuredFeeds?: CustomCsafFeed[],
+): Promise<{
+  selection: OfflineSelection
+  download: DownloadFeed
+  uploadIDs: string[]
+  customCsafFeeds: CustomCsafFeed[]
+}> => {
   const files = await offlineFiles(req, batchID, ids)
   const source = files[0].source
+  const customCsafFeeds =
+    source === 'csaf'
+      ? normalizeCustomCsafFeeds(
+          configuredFeeds ??
+            (await readVulnerabilityFeedSettings(req.payload, req)).customCsafFeeds,
+        )
+      : []
   // A correction replaces the previous file at the same logical path, without mutating stored bytes.
   const latest = [
     ...new Map(
@@ -91,9 +107,13 @@ export const inspectOffline = async (
   const byMirror = new Map<string, Upload[]>()
   const byName = new Map<string, Upload[]>()
   const hosts = new Set(
-    [CISA_KEV_URL, CSAF_AGGREGATOR_URL, ...CISA_CSAF_FEED_URLS, NVD_FEED_BASE_URL].map(
-      (url) => new URL(url).hostname,
-    ),
+    [
+      CISA_KEV_URL,
+      CSAF_AGGREGATOR_URL,
+      ...CISA_CSAF_FEED_URLS,
+      NVD_FEED_BASE_URL,
+      ...customCsafFeeds.map(({ url }) => url),
+    ].map((url) => new URL(url).hostname),
   )
   for (const file of latest) {
     if (file.sourceURL) {
@@ -102,12 +122,16 @@ export const inspectOffline = async (
     }
     const parts = (file.relativePath || file.originalName).split('/')
     const host = parts.findIndex((part) => hosts.has(part))
-    const index = host >= 0 ? byMirror : byName
-    if (host < 0 && parts.length > 2) continue
-    const key = host >= 0 ? parts.slice(host).join('/') : file.originalName
-    const entries = index.get(key) || []
-    entries.push(file)
-    index.set(key, entries)
+    if (host >= 0 || (parts.length > 1 && parts[0].includes('.'))) {
+      const key = host >= 0 ? parts.slice(host).join('/') : parts.join('/')
+      const entries = byMirror.get(key) || []
+      entries.push(file)
+      byMirror.set(key, entries)
+    } else if (parts.length <= 2) {
+      const entries = byName.get(file.originalName) || []
+      entries.push(file)
+      byName.set(file.originalName, entries)
+    }
   }
   const find = (url: string) => {
     const explicit = byURL.get(url)
@@ -195,12 +219,27 @@ export const inspectOffline = async (
   } else if (source === 'csaf') {
     const aggregator = await json(CSAF_AGGREGATOR_URL)
     const feedURLs = new Set<string>(CISA_CSAF_FEED_URLS)
+    const providerURLs = new Set<string>()
     if (aggregator !== undefined) {
-      for (const url of parseCsafAggregator(aggregator)) {
-        const provider = await json(url)
-        if (provider !== undefined)
-          for (const feed of parseCsafProviderMetadata(provider)) feedURLs.add(feed)
+      for (const url of parseCsafAggregator(aggregator)) providerURLs.add(url)
+    }
+    for (const custom of customCsafFeeds) {
+      if (custom.type === 'rolie') {
+        feedURLs.add(custom.url)
+        continue
       }
+      const content = await json(custom.url)
+      if (content === undefined) continue
+      if (custom.type === 'aggregator') {
+        for (const url of parseCsafAggregator(content)) providerURLs.add(url)
+      } else {
+        for (const url of parseCsafProviderMetadata(content)) feedURLs.add(url)
+      }
+    }
+    for (const url of providerURLs) {
+      const provider = await json(url)
+      if (provider !== undefined)
+        for (const feed of parseCsafProviderMetadata(provider)) feedURLs.add(feed)
     }
     if (feedURLs.size > MAX_CSAF_FEEDS) throw new APIError('The CSAF feed limit was exceeded.', 400)
     const documents = new Set<string>()
@@ -238,12 +277,13 @@ export const inspectOffline = async (
     },
     download,
     uploadIDs: files.map((file) => file.id),
+    customCsafFeeds,
   }
 }
 
 /** Preflight every selected file before any catalog mutation, including all linked CSAF documents. */
 export const validateOfflineContents = async (
-  { selection, download }: Awaited<ReturnType<typeof inspectOffline>>,
+  { selection, download, customCsafFeeds }: Awaited<ReturnType<typeof inspectOffline>>,
   { skipMissing = false }: { skipMissing?: boolean } = {},
 ) => {
   // A publisher can list a CSAF document it never serves, which no upload can satisfy. Only an
@@ -254,7 +294,8 @@ export const validateOfflineContents = async (
     parseCisaCatalog(JSON.parse(await feedText(download, CISA_KEV_URL)))
   if (selection.source === 'ics-advisories')
     parseIcsAdvisories(await feedText(download, ICS_ADVISORY_URL))
-  if (selection.source === 'csaf') await loadCsafSnapshot(download, {})
+  if (selection.source === 'csaf')
+    await loadCsafSnapshot(download, {}, normalizeCustomCsafFeeds(customCsafFeeds))
   if (selection.source === 'nvd')
     for (const year of selection.years) {
       const base = `${NVD_FEED_BASE_URL}/nvdcve-2.0-${year}`

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   releaseSync: vi.fn(async () => undefined),
   renewWorker: vi.fn(),
   systemRequest: vi.fn(async () => ({ context: {} })),
+  vulnerabilityFeedSync: vi.fn(async () => undefined),
 }))
 
 vi.mock('node:timers/promises', () => ({ setTimeout: mocks.delay }))
@@ -23,6 +24,9 @@ vi.mock('../../src/jobs/ownership', () => ({
 }))
 
 vi.mock('../../src/jobs/maintenance', () => ({ SYNC_INTERVAL_MS: 10_000 }))
+vi.mock('../../src/vulnerabilities/feeds', () => ({
+  scheduleVulnerabilityFeedSync: mocks.vulnerabilityFeedSync,
+}))
 vi.mock('../../src/otter/releaseSync', () => ({ scheduleOtterReleaseSync: mocks.releaseSync }))
 vi.mock('../../src/metadata/sync', () => ({ scheduleMetadataSync: mocks.metadataSync }))
 
@@ -253,6 +257,7 @@ describe('worker scheduling and execution', () => {
     expect(mocks.releaseSync).toHaveBeenCalledWith(payload)
     expect(mocks.releaseSync).toHaveBeenCalledTimes(1)
     expect(mocks.metadataSync).toHaveBeenCalledWith(payload)
+    expect(mocks.vulnerabilityFeedSync).toHaveBeenCalledWith(payload)
     expect(payload.jobs.run).toHaveBeenCalledWith(
       expect.objectContaining({ queue: 'maintenance', limit: 1, sequential: true }),
     )

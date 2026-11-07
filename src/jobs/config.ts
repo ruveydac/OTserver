@@ -7,6 +7,7 @@ import { safeFailure, transientFailure } from './errors'
 import { currentWorker } from '../integrations/payload/workerContext'
 import { reapplyAssetClassRules } from '../collections/AssetClasses'
 import { executeFeedUpdate } from '../vulnerabilities/actions'
+import { executeScheduledVulnerabilityFeedSync } from '../vulnerabilities/feeds'
 import { feedSources } from '../vulnerabilities/sources'
 import { activeCatalog } from '../metadata/runtime'
 import { executeOtterReleaseSync, OTTER_RELEASE_SYNC_TASK } from '../otter/releaseSync'
@@ -90,6 +91,7 @@ export const jobs: JobsConfig = {
         },
         { name: 'batchID', type: 'text' },
         { name: 'uploadIDs', type: 'json' },
+        { name: 'customCsafFeeds', type: 'json' },
         { name: 'skipMissing', type: 'checkbox' },
       ],
       handler: async ({ input, req }) => {
@@ -97,6 +99,22 @@ export const jobs: JobsConfig = {
           throw new JobCancelledError('Unsupported worker input or execution context.')
         try {
           await executeFeedUpdate(req.payload, input)
+        } catch (error) {
+          if (!transientFailure(error)) throw new JobCancelledError(safeFailure(error))
+          throw error
+        }
+        return { output: {} }
+      },
+    },
+    {
+      slug: 'vulnerability-feed-auto-sync-v1',
+      retries: { attempts: 2, backoff: { type: 'exponential', delay: 30_000 } },
+      inputSchema: [{ name: 'version', type: 'number', required: true }],
+      handler: async ({ input, req }) => {
+        if (input.version !== 1 || currentWorker()?.queue !== 'maintenance')
+          throw new JobCancelledError('Unsupported worker input or execution context.')
+        try {
+          await executeScheduledVulnerabilityFeedSync(req.payload)
         } catch (error) {
           if (!transientFailure(error)) throw new JobCancelledError(safeFailure(error))
           throw error

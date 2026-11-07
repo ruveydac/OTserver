@@ -312,6 +312,13 @@ refresh. Work continues in the maintenance queue after the browser closes. For i
 set `OTSERVER_VULNERABILITY_FEEDS=off` in the application and any external maintenance worker;
 **Upload downloaded feeds** remains available without network access.
 
+Automatic vulnerability feed updates are enabled by default and run every seven days. Administrators
+can disable them or change the interval from 1 to 365 days under **Settings > Application settings**.
+The same page accepts additional public HTTPS CSAF aggregator, provider metadata, and JSON ROLIE
+feeds. Online and offline CSAF snapshots include those sources alongside the built-in feeds. Manual
+updates remain available when automatic updates are disabled; `OTSERVER_VULNERABILITY_FEEDS=off`
+disables all online feed downloads regardless of the saved setting.
+
 Offline transfer workflow:
 
 1. Open **Upload downloaded feeds**, choose a source, and save its download instructions.
@@ -326,8 +333,8 @@ Required files:
 - CISA KEV: `known_exploited_vulnerabilities.json`.
 - NVD: each selected `nvdcve-2.0-YYYY.json.gz` (or `.json`) with its matching `.meta` file.
 - ICS Advisory Project: `CISA_ICS_ADV_Master.csv`.
-- CSAF: the CERT@VDE aggregator, every referenced provider metadata/index/advisory file, and both
-  CISA OT/IT indexes with their referenced advisories.
+- CSAF: the CERT@VDE aggregator, every referenced provider metadata/index/advisory file, both
+  CISA OT/IT indexes with their referenced advisories, and all configured custom CSAF sources.
 
 NVD years can be imported in batches; unselected years and other sources remain intact. Coverage
 stays partial until all annual years from 2002 onward have been loaded. For CSAF, check the initial

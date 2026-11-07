@@ -1,4 +1,8 @@
 import { createHash } from 'node:crypto'
+import { lookup as dnsLookup } from 'node:dns/promises'
+import { request as httpRequest, type IncomingMessage } from 'node:http'
+import { request as httpsRequest } from 'node:https'
+import { isIP, type LookupFunction } from 'node:net'
 import { pipeline } from 'node:stream/promises'
 import { createGunzip } from 'node:zlib'
 import type { Payload } from 'payload'
@@ -31,6 +35,120 @@ const safeError = (error: unknown): string =>
     /https?:\/\/[^\s"'<>]+/g,
     (url) => safeURL(url),
   )
+
+export const isPublicFeedAddress = (address: string): boolean => {
+  if (isIP(address) === 4) {
+    const [first, second, third] = address.split('.').map(Number)
+    return !(
+      first === 0 ||
+      first === 10 ||
+      first === 127 ||
+      first >= 224 ||
+      (first === 100 && second >= 64 && second <= 127) ||
+      (first === 169 && second === 254) ||
+      (first === 172 && second >= 16 && second <= 31) ||
+      (first === 192 && (second === 0 || (second === 168 && third >= 0))) ||
+      (first === 192 && second === 88 && third === 99) ||
+      (first === 198 && (second === 18 || second === 19 || (second === 51 && third === 100))) ||
+      (first === 203 && second === 0 && third === 113)
+    )
+  }
+  if (isIP(address) !== 6) return false
+  let value = address.toLowerCase().split('%')[0]
+  const dotted = value.match(/(\d+\.\d+\.\d+\.\d+)$/)?.[1]
+  if (dotted) {
+    const octets = dotted.split('.').map(Number)
+    if (octets.length !== 4 || octets.some((octet) => octet > 255)) return false
+    value = value.replace(
+      dotted,
+      `${((octets[0] << 8) | octets[1]).toString(16)}:${((octets[2] << 8) | octets[3]).toString(16)}`,
+    )
+  }
+  const [left = '', right] = value.split('::')
+  const leftParts = left ? left.split(':') : []
+  const rightParts = right ? right.split(':') : []
+  const zeros = 8 - leftParts.length - rightParts.length
+  const parts = [...leftParts, ...Array(Math.max(0, zeros)).fill('0'), ...rightParts]
+  if (parts.length !== 8 || parts.some((part) => !/^[a-f\d]{1,4}$/i.test(part))) return false
+  const integer = parts.reduce((result, part) => (result << 16n) | BigInt(`0x${part}`), 0n)
+  return integer >> 125n === 1n && integer >> 96n !== 0x20010db8n
+}
+
+const loopbackTestURL = (url: URL) =>
+  process.env.NODE_ENV === 'test' &&
+  url.protocol === 'http:' &&
+  ['127.0.0.1', '[::1]'].includes(url.hostname)
+
+const responseFor = async (url: URL): Promise<IncomingMessage> => {
+  const localTest = loopbackTestURL(url)
+  if ((url.protocol !== 'https:' && !localTest) || url.username || url.password || url.hash)
+    throw new Error('Vulnerability feeds must use public HTTPS URLs.')
+  const addresses = localTest
+    ? [
+        {
+          address: url.hostname.replace(/^\[|\]$/g, ''),
+          family: isIP(url.hostname.replace(/^\[|\]$/g, '')),
+        },
+      ]
+    : await dnsLookup(url.hostname, { all: true, verbatim: true })
+  if (
+    !addresses.length ||
+    (!localTest && addresses.some(({ address }) => !isPublicFeedAddress(address)))
+  )
+    throw new Error('The vulnerability feed URL must resolve only to public IP addresses.')
+
+  let lastError: unknown
+  for (const address of addresses) {
+    const pinnedLookup: LookupFunction = (_hostname, options, callback) => {
+      if (typeof options === 'object' && options.all) callback(null, [address])
+      else callback(null, address.address, address.family)
+    }
+    try {
+      return await new Promise<IncomingMessage>((resolve, reject) => {
+        const request = (url.protocol === 'https:' ? httpsRequest : httpRequest)(
+          {
+            hostname: url.hostname,
+            port: url.port || undefined,
+            path: `${url.pathname}${url.search}`,
+            method: 'GET',
+            headers: {
+              accept: '*/*',
+              'accept-encoding': 'identity',
+              'user-agent': 'OTserver vulnerability catalog sync',
+            },
+            lookup: pinnedLookup,
+            signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+            ...(url.protocol === 'https:' ? { servername: url.hostname } : {}),
+          },
+          resolve,
+        )
+        request.once('error', reject)
+        request.end()
+      })
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError
+}
+
+const publicResponse = async (input: string): Promise<IncomingMessage> => {
+  let url = new URL(input)
+  for (let redirects = 0; redirects <= 5; redirects++) {
+    const response = await responseFor(url)
+    const status = response.statusCode || 0
+    if (![301, 302, 303, 307, 308].includes(status)) return response
+    const location = response.headers.location
+    response.resume()
+    if (!location)
+      throw Object.assign(new Error('The feed redirect has no destination.'), { status })
+    const next = new URL(location, url)
+    if (next.username || next.password || next.hash)
+      throw new Error('The feed redirect contains credentials or a fragment.')
+    url = next
+  }
+  throw new Error('The feed exceeded the redirect limit.')
+}
 
 const logRequestFailure = (
   logger: FeedLogger | undefined,
@@ -107,26 +225,32 @@ export const downloadFeed = async (
   options?: FeedOptions,
   logger?: FeedLogger,
 ): Promise<FeedBody> => {
-  let response: Response
+  let response: IncomingMessage
   try {
-    response = await fetch(url, {
-      headers: { 'user-agent': 'OTserver vulnerability catalog sync' },
-      signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
-    })
+    response = await publicResponse(url)
   } catch (error) {
     logRequestFailure(logger, url, error)
     throw error
   }
-  if (!response.ok || !response.body) {
-    const error = Object.assign(new Error(`${url} responded with ${response.status}.`), {
-      status: response.status,
-    })
-    logRequestFailure(logger, response.url || url, error, response.status)
+  if (
+    !response.statusCode ||
+    response.statusCode < 200 ||
+    response.statusCode >= 300 ||
+    response.statusCode === 204
+  ) {
+    const error = Object.assign(
+      new Error(`${safeURL(url)} responded with ${response.statusCode || 'no status'}.`),
+      {
+        status: response.statusCode,
+      },
+    )
+    response.resume()
+    logRequestFailure(logger, url, error, response.statusCode)
     throw error
   }
   const body = decodeFeed(
     verifyFeed(
-      response.body as unknown as AsyncIterable<Uint8Array>,
+      response as unknown as AsyncIterable<Uint8Array>,
       MAX_DOWNLOAD_BYTES,
       undefined,
       url,
@@ -138,7 +262,7 @@ export const downloadFeed = async (
     try {
       yield* body
     } catch (error) {
-      logRequestFailure(logger, response.url || url, error, response.status)
+      logRequestFailure(logger, url, error, response.statusCode)
       throw error
     }
   })()

@@ -159,6 +159,7 @@ export interface Config {
       'device-metadata-sync-v1': TaskDeviceMetadataSyncV1;
       'otter-release-sync-v1': TaskOtterReleaseSyncV1;
       'vulnerability-feed-sync-v1': TaskVulnerabilityFeedSyncV1;
+      'vulnerability-feed-auto-sync-v1': TaskVulnerabilityFeedAutoSyncV1;
       'import-v1': TaskImportV1;
       'maintenance-v1': TaskMaintenanceV1;
       'reapply-asset-classes-v1': TaskReapplyAssetClassesV1;
@@ -1466,6 +1467,7 @@ export interface PayloadJob {
           | 'device-metadata-sync-v1'
           | 'otter-release-sync-v1'
           | 'vulnerability-feed-sync-v1'
+          | 'vulnerability-feed-auto-sync-v1'
           | 'import-v1'
           | 'maintenance-v1'
           | 'reapply-asset-classes-v1';
@@ -1507,6 +1509,7 @@ export interface PayloadJob {
         | 'device-metadata-sync-v1'
         | 'otter-release-sync-v1'
         | 'vulnerability-feed-sync-v1'
+        | 'vulnerability-feed-auto-sync-v1'
         | 'import-v1'
         | 'maintenance-v1'
         | 'reapply-asset-classes-v1'
@@ -2420,6 +2423,27 @@ export interface PayloadMigrationsSelect<T extends boolean = true> {
  */
 export interface ApplicationSetting {
   id: string;
+  vulnerabilityFeeds?: {
+    /**
+     * Automatically download feeds. Manual updates and offline imports remain available when this is disabled.
+     */
+    automaticUpdates?: boolean | null;
+    /**
+     * Automatic updates run at this interval, from 1 to 365 days.
+     */
+    pullIntervalDays?: number | null;
+    /**
+     * Add public HTTPS CSAF aggregators, provider metadata, or ROLIE feeds. Referenced feeds and advisories are discovered automatically.
+     */
+    customCsafFeeds?:
+      | {
+          name: string;
+          type: 'aggregator' | 'provider-metadata' | 'rolie';
+          url: string;
+          id?: string | null;
+        }[]
+      | null;
+  };
   /**
    * Import the latest stable GitHub release for all supported platforms every 24 hours. Scanner updates are assigned separately.
    */
@@ -2460,6 +2484,20 @@ export interface ApplicationSetting {
  * via the `definition` "application-settings_select".
  */
 export interface ApplicationSettingsSelect<T extends boolean = true> {
+  vulnerabilityFeeds?:
+    | T
+    | {
+        automaticUpdates?: T;
+        pullIntervalDays?: T;
+        customCsafFeeds?:
+          | T
+          | {
+              name?: T;
+              type?: T;
+              url?: T;
+              id?: T;
+            };
+      };
   otterReleaseImports?: T;
   metadataImports?: T;
   metadataSync?:
@@ -2544,7 +2582,26 @@ export interface TaskVulnerabilityFeedSyncV1 {
       | number
       | boolean
       | null;
+    customCsafFeeds?:
+      | {
+          [k: string]: unknown;
+        }
+      | unknown[]
+      | string
+      | number
+      | boolean
+      | null;
     skipMissing?: boolean | null;
+  };
+  output?: unknown;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskVulnerability-feed-auto-sync-v1".
+ */
+export interface TaskVulnerabilityFeedAutoSyncV1 {
+  input: {
+    version: number;
   };
   output?: unknown;
 }

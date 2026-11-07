@@ -8,6 +8,7 @@ import { systemRequest } from '../integrations/payload/requests'
 import { expireOtterLeases } from '../otter/controller'
 import { scheduleOtterReleaseSync } from '../otter/releaseSync'
 import { scheduleMetadataSync } from '../metadata/sync'
+import { scheduleVulnerabilityFeedSync } from '../vulnerabilities/feeds'
 
 const OTTER_LEASE_SWEEP_MS = 15_000
 
@@ -132,6 +133,7 @@ export const runWorker = async (payload: Payload, queue: Queue, signal: AbortSig
       if (queue === 'maintenance') {
         await scheduleMaintenance(payload, fence)
         if (Date.now() >= nextUpdaterCheck) {
+          await withWorkerFence(fence, () => scheduleVulnerabilityFeedSync(payload))
           await withWorkerFence(fence, () => scheduleOtterReleaseSync(payload))
           await withWorkerFence(fence, () => scheduleMetadataSync(payload))
           nextUpdaterCheck = Date.now() + 60_000

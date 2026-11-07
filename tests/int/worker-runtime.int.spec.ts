@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   acquireWorker: vi.fn(),
   renewWorker: vi.fn(),
+  metadataSync: vi.fn(async () => undefined),
+  vulnerabilityFeedSync: vi.fn(async () => undefined),
   systemRequest: vi.fn(),
 }))
 
@@ -11,6 +13,10 @@ vi.mock('../../src/jobs/ownership', () => ({
   renewWorker: mocks.renewWorker,
 }))
 vi.mock('../../src/jobs/maintenance', () => ({ SYNC_INTERVAL_MS: 60_000 }))
+vi.mock('../../src/vulnerabilities/feeds', () => ({
+  scheduleVulnerabilityFeedSync: mocks.vulnerabilityFeedSync,
+}))
+vi.mock('../../src/metadata/sync', () => ({ scheduleMetadataSync: mocks.metadataSync }))
 vi.mock('../../src/otter/releaseSync', () => ({ scheduleOtterReleaseSync: vi.fn() }))
 vi.mock('../../src/integrations/payload/requests', () => ({
   systemRequest: mocks.systemRequest,
