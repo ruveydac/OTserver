@@ -1277,7 +1277,7 @@ describe('remaining Otter component states', () => {
     )
   })
 
-  it('selects and queues a signed release and closes the enrollment-token dialog', async () => {
+  it('selects a version tag, automatically targets the scanner platform, and closes enrollment', async () => {
     mocks.documentID = 'scanner-1'
     mocks.documentCanUpdate = true
     mocks.collectionSlug = 'otter-scanners'
@@ -1311,7 +1311,7 @@ describe('remaining Otter component states', () => {
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(
         release,
-        'release-2',
+        'v1.1.0',
       )
       release.dispatchEvent(new Event('change', { bubbles: true }))
     })
@@ -1328,7 +1328,7 @@ describe('remaining Otter component states', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/otter/v1/updates',
       expect.objectContaining({
-        body: JSON.stringify({ releaseID: 'release-2', scannerIDs: ['scanner-1'] }),
+        body: JSON.stringify({ version: 'v1.1.0', scannerIDs: ['scanner-1'] }),
       }),
     )
     expect(container.textContent).toContain('Update queued for 1 scanner.')

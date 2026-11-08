@@ -186,6 +186,9 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
 - Otter enrollment and polling inventory reports include the computer name and at most 32 adapters,
   each with technical/friendly names, description, MAC, and at most 16 IPv4/IPv6 addresses. Validate
   reports and keep them bound to the exact scanner; never include credentials in adapter inventory.
+- Otter enrollment and polling reports include the client-reported OS version. Update assignments
+  select a signed release by version tag and resolve its executable target from each scanner's
+  reported build target.
 - Manage enrollment from the Otter Scanners collection popup. All scan options and human import
   overrides belong to Otter Configurations (`otter-profiles`); manual runs select a configuration
   explicitly and schedules reference one. Snapshot scan options, encrypted credentials, and import
@@ -555,5 +558,7 @@ origin policy separate from this home-network development exception.
 - Admin copy uses sentence case and “Otter configuration” (the API retains `otter-profiles`).
   Passive catalog results are “Potential vulnerability matches”; use “Create” for documents,
   “Enroll” for scanners, and “Select” for choices. Reuse Payload controls and theme tokens.
+- Admin UI uses native Payload components and supported extension points. Do not recreate Payload
+  controls or add standalone controls where a Payload list, field, or action slot fits.
 - Do not weaken validation, access control, auditing, or Otter safety to make a test pass.
 - Update this file only for durable guidance, not temporary status or implementation notes.

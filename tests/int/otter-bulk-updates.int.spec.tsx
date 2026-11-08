@@ -19,13 +19,17 @@ vi.mock('@payloadcms/ui', () => ({
   Banner: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   Button: ({
     buttonStyle,
+    el = 'button',
     children,
+    url,
     ...props
   }: ComponentProps<'button'> & {
     buttonStyle?: string
+    el?: 'button' | 'link'
+    url?: string
   }) => {
     void buttonStyle
-    return <button {...props}>{children}</button>
+    return el === 'link' ? <a href={url}>{children}</a> : <button {...props}>{children}</button>
   },
   ConfirmationModal: ({
     body,
@@ -40,7 +44,7 @@ vi.mock('@payloadcms/ui', () => ({
   }) => (
     <div>
       <h2>{heading}</h2>
-      <p>{body}</p>
+      <div>{body}</div>
       <button onClick={onConfirm}>{confirmLabel}</button>
     </div>
   ),
@@ -94,6 +98,7 @@ afterEach(async () => {
 
 describe('Otter bulk updates', () => {
   it('shows loading, load-error, and no-release states', async () => {
+    mocks.selection = { count: 1, selected: { scannerOne: true }, selectAll: 'some' }
     let signal: AbortSignal | undefined
     vi.stubGlobal(
       'fetch',
@@ -106,7 +111,7 @@ describe('Otter bulk updates', () => {
     )
     await render()
     expect(container.querySelector('[role="status"]')?.textContent).toContain(
-      'Loading signed Otter releases',
+      'Loading signed releases',
     )
     await act(async () => root.unmount())
     expect(signal?.aborted).toBe(true)
@@ -126,10 +131,9 @@ describe('Otter bulk updates', () => {
 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ releases: [] })))
     await renderFresh()
-    expect(container.textContent).toContain('No signed Otter executables have been uploaded')
-    expect(container.querySelector('a')?.getAttribute('href')).toBe(
-      '/admin/collections/otter-releases',
-    )
+    expect(
+      container.querySelector('a[href="/admin/collections/otter-releases"]')?.textContent,
+    ).toBe('Upload a signed release')
 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ releases: null })))
     await renderFresh()
@@ -142,6 +146,7 @@ describe('Otter bulk updates', () => {
     const releases = [
       { id: 'release-1', version: 'v1.2.0', target: 'x86_64-unknown-linux-gnu' },
       { id: 'release-2', version: 'v1.3.0', target: 'x86_64-pc-windows-msvc' },
+      { id: 'release-3', version: 'v1.3.0', target: 'x86_64-unknown-linux-gnu' },
     ]
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ releases })))
     mocks.selection = {
@@ -152,20 +157,21 @@ describe('Otter bulk updates', () => {
     mocks.action.mockResolvedValue({ queued: [{ id: 'scannerOne' }] })
     await render()
 
+    await click('Update selected')
+    expect(mocks.openModal).toHaveBeenCalledWith('otter-bulk-update-confirm')
     const select = container.querySelector('select')!
+    expect([...select.options].map((option) => option.value)).toEqual(['v1.2.0', 'v1.3.0'])
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(
         select,
-        'release-2',
+        'v1.3.0',
       )
       select.dispatchEvent(new Event('change', { bubbles: true }))
     })
-    await click('Update selected Otters')
-    expect(mocks.openModal).toHaveBeenCalledWith('otter-bulk-update-confirm')
     expect(container.textContent).toContain('Queue v1.3.0 for 1 selected scanner?')
     await click('Queue updates')
     expect(mocks.action).toHaveBeenCalledWith('/api/otter/v1/updates', {
-      releaseID: 'release-2',
+      version: 'v1.3.0',
       scannerIDs: ['scannerOne'],
     })
     expect(container.querySelector('[role="status"]')?.textContent).toBe(
@@ -174,12 +180,12 @@ describe('Otter bulk updates', () => {
     expect(mocks.refresh).toHaveBeenCalledOnce()
 
     mocks.action.mockRejectedValueOnce(new Error('Permission denied.'))
-    await click('Update selected Otters')
+    await click('Update selected')
     await click('Queue updates')
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('Permission denied')
 
     mocks.action.mockRejectedValueOnce('offline')
-    await click('Update selected Otters')
+    await click('Update selected')
     await click('Queue updates')
     expect(container.querySelector('[role="alert"]')?.textContent).toContain(
       'Could not queue the update',
@@ -187,8 +193,12 @@ describe('Otter bulk updates', () => {
 
     mocks.selection = { count: 2, selected: { scannerOne: true }, selectAll: 'allAvailable' }
     await renderFresh()
-    expect(container.textContent).toContain('Select individual scanner rows')
-    expect(container.querySelector('button')?.disabled).toBe(true)
+    expect(container.textContent).toContain('Select individual scanners')
+    expect(
+      [...container.querySelectorAll('button')].find(
+        (button) => button.textContent === 'Update selected',
+      )?.disabled,
+    ).toBe(true)
 
     mocks.selection = { count: 1, selected: { scannerOne: false }, selectAll: 'some' }
     await renderFresh()
@@ -201,7 +211,7 @@ describe('Otter bulk updates', () => {
     }
     mocks.action.mockResolvedValueOnce({ queued: [{ id: 'scannerOne' }, { id: 'scannerTwo' }] })
     await renderFresh()
-    await click('Update selected Otters')
+    await click('Update selected')
     await click('Queue updates')
     expect(container.querySelector('[role="status"]')?.textContent).toBe(
       'Update queued for 2 scanners.',

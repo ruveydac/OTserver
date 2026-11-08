@@ -740,6 +740,7 @@ export interface OtterScanner {
   enrolledAt?: string | null;
   lastSeenAt?: string | null;
   version?: string | null;
+  osVersion?: string | null;
   buildTarget?: string | null;
   binaryDigest?: string | null;
   capabilities?:
@@ -1936,6 +1937,7 @@ export interface OtterScannersSelect<T extends boolean = true> {
   enrolledAt?: T;
   lastSeenAt?: T;
   version?: T;
+  osVersion?: T;
   buildTarget?: T;
   binaryDigest?: T;
   capabilities?: T;
