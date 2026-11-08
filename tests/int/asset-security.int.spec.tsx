@@ -94,7 +94,6 @@ beforeEach(() => {
       name: 'PLC 1',
       site: 'site-1',
       status: 'online',
-      criticality: 'high',
       vulnerabilityCount: 31,
     },
     payload: { config: { routes: { admin: '/admin' } }, find: descriptionRead },

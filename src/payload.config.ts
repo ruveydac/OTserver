@@ -42,12 +42,14 @@ import {
 import { ApplicationSettings } from './globals/ApplicationSettings'
 import { initializeMetadataCatalog } from './metadata/initialize'
 import { DeviceCatalog } from './collections/DeviceCatalog'
+import { initializeAssetTags, TagGroups, Tags } from './collections/Tags'
 
 const dirname = import.meta.dirname || path.resolve('src')
 
 const initializeApplication = async (payload: Payload) => {
   await initializeSiteTypes(payload)
   await initializeAssetClasses(payload)
+  await initializeAssetTags(payload)
   await initializeAuthorization(payload)
   await initializeMetadataCatalog(payload)
 
@@ -108,6 +110,8 @@ export default buildConfig({
     SiteTypes,
     Sites,
     AssetClasses,
+    TagGroups,
+    Tags,
     Assets,
     NetworkEndpoints,
     ServiceBindings,

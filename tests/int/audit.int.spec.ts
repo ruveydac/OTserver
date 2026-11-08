@@ -76,7 +76,6 @@ describe('audit log', () => {
       collection: 'assets',
       data: {
         assetClass: plcClassID,
-        criticality: 'medium',
         macAddress: `02:${randomBytes(5).toString('hex').toUpperCase().match(/.{2}/g)?.join(':')}`,
         name: 'Audited PLC',
         site: site.id,

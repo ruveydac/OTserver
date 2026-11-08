@@ -1,6 +1,12 @@
-import { APIError, type CollectionBeforeChangeHook, type CollectionConfig } from 'payload'
+import {
+  APIError,
+  type CollectionAfterDeleteHook,
+  type CollectionBeforeChangeHook,
+  type CollectionConfig,
+} from 'payload'
 
 import { adminOnly, hideFromNonAdmins } from '../access/authorization'
+import { queueAssetTagReapply } from '../tags/assign'
 
 export type AssetFieldDefinition = {
   id: number | string
@@ -63,6 +69,10 @@ const keepTypeStable: CollectionBeforeChangeHook = ({ data, originalDoc }) => {
   return data
 }
 
+const reapplyTagRules: CollectionAfterDeleteHook = async ({ req }) => {
+  await queueAssetTagReapply(req)
+}
+
 export const AssetFields: CollectionConfig = {
   slug: 'asset-fields',
   labels: { singular: 'Custom asset field', plural: 'Custom asset fields' },
@@ -105,5 +115,5 @@ export const AssetFields: CollectionConfig = {
       type: 'textarea',
     },
   ],
-  hooks: { beforeChange: [keepTypeStable] },
+  hooks: { beforeChange: [keepTypeStable], afterDelete: [reapplyTagRules] },
 }

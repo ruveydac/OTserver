@@ -6,6 +6,7 @@ import { runMaintenance } from './maintenance'
 import { safeFailure, transientFailure } from './errors'
 import { currentWorker } from '../integrations/payload/workerContext'
 import { reapplyAssetClassRules } from '../collections/AssetClasses'
+import { reapplyAssetTags } from '../tags/assign'
 import { executeFeedUpdate } from '../vulnerabilities/actions'
 import { executeScheduledVulnerabilityFeedSync } from '../vulnerabilities/feeds'
 import { feedSources } from '../vulnerabilities/sources'
@@ -222,6 +223,36 @@ export const jobs: JobsConfig = {
           throw new Error(sanitized)
         } finally {
           delete req.context.deviceMetadataCatalog
+        }
+        return { output: {} }
+      },
+    },
+    {
+      slug: 'reapply-asset-tags-v1',
+      retries: { attempts: 2, backoff: { type: 'exponential', delay: 5000 } },
+      inputSchema: [{ name: 'version', type: 'number', required: true }],
+      handler: async ({ input, req, job }) => {
+        if (input.version !== 1 || currentWorker()?.queue !== 'maintenance')
+          throw new JobCancelledError('Unsupported worker input or execution context.')
+        const started = Date.now()
+        try {
+          const result = await reapplyAssetTags(req)
+          req.payload.logger.info({
+            event: 'asset-tags.reapplied',
+            jobID: job.id,
+            durationMs: Date.now() - started,
+            ...result,
+          })
+        } catch (error) {
+          const sanitized = safeFailure(error)
+          req.payload.logger.warn({
+            event: 'asset-tags.reapply-failed',
+            jobID: job.id,
+            durationMs: Date.now() - started,
+            error: sanitized,
+          })
+          if (!transientFailure(error)) throw new JobCancelledError(sanitized)
+          throw new Error(sanitized)
         }
         return { output: {} }
       },

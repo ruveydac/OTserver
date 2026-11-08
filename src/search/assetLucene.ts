@@ -41,7 +41,7 @@ const fieldFor = (name: string) =>
 
 const normalizeKeyword = (path: string, value: string) => {
   if (path === 'macAddress') return value.replaceAll('-', ':').toUpperCase()
-  if (['criticality', 'protocols', 'status'].includes(path)) return value.toLowerCase()
+  if (['protocols', 'status'].includes(path)) return value.toLowerCase()
   return value
 }
 

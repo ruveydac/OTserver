@@ -30,6 +30,7 @@ change over time. Add assets manually or import discovery results from
 ## What you can do
 
 - Maintain an inventory of device manufacturers, models, firmware, protocols, ownership, and custom fields.
+- Create manual or rule-matched tags, group them for administration, and filter assets by tag.
 - Organize assets into sites using a hierarchy that fits your organization.
 - Give teams read-only or read/write access to the sites they manage.
 - Combine discovery results while preserving manual edits and the source of each value.

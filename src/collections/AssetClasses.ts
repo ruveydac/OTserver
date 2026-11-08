@@ -15,6 +15,7 @@ import defaultRuleSeed from '../data/default-asset-class-rules.json'
 import { validateAssignmentRegex } from '../domain/assignmentRegex'
 import { metadataGroups, type MetadataMatch } from '../metadata/catalog'
 import { activeCatalog, matchAssetMetadata } from '../metadata/runtime'
+import { matchesRegexValues } from '../domain/assetRuleMatching'
 import type { AssetClass } from '../payload-types'
 export { validateAssignmentRegex } from '../domain/assignmentRegex'
 
@@ -153,9 +154,7 @@ export const findMatchingAssetClass = async (
     }
     return (
       matcher.conditions.length > 0 &&
-      matcher.conditions.every(({ field, regex }) =>
-        fieldValue(field).some((value) => regex.test(value)),
-      )
+      matcher.conditions.every(({ field, regex }) => matchesRegexValues(fieldValue(field), regex))
     )
   })?.assetClass
 }

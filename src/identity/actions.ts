@@ -218,6 +218,24 @@ export const performIdentityAction = async (
           overrideAccess: false,
           req,
         })
+        await req.payload.update({
+          collection: 'assets',
+          id: target.id,
+          data: {
+            manualTags: [
+              ...new Set([
+                ...(Array.isArray(target.manualTags) ? target.manualTags : [])
+                  .map(idOf)
+                  .filter(Boolean),
+                ...(Array.isArray(source.manualTags) ? source.manualTags : [])
+                  .map(idOf)
+                  .filter(Boolean),
+              ]),
+            ],
+          },
+          overrideAccess: false,
+          req,
+        })
         await refreshAssetVulnerabilityCount(req.payload, { ...source, lifecycle: 'merged' }, req)
         await refreshAssetVulnerabilityCount(req.payload, target, req)
       } else {
@@ -299,7 +317,7 @@ export const performIdentityAction = async (
             site: idOf(source.site),
             assetClass: idOf(source.assetClass),
             status: 'unknown',
-            criticality: source.criticality,
+            manualTags: source.manualTags,
             physicalKind: 'unknown',
             uuid: randomUUID(),
           },

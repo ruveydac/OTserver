@@ -5,6 +5,7 @@ import { inTransaction } from '../integrations/payload/transactions'
 import { transientFailure } from '../jobs/errors'
 import { setTimeout as delay } from 'node:timers/promises'
 import { activeCatalog } from './runtime'
+import { queueAssetTagReapply } from '../tags/assign'
 
 const initializeCatalog = async (payload: Payload) => {
   const revisionHash = (await activeCatalog(payload)).revision
@@ -57,6 +58,7 @@ const initializeCatalog = async (payload: Payload) => {
       req,
       input: { version: 1, assetClassID: marker.id, catalogRevision: revisionHash },
     })
+    await queueAssetTagReapply(req)
   })
 }
 

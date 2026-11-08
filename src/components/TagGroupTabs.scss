@@ -1,0 +1,33 @@
+.tag-group-tabs {
+  align-items: end;
+  border-bottom: 1px solid var(--theme-elevation-200);
+  display: flex;
+  gap: 0.25rem;
+  margin: 0.5rem 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.tag-group-tabs__button {
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--theme-elevation-600);
+  cursor: pointer;
+  flex: 0 0 auto;
+  font: inherit;
+  min-height: 44px;
+  padding: 0.55rem 0.75rem;
+  white-space: nowrap;
+
+  &[aria-pressed='true'] {
+    border-bottom-color: var(--theme-text);
+    color: var(--theme-text);
+    font-weight: 650;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--theme-text);
+    outline-offset: -2px;
+  }
+}

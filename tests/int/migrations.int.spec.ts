@@ -42,7 +42,6 @@ describe('versioned legacy identity migration', () => {
       collection: 'assets',
       data: {
         assetClass: initialClass.id,
-        criticality: 'low',
         name: 'Legacy PLC',
         site: site.id,
         status: 'unknown',
@@ -61,16 +60,26 @@ describe('versioned legacy identity migration', () => {
         )
       }
       await payload.db.collections.users.updateOne({ _id: user.id }, { $unset: { role: '' } })
-      await payload.db.collections.assets.updateOne(
-        { _id: asset.id },
+      await payload.db.collections.assets.collection.updateOne(
+        { _id: new ObjectId(asset.id) },
         {
           $set: {
             assetType: 'plc',
+            criticality: 'low',
             fieldProvenance: { assetType: { quality: 'medium', source: 'nmap' } },
           },
           $unset: { assetClass: '' },
         },
       )
+      expect(
+        await payload.db.collections.assets.collection.findOne(
+          { _id: new ObjectId(asset.id) },
+          { projection: { criticality: 1 } },
+        ),
+      ).toMatchObject({ criticality: 'low' })
+      expect(
+        await payload.db.collections.tags.collection.findOne({ systemKey: 'criticality-low' }),
+      ).not.toBeNull()
       await initializeAssetClasses(payload)
       await initializeAuthorization(payload)
       const legacyAsset = (await payload.db.collections.assets
@@ -119,6 +128,14 @@ describe('versioned legacy identity migration', () => {
       expect(migratedAsset!.fieldProvenance).toMatchObject({
         assetClass: { quality: 'medium', source: 'nmap' },
       })
+      const lowTag = await payload.find({
+        collection: 'tags',
+        depth: 0,
+        limit: 1,
+        where: { systemKey: { equals: 'criticality-low' } },
+      })
+      expect(migratedAsset).not.toHaveProperty('criticality')
+      expect((migratedAsset!.manualTags as unknown[]).map(String)).toContain(lowTag.docs[0]!.id)
       expect(migratedAsset!.assetType).toBeFalsy()
       expect(String(migratedUser?.role)).toBe(adminRole.id)
       const auditCount = await payload.count({

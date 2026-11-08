@@ -23,6 +23,8 @@ import { releaseDeletedAssetBindings } from '../identity/deletion'
 import { purdueLevels } from '../domain/purdue'
 import { vulnerabilityReviewAction } from '../vulnerabilities/reviews'
 import { matchAssetMetadata } from '../metadata/runtime'
+import { assignAssetTagsBeforeChange } from '../tags/assign'
+import { bulkManualAssetTags } from '../tags/actions'
 
 import { userSuppliedAssetFields } from '../domain/assetFields'
 export { userSuppliedAssetFields } from '../domain/assetFields'
@@ -32,6 +34,7 @@ const recordHumanChanges: CollectionBeforeChangeHook = ({ context, data, origina
     context.assetImport ||
     context.assetClassMigration ||
     context.assetClassReclassification ||
+    context.assetTagReclassification ||
     context.vulnerabilityCountSync ||
     context.networkProjection ||
     context.identityAction
@@ -95,6 +98,7 @@ export const Assets: CollectionConfig = {
   endpoints: [
     { handler: identityAction, method: 'post', path: '/:id/identity' },
     { handler: vulnerabilityReviewAction, method: 'post', path: '/:id/vulnerability-review' },
+    { handler: bulkManualAssetTags, method: 'post', path: '/bulk-tags' },
     { handler: migrateIdentity, method: 'post', path: '/migrate-identity' },
     {
       handler: exportAssetsCSV,
@@ -238,6 +242,42 @@ export const Assets: CollectionConfig = {
           label,
         })),
       ],
+    },
+    {
+      name: 'manualTags',
+      type: 'relationship',
+      relationTo: 'tags',
+      hasMany: true,
+      index: true,
+      label: 'Manual tags',
+      filterOptions: { manual: { equals: true } },
+      admin: {
+        description: 'People can assign and remove these tags. Automatic tags are rule-managed.',
+      },
+    },
+    {
+      name: 'automaticTags',
+      type: 'relationship',
+      relationTo: 'tags',
+      hasMany: true,
+      access: { create: () => false, update: () => false },
+      admin: { hidden: true, readOnly: true },
+    },
+    {
+      name: 'tags',
+      type: 'relationship',
+      relationTo: 'tags',
+      hasMany: true,
+      access: { create: () => false, update: () => false },
+      admin: { hidden: true, readOnly: true },
+    },
+    {
+      name: 'tagNames',
+      type: 'text',
+      hasMany: true,
+      index: true,
+      access: { create: () => false, update: () => false },
+      admin: { hidden: true, disableListFilter: true, readOnly: true },
     },
     {
       name: 'customFields',
@@ -394,20 +434,6 @@ export const Assets: CollectionConfig = {
       required: true,
     },
     {
-      name: 'criticality',
-      type: 'select',
-      admin: { position: 'sidebar' },
-      defaultValue: 'medium',
-      index: true,
-      options: [
-        { label: 'Low', value: 'low' },
-        { label: 'Medium', value: 'medium' },
-        { label: 'High', value: 'high' },
-        { label: 'Critical', value: 'critical' },
-      ],
-      required: true,
-    },
-    {
       name: 'vulnerabilityCount',
       type: 'number',
       access: {
@@ -461,7 +487,7 @@ export const Assets: CollectionConfig = {
   ],
   hooks: {
     beforeValidate: [assignDefaultAssetClass],
-    // assignVulnerabilityCount runs last so the derived count never enters field provenance.
+    // Provenance is recorded first; derived counts and tags never become human field evidence.
     beforeChange: [
       enforceWritableSite,
       protectAssetIdentity,
@@ -472,6 +498,7 @@ export const Assets: CollectionConfig = {
         metadataMatch: await matchAssetMetadata(req.payload, { ...originalDoc, ...data }, req),
       }),
       assignVulnerabilityCount,
+      assignAssetTagsBeforeChange,
     ],
     beforeOperation: [applyAssetSearch],
     afterChange: [syncManualEndpoint],

@@ -61,7 +61,6 @@ describe('asset CRUD', () => {
         collection: 'assets',
         data: {
           assetClass: plcClassID,
-          criticality: 'medium',
           ipAddress: '192.0.2.10',
           macAddress: mac.replaceAll(':', '-').toLowerCase(),
           name: 'CRUD test PLC',
@@ -87,7 +86,6 @@ describe('asset CRUD', () => {
         collection: 'assets',
         data: {
           assetClass: otherClassID,
-          criticality: 'low',
           ipAddress: '192.0.2.10',
           macAddress: `02:${randomBytes(5).toString('hex').toUpperCase().match(/.{2}/g)?.join(':')}`,
           name: 'Same IP, different MAC',
@@ -153,7 +151,6 @@ describe('asset CRUD', () => {
         collection: 'assets',
         data: {
           assetClass: otherClassID,
-          criticality: 'low',
           macAddress: mac,
           name: 'Trash test asset',
           site: siteID,
@@ -250,7 +247,6 @@ describe('asset CRUD', () => {
       const asset = await payload.create({
         collection: 'assets',
         data: {
-          criticality: 'medium',
           macAddress: `02:${randomBytes(5).toString('hex').toUpperCase().match(/.{2}/g)?.join(':')}`,
           model: 'Drive-9000',
           name: 'Drive under test',
@@ -524,7 +520,6 @@ describe('asset CRUD', () => {
         collection: 'assets',
         data: {
           assetClass: plcClassID,
-          criticality: 'medium',
           macAddress: aachenMAC,
           name: 'Aachen PLC',
           site: aachen.id,
@@ -535,7 +530,6 @@ describe('asset CRUD', () => {
         collection: 'assets',
         data: {
           assetClass: plcClassID,
-          criticality: 'medium',
           macAddress: usaMAC,
           name: 'USA PLC',
           site: usa.id,
@@ -632,7 +626,6 @@ describe('asset CRUD', () => {
         collection: 'assets',
         data: {
           assetClass: otherClassID,
-          criticality: 'low',
           macAddress: writerMAC,
           name: 'Writer-created asset',
           site: aachen.id,
@@ -646,7 +639,6 @@ describe('asset CRUD', () => {
           collection: 'assets',
           data: {
             assetClass: otherClassID,
-            criticality: 'low',
             macAddress: mac(),
             name: 'Out-of-scope asset',
             site: usa.id,
@@ -750,7 +742,6 @@ describe('asset CRUD', () => {
         collection: 'assets',
         data: {
           assetClass: plcClassID,
-          criticality: 'medium',
           macAddress: mac(),
           name: 'Exported PLC, with "quotes"',
           notes: 'line one\nline two',
@@ -763,7 +754,6 @@ describe('asset CRUD', () => {
         collection: 'assets',
         data: {
           assetClass: otherClassID,
-          criticality: 'low',
           macAddress: mac(),
           name: 'Hidden asset',
           site: otherSite.id,
@@ -926,7 +916,6 @@ describe('asset CRUD', () => {
       expect(importedAssets.docs[0]).toMatchObject({
         assetOwner: 'OT operations',
         assetClass: otherClassID,
-        criticality: 'medium',
         importSource: 'nmap',
         ipAddress: '192.0.2.21',
         macAddress: mac,

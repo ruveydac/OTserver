@@ -9,6 +9,7 @@ import { getAuthorization } from '../access/authorization'
 import { inTransaction } from '../integrations/payload/transactions'
 import { createCatalogMatcher, type Catalog } from './catalog'
 import { activeCatalog, catalogRevision } from './runtime'
+import { queueAssetTagReapply } from '../tags/assign'
 
 export const MAX_METADATA_BYTES = 8 * 1024 * 1024
 const ajv = new Ajv2020({ allErrors: false })
@@ -148,6 +149,7 @@ export const applyMetadataFilesInTransaction = async (req: PayloadRequest, files
     req,
     input: { version: 1, assetClassID: 'device-catalog', catalogRevision: revision },
   })
+  await queueAssetTagReapply(req)
   return { ...merged.counts, revision, changed: true }
 }
 

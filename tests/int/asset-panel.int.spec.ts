@@ -134,7 +134,6 @@ describe('asset panel read interface', () => {
         collection: 'assets',
         data: {
           assetClass: assetClassID,
-          criticality: 'medium',
           macAddress: randomMAC(),
           name: 'Panel asset',
           site: site.id,
@@ -146,7 +145,6 @@ describe('asset panel read interface', () => {
         collection: 'assets',
         data: {
           assetClass: assetClassID,
-          criticality: 'medium',
           macAddress: randomMAC(),
           name: 'Foreign panel asset',
           site: otherSite.id,

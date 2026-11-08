@@ -15,7 +15,9 @@
     .topology-view,
     .otter-enrollment,
     .otter-credentials,
-    .custom-asset-fields
+    .custom-asset-fields,
+    .asset-bulk-tags,
+    .asset-manual-tags__list
   )
   :is(a, button, input, select, textarea):focus-visible {
   outline: 2px solid var(--theme-text);
@@ -30,9 +32,35 @@
       .topology-view,
       .otter-enrollment,
       .otter-credentials,
-      .custom-asset-fields
+      .custom-asset-fields,
+      .asset-bulk-tags
     )
     :is(button, select, input:not([type='checkbox']), textarea) {
     min-height: 44px;
+  }
+}
+
+.asset-bulk-tags {
+  display: grid;
+  gap: 0.4rem;
+
+  > label:first-child {
+    display: grid;
+    gap: 0.35rem;
+    margin-bottom: 0.7rem;
+  }
+
+  &__option {
+    align-items: center;
+    border-bottom: 1px solid var(--theme-elevation-150);
+    display: flex;
+    gap: 0.6rem;
+    min-height: 44px;
+    padding: 0.3rem 0.2rem;
+
+    small {
+      color: var(--theme-elevation-500);
+      margin-left: auto;
+    }
   }
 }
