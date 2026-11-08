@@ -243,9 +243,7 @@ describe('asset Security overview', () => {
       },
     ]
     const find = vi.fn(async (args: { collection: string }) =>
-      args.collection === 'tags'
-        ? { docs: tagOptions }
-        : descriptionRead({ where: { cve: { in: [] } } }),
+      args.collection === 'tags' ? { docs: tagOptions } : { docs: [] },
     )
     const findByID = vi.fn(async () => ({
       tags: [
@@ -255,7 +253,10 @@ describe('asset Security overview', () => {
       ],
       manualTags: [{ id: 'manual-tag' }, null],
     }))
-    props.payload = { ...props.payload, find, findByID } as never
+    props = {
+      ...props,
+      payload: { ...props.payload, find, findByID } as never,
+    }
 
     const view = await render({ tab: 'overview' })
 

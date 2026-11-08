@@ -407,7 +407,10 @@ describe('asset tags', () => {
     ).toBe('42')
     expect(
       selectedTagGroup({
-        and: [{ group: [{ equals: 'ignored' }] }, { or: [{ group: { equals: 'nested' } }] }],
+        and: [
+          { group: [{ name: { equals: 'ignored' } }] },
+          { or: [{ group: { equals: 'nested' } }] },
+        ],
       }),
     ).toBe('nested')
     expect(filterTagsByGroup(undefined, 'all')).toBeUndefined()
