@@ -15,7 +15,19 @@ vi.mock('../../src/access/authorization', async (importOriginal) => ({
 vi.mock('../../src/application/assetPanel', () => ({ loadAssetPanel: vi.fn() }))
 vi.mock('../../src/components/DeviceIdentity', () => ({ default: () => null }))
 vi.mock('../../src/components/AssetVulnerabilityReviewActions', () => ({ default: () => null }))
-vi.mock('@payloadcms/ui', () => ({ CopyToClipboard: () => null }))
+vi.mock('@payloadcms/ui', async () => {
+  const { createElement } = await import('react')
+  return {
+    Banner: ({ children }: { children: React.ReactNode }) => createElement('div', null, children),
+    Button: ({ children, ...props }: Record<string, unknown>) =>
+      createElement('button', props, children as never),
+    ConfirmationModal: ({ body }: { body: React.ReactNode }) => createElement('div', null, body),
+    CopyToClipboard: () => null,
+    useConfig: () => ({ config: { routes: { api: '/api' } } }),
+    useModal: () => ({ openModal: vi.fn() }),
+  }
+})
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }))
 
 type Panel = Awaited<ReturnType<typeof loadAssetPanel>>
 type Finding = Panel['vulnerabilityFindings'][number]
@@ -96,7 +108,11 @@ beforeEach(() => {
       status: 'online',
       vulnerabilityCount: 31,
     },
-    payload: { config: { routes: { admin: '/admin' } }, find: descriptionRead },
+    payload: {
+      config: { routes: { admin: '/admin' } },
+      find: descriptionRead,
+      findByID: vi.fn(async () => ({ tags: [], manualTags: [] })),
+    },
     initPageResult: { req: { user: { id: 'reader-1' } } },
     routeSegments: ['collections', 'assets', 'asset-1'],
   } as unknown as DocumentViewServerProps
@@ -207,6 +223,63 @@ describe('asset Security overview', () => {
     props.doc!.vulnerabilityCount = null
     expect((await render()).textContent).toContain(
       'has not been evaluated against a usable vulnerability catalog',
+    )
+  })
+
+  it('renders manual tag controls and safely formats the current tag snapshot', async () => {
+    vi.mocked(getAuthorization).mockResolvedValue({ isAdmin: true, writableSiteIDs: [] } as never)
+    const tagOptions = [
+      {
+        id: 'manual-tag',
+        name: 'Safety',
+        color: '#336699',
+        group: { id: 'operations', name: 'Operations' },
+      },
+      {
+        id: 'legacy-tag',
+        name: 'Legacy',
+        color: 'not-a-color',
+        group: { id: 'operations', name: 'Operations' },
+      },
+    ]
+    const find = vi.fn(async (args: { collection: string }) =>
+      args.collection === 'tags'
+        ? { docs: tagOptions }
+        : descriptionRead({ where: { cve: { in: [] } } }),
+    )
+    const findByID = vi.fn(async () => ({
+      tags: [
+        { id: 'display-tag', name: 'Displayed tag', color: '#336699' },
+        { id: 'fallback-name', color: 'invalid' },
+        { id: null, name: 'Missing ID', color: '#336699' },
+      ],
+      manualTags: [{ id: 'manual-tag' }, null],
+    }))
+    props.payload = { ...props.payload, find, findByID } as never
+
+    const view = await render({ tab: 'overview' })
+
+    expect(view.querySelector('[aria-label="Asset tags"]')?.textContent).toContain('Displayed tag')
+    expect(view.querySelector('[aria-label="Asset tags"]')?.textContent).toContain('fallback-name')
+    expect(view.querySelector('[aria-label="Asset tags"]')?.textContent).not.toContain('Missing ID')
+    expect(view.textContent).toContain('Manage manual tags')
+    expect(view.textContent).toContain('Operations')
+    expect(view.textContent).toContain('Legacy')
+    expect(view.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(true)
+    expect(findByID).toHaveBeenCalledWith(
+      expect.objectContaining({
+        collection: 'assets',
+        select: { manualTags: true, tags: true },
+        overrideAccess: false,
+        req: props.initPageResult.req,
+      }),
+    )
+    expect(find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        collection: 'tags',
+        where: { manual: { equals: true } },
+        overrideAccess: false,
+      }),
     )
   })
 })

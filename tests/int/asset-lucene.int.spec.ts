@@ -110,8 +110,9 @@ describe('asset Lucene search', () => {
     expect(parseAssetSearch('status:-*')).toEqual({ status: { exists: false } })
     expect(parseAssetSearch('name:"foo bar"~3')).toEqual({ name: { equals: 'foo bar' } })
     expect(parseAssetSearch('tag:"Outdated Firmware"')).toEqual({
-      tagNames: { like: 'Outdated Firmware' },
+      tagNames: { equals: 'Outdated Firmware' },
     })
+    expect(parseAssetSearch('tag:Firmware')).toEqual({ tagNames: { like: 'Firmware' } })
     expect(() => parseAssetSearch('criticality:HIGH')).toThrow(/unknown field/)
     expect(parseAssetSearch('vendor:a NOT osAccuracy:[80 TO 100]')).toEqual({
       and: [

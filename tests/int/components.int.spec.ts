@@ -26,9 +26,10 @@ const mocks = vi.hoisted(() => ({
     site?: { value: unknown }
     scanner?: { value: unknown }
   },
-  selection: { count: 0, getQueryParams: vi.fn(() => ''), selectAll: 'none' } as {
+  selection: { count: 0, getQueryParams: vi.fn(() => ''), selectAll: 'none', selected: {} } as {
     count: number
     getQueryParams: () => string
+    selected: Record<string, boolean>
     selectAll: string
   },
   setValue: vi.fn(),
@@ -161,6 +162,7 @@ vi.mock('@payloadcms/next/templates', async () => {
 })
 
 import AssetListInteractions from '../../src/components/AssetListInteractions'
+import BulkManualTags from '../../src/components/AssetListInteractions/BulkManualTags'
 import CopyButton from '../../src/components/AssetView/CopyButton'
 import DensityToggle from '../../src/components/AssetView/DensityToggle'
 import CustomAssetFields from '../../src/components/CustomAssetFields'
@@ -205,7 +207,7 @@ beforeEach(() => {
   mocks.formFields = { scanner: { value: 'scanner-1' } }
   mocks.modalOpen = true
   mocks.pathname = '/admin/otters'
-  mocks.selection = { count: 0, getQueryParams: vi.fn(() => ''), selectAll: 'none' }
+  mocks.selection = { count: 0, getQueryParams: vi.fn(() => ''), selectAll: 'none', selected: {} }
   window.localStorage.clear()
   container = document.createElement('div')
   document.body.append(container)
@@ -509,6 +511,7 @@ describe('asset list interactions', () => {
     mocks.selection = {
       count: 1,
       getQueryParams: () => '?where%5Bid%5D%5Bin%5D=abc',
+      selected: { abc: true },
       selectAll: 'some',
     }
     await render(createElement(AssetListInteractions))
@@ -521,7 +524,12 @@ describe('asset list interactions', () => {
     await act(async () => button.click())
     expect(fetch).toHaveBeenCalledWith('/api/assets/export-csv?where%5Bid%5D%5Bin%5D=abc')
 
-    mocks.selection = { count: 5, getQueryParams: vi.fn(() => ''), selectAll: 'allAvailable' }
+    mocks.selection = {
+      count: 5,
+      getQueryParams: vi.fn(() => ''),
+      selected: {},
+      selectAll: 'allAvailable',
+    }
     await render(createElement(AssetListInteractions))
     await act(async () => bar.querySelector<HTMLButtonElement>('.asset-export-csv')!.click())
     expect(fetch).toHaveBeenCalledWith('/api/assets/export-csv?search=vendor%3ASiemens')
@@ -534,6 +542,133 @@ describe('asset list interactions', () => {
     vi.mocked(fetch).mockRejectedValueOnce(new Error('offline'))
     await act(async () => bar.querySelector<HTMLButtonElement>('.asset-export-csv')!.click())
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('try again')
+  })
+})
+
+describe('bulk manual asset tags', () => {
+  it('loads tags, applies a selected add or remove action, and reports the result', async () => {
+    mocks.selection = {
+      count: 2,
+      getQueryParams: vi.fn(() => ''),
+      selected: { assetA: true, assetB: false, assetC: true },
+      selectAll: 'some',
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          docs: [
+            { id: 'critical', name: 'Critical', color: '#B91C1C', group: { name: 'Criticality' } },
+            { id: 'review', name: 'Review', color: '#64748B', group: 'legacy-group' },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ updated: 2 }) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await render(createElement(BulkManualTags))
+    expect(container.textContent).toContain('2 selected assets')
+    expect(container.textContent).toContain('Criticality')
+    expect(container.textContent).not.toContain('legacy-group')
+    const apply = () =>
+      [...container.querySelectorAll('button')].find(
+        (button) => button.textContent === 'Apply tags',
+      )!
+
+    await act(async () => apply().click())
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'Select at least one manual tag.',
+    )
+
+    const tag = container.querySelector<HTMLInputElement>('input[type="checkbox"]')!
+    await act(async () => tag.click())
+    const action = container.querySelector<HTMLSelectElement>('select')!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(
+        action,
+        'remove',
+      )
+      action.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    await act(async () => apply().click())
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/assets/bulk-tags',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'remove',
+          assetIDs: ['assetA', 'assetC'],
+          tagIDs: ['critical'],
+        }),
+      }),
+    )
+    expect(container.querySelector('[role="status"]')?.textContent).toContain(
+      'Updated manual tags on 2 assets.',
+    )
+    expect(mocks.refresh).toHaveBeenCalledOnce()
+  })
+
+  it('handles empty selections, load failures, and disabled select-all operations', async () => {
+    mocks.selection = {
+      count: 0,
+      getQueryParams: vi.fn(() => ''),
+      selected: {},
+      selectAll: 'none',
+    }
+    await render(createElement(BulkManualTags))
+    expect(container.textContent).toBe('')
+
+    mocks.selection = {
+      count: 2,
+      getQueryParams: vi.fn(() => ''),
+      selected: { assetA: true, assetB: true },
+      selectAll: 'some',
+    }
+    const failedFetch = vi.fn().mockRejectedValue('offline')
+    vi.stubGlobal('fetch', failedFetch)
+    await renderFresh(createElement(BulkManualTags))
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'Could not load manual tags.',
+    )
+
+    mocks.modalOpen = false
+    await render(createElement(BulkManualTags))
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'Could not load manual tags.',
+    )
+
+    mocks.selection = {
+      count: 1,
+      getQueryParams: vi.fn(() => ''),
+      selected: {},
+      selectAll: 'allAvailable',
+    }
+    await renderFresh(createElement(BulkManualTags))
+    await act(async () =>
+      [...container.querySelectorAll('button')]
+        .find((entry) => entry.textContent === 'Apply tags')!
+        .click(),
+    )
+    expect(failedFetch).toHaveBeenCalledTimes(1)
+
+    mocks.selection = {
+      count: 201,
+      getQueryParams: vi.fn(() => ''),
+      selected: Object.fromEntries(
+        Array.from({ length: 201 }, (_, index) => [`asset-${index}`, true]),
+      ),
+      selectAll: 'allAvailable',
+    }
+    await renderFresh(createElement(BulkManualTags))
+    const button = [...container.querySelectorAll('button')].find(
+      (entry) => entry.textContent === 'Set manual tags',
+    )!
+    expect(button.disabled).toBe(true)
+    expect(container.textContent).toContain('Select individual assets to assign tags.')
+    expect(container.textContent).toContain('Bulk tag actions support up to 200 assets.')
   })
 })
 

@@ -4,7 +4,7 @@ import { act, createElement, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ setValue: vi.fn(), value: '' as string }))
+const mocks = vi.hoisted(() => ({ setValue: vi.fn(), value: '' as unknown }))
 
 vi.mock('@payloadcms/ui', () => ({
   SelectInput: ({
@@ -18,33 +18,43 @@ vi.mock('@payloadcms/ui', () => ({
   }: {
     label: ReactNode
     name: string
-    onChange: (value: { label: string; value: string }) => void
+    onChange: (
+      value: { label: string; value: string } | { label: string; value: string }[] | null,
+    ) => void
     options: Array<{ label: string; value: string }>
     readOnly?: boolean
     required?: boolean
     value?: string | string[]
   }) => (
-    <label>
-      {label}
-      <select
-        aria-label={String(label)}
-        disabled={readOnly}
-        name={name}
-        onChange={(event) => {
-          const option = options.find(({ value }) => value === event.currentTarget.value)
-          if (option) onChange(option)
-        }}
-        required={required}
-        value={typeof value === 'string' ? value : ''}
-      >
-        <option value="">Select a field</option>
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div>
+      <label>
+        {label}
+        <select
+          aria-label={String(label)}
+          disabled={readOnly}
+          name={name}
+          onChange={(event) => {
+            const option = options.find(({ value }) => value === event.currentTarget.value)
+            if (option) onChange(option)
+          }}
+          required={required}
+          value={typeof value === 'string' ? value : ''}
+        >
+          <option value="">Select a field</option>
+          {options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button onClick={() => onChange([])} type="button">
+        Select no fields
+      </button>
+      <button onClick={() => onChange(null)} type="button">
+        Clear field
+      </button>
+    </div>
   ),
   useConfig: () => ({ config: { routes: { api: '/api' } } }),
   useField: () => ({ setValue: mocks.setValue, showError: false, value: mocks.value }),
@@ -157,5 +167,64 @@ describe('automatic tag rule field selector', () => {
     expect(container.querySelector('[role="alert"]')?.textContent).toContain(
       'Other field choices remain available.',
     )
+  })
+
+  it('clears non-string values and empty selections when custom fields cannot load', async () => {
+    mocks.value = 42
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: false })),
+    )
+    await render('field')
+
+    expect(container.querySelector<HTMLSelectElement>('select')?.value).toBe('')
+    expect(container.querySelector('[role="alert"]')).not.toBeNull()
+    await act(async () => {
+      container.querySelectorAll('button')[0]?.click()
+      container.querySelectorAll('button')[1]?.click()
+    })
+    expect(mocks.setValue.mock.calls).toEqual([[''], ['']])
+  })
+
+  it('ignores aborted requests and reports other DOM exceptions', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new DOMException('Aborted', 'NetworkError')
+      }),
+    )
+    await render('field')
+    expect(container.querySelector('[role="alert"]')).not.toBeNull()
+
+    await act(async () => root.unmount())
+    root = createRoot(container)
+    let signal: AbortSignal | undefined
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            signal = init.signal!
+            signal.addEventListener('abort', () =>
+              reject(new DOMException('Aborted', 'AbortError')),
+            )
+          }),
+      ),
+    )
+    await act(async () =>
+      root.render(
+        createElement(TagRuleField, {
+          field: { label: 'Field', name: 'field' },
+          path: 'rules.0.conditions.0.field',
+        } as never),
+      ),
+    )
+    await act(async () => {
+      root.unmount()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(signal?.aborted).toBe(true)
+    root = createRoot(container)
   })
 })

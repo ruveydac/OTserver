@@ -149,14 +149,20 @@ describe('worker runtime boundaries', () => {
 
   it('drains reapply jobs on a separate maintenance loop', async () => {
     const controller = new AbortController()
-    type RunArgs = { queue?: string; where?: { taskSlug?: Record<string, string | undefined> } }
+    type RunArgs = {
+      queue?: string
+      where?: {
+        taskSlug?: { equals?: string; in?: string[]; not_equals?: string }
+        and?: Array<{ taskSlug?: { not_equals?: string } }>
+      }
+    }
     const drainRuns: RunArgs[] = []
     const mainRuns: RunArgs[] = []
     const payload = {
       jobs: {
         queue: vi.fn(async () => undefined),
         run: vi.fn(async (args: RunArgs) => {
-          if (args.where?.taskSlug?.equals === 'reapply-asset-classes-v1') drainRuns.push(args)
+          if (args.where?.taskSlug?.in) drainRuns.push(args)
           else mainRuns.push(args)
           if (drainRuns.length && mainRuns.length) controller.abort()
           return { remainingJobsFromQueried: 0 }
@@ -169,13 +175,18 @@ describe('worker runtime boundaries', () => {
     mocks.acquireWorker.mockResolvedValueOnce({ ...fence, queue: 'maintenance' })
     await runWorker(payload as never, 'maintenance', controller.signal)
     expect(
-      mainRuns.every((args) => args.where?.taskSlug?.not_equals === 'reapply-asset-classes-v1'),
+      mainRuns.every((args) =>
+        ['reapply-asset-classes-v1', 'reapply-asset-tags-v1'].every((task) =>
+          args.where?.and?.some(({ taskSlug }) => taskSlug?.not_equals === task),
+        ),
+      ),
     ).toBe(true)
     expect(
       drainRuns.every(
         (args) =>
           args.queue === 'maintenance' &&
-          args.where?.taskSlug?.equals === 'reapply-asset-classes-v1',
+          args.where?.taskSlug?.in?.includes('reapply-asset-classes-v1') &&
+          args.where?.taskSlug?.in?.includes('reapply-asset-tags-v1'),
       ),
     ).toBe(true)
   })
