@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({
   executeImport: vi.fn(),
   maintenance: vi.fn(),
   metadataSync: vi.fn(),
+  scheduledFeedSync: vi.fn(),
+  reapplyTags: vi.fn(),
   reapplyAssetClasses: vi.fn(),
   feeds: vi.fn(),
   releases: vi.fn(),
@@ -32,6 +34,10 @@ vi.mock('../../src/metadata/sync', () => ({
   METADATA_SYNC_TASK: 'device-metadata-sync-v1',
   executeMetadataSync: mocks.metadataSync,
 }))
+vi.mock('../../src/vulnerabilities/feeds', () => ({
+  executeScheduledVulnerabilityFeedSync: mocks.scheduledFeedSync,
+}))
+vi.mock('../../src/tags/assign', () => ({ reapplyAssetTags: mocks.reapplyTags }))
 
 vi.mock('../../src/integrations/payload/workerContext', () => ({
   currentWorker: () => mocks.worker,
@@ -64,6 +70,8 @@ beforeEach(() => {
   mocks.executeImport.mockResolvedValue(undefined)
   mocks.maintenance.mockResolvedValue(undefined)
   mocks.metadataSync.mockResolvedValue({ updated: true })
+  mocks.scheduledFeedSync.mockResolvedValue(undefined)
+  mocks.reapplyTags.mockResolvedValue({ scanned: 4, updated: 2 })
   mocks.reapplyAssetClasses.mockResolvedValue({ scanned: 4, updated: 2 })
 })
 
@@ -137,6 +145,27 @@ describe('Payload job configuration', () => {
     mocks.feeds.mockRejectedValueOnce(transient)
     await expect(run(args)).rejects.toBe(transient)
     mocks.feeds.mockRejectedValueOnce(Object.assign(new Error('Invalid feed'), { status: 400 }))
+    await expect(run(args)).rejects.toBeInstanceOf(JobCancelledError)
+  })
+
+  it('runs automatic feed sync only on the maintenance worker', async () => {
+    const run = jobs.tasks!.find((task) => task.slug === 'vulnerability-feed-auto-sync-v1')!
+      .handler as unknown as Handler
+    const req = request()
+    const args = { input: { version: 1 }, job: { id: 'auto-feed-job' }, req }
+    await expect(run(args)).rejects.toBeInstanceOf(JobCancelledError)
+    mocks.worker = { queue: 'maintenance' }
+    await expect(run({ ...args, input: { version: 2 } })).rejects.toBeInstanceOf(JobCancelledError)
+    expect(await run(args)).toEqual({ output: {} })
+    expect(mocks.scheduledFeedSync).toHaveBeenCalledWith(req.payload)
+
+    mocks.scheduledFeedSync.mockRejectedValueOnce(
+      Object.assign(new Error('Connection reset'), { code: 'ECONNRESET' }),
+    )
+    await expect(run(args)).rejects.toThrow('Connection reset')
+    mocks.scheduledFeedSync.mockRejectedValueOnce(
+      Object.assign(new Error('Invalid settings'), { status: 400 }),
+    )
     await expect(run(args)).rejects.toBeInstanceOf(JobCancelledError)
   })
   it('keeps the raw queue operations private and audits its collection', async () => {
@@ -320,6 +349,33 @@ describe('Payload job configuration', () => {
     ).rejects.toThrow('temporary database or network failure')
     expect(req.payload.logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({ event: 'asset-classes.reapply-failed', jobID: 'j6' }),
+    )
+  })
+
+  it('reapplies asset tags only on the maintenance worker and logs failures safely', async () => {
+    const run = jobs.tasks!.find((task) => task.slug === 'reapply-asset-tags-v1')!
+      .handler as unknown as Handler
+    const req = request()
+    const args = { input: { version: 1 }, job: { id: 'tag-job' }, req }
+    await expect(run(args)).rejects.toBeInstanceOf(JobCancelledError)
+    mocks.worker = { queue: 'maintenance' }
+    await expect(run({ ...args, input: { version: 2 } })).rejects.toBeInstanceOf(JobCancelledError)
+    expect(await run(args)).toEqual({ output: {} })
+    expect(mocks.reapplyTags).toHaveBeenCalledWith(req)
+    expect(req.payload.logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'asset-tags.reapplied', jobID: 'tag-job', scanned: 4 }),
+    )
+
+    mocks.reapplyTags.mockRejectedValueOnce(
+      Object.assign(new Error('Invalid input'), { status: 400 }),
+    )
+    await expect(run(args)).rejects.toBeInstanceOf(JobCancelledError)
+    mocks.reapplyTags.mockRejectedValueOnce(
+      Object.assign(new Error('Database host'), { code: 'ECONNRESET' }),
+    )
+    await expect(run(args)).rejects.toThrow('temporary database or network failure')
+    expect(req.payload.logger.warn).toHaveBeenLastCalledWith(
+      expect.objectContaining({ event: 'asset-tags.reapply-failed', jobID: 'tag-job' }),
     )
   })
 })

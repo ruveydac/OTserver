@@ -564,6 +564,7 @@ describe('bulk manual asset tags', () => {
           ],
         }),
       })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ updated: 1 }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ updated: 2 }) })
     vi.stubGlobal('fetch', fetchMock)
 
@@ -576,6 +577,11 @@ describe('bulk manual asset tags', () => {
         (button) => button.textContent === 'Apply tags',
       )!
 
+    await act(async () =>
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Set manual tags')!
+        .click(),
+    )
     await act(async () => apply().click())
     expect(container.querySelector('[role="alert"]')?.textContent).toContain(
       'Select at least one manual tag.',
@@ -583,6 +589,12 @@ describe('bulk manual asset tags', () => {
 
     const tag = container.querySelector<HTMLInputElement>('input[type="checkbox"]')!
     await act(async () => tag.click())
+    await act(async () => tag.click())
+    await act(async () => tag.click())
+    await act(async () => apply().click())
+    expect(container.querySelector('[role="status"]')?.textContent).toContain(
+      'Updated manual tags on 1 asset.',
+    )
     const action = container.querySelector<HTMLSelectElement>('select')!
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(
@@ -594,7 +606,7 @@ describe('bulk manual asset tags', () => {
     await act(async () => apply().click())
 
     expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+      3,
       '/api/assets/bulk-tags',
       expect.objectContaining({
         method: 'POST',
@@ -608,7 +620,44 @@ describe('bulk manual asset tags', () => {
     expect(container.querySelector('[role="status"]')?.textContent).toContain(
       'Updated manual tags on 2 assets.',
     )
-    expect(mocks.refresh).toHaveBeenCalledOnce()
+    expect(mocks.refresh).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows API and network failures when saving manual tags', async () => {
+    mocks.selection = {
+      count: 1,
+      getQueryParams: vi.fn(() => ''),
+      selected: { assetA: true },
+      selectAll: 'some',
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ docs: [{ id: 'critical', name: 'Critical', color: '#B91C1C' }] }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ errors: [{ message: 'Write denied' }] }),
+      })
+      .mockRejectedValueOnce('offline')
+    vi.stubGlobal('fetch', fetchMock)
+
+    await render(createElement(BulkManualTags))
+    await act(async () =>
+      container.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click(),
+    )
+    const apply = () =>
+      [...container.querySelectorAll('button')].find(
+        (button) => button.textContent === 'Apply tags',
+      )!
+
+    await act(async () => apply().click())
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Write denied')
+    await act(async () => apply().click())
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'Could not update tags.',
+    )
   })
 
   it('handles empty selections, load failures, and disabled select-all operations', async () => {
