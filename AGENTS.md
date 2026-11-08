@@ -79,6 +79,9 @@ Main locations:
   shared database revision for matching, references, startup, and workers. Without an import,
   recognition returns unmatched with revision `unloaded`; administrator regex rules still
   work. Never reset imported data on restart or code upgrades.
+  Administrators can opt into daily OTserver Metadata updates in Settings > Application settings;
+  updates are pinned to a Git commit, validated like manual imports, and never delete records
+  missing from the upstream repository.
   `src/metadata/catalog.ts` is the shared manufacturer-scoped recognizer. Missing qualifiers
   do not match; never treat asset names as product names, combine firmware/software version
   contexts, or derive matching input from prior catalog output. Preserve all matching products
@@ -95,6 +98,16 @@ Main locations:
   fenced maintenance reclassification job. The maintenance worker runs reapply jobs on a dedicated
   concurrent drain so an import's reclassification completes in seconds instead of waiting behind
   the weekly maintenance job's multi-minute vulnerability sync.
+- Tags are independent of asset classes and allow multiple tags per asset. `manualTags` are human
+  assignments; `automaticTags` are rule-derived. Refreshes must preserve manual assignments, tag
+  groups only organize tag definitions, and all tag writes remain site-scoped and audited. Tag rules
+  can inspect asset/custom fields, current connected catalog evidence, and confirmed vulnerability
+  review snapshots, never unconfirmed matches. Version comparisons fail closed unless both values
+  are numeric dotted versions and the connected firmware target is unambiguous. `Long offline` uses
+  `lastSeen` older than 60 days, not record edits, and periodic maintenance reevaluates it. The
+  `20261108_120000_asset_tags` migration transfers existing criticality into manual tags and removes
+  the old field; back up and run `pnpm migrate` before serving an upgraded database. Restoring a
+  backup is required to recover the old field.
 - `assets.metadataMatch` is server-owned, site-scoped derived evidence containing the catalog
   revision, matched manufacturer UUIDs, device UUIDs with their manufacturer/group UUID references,
   status, and matched conditions. Recompute it on asset writes and reclassification, even for
@@ -183,6 +196,9 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
 - Otter enrollment and polling inventory reports include the computer name and at most 32 adapters,
   each with technical/friendly names, description, MAC, and at most 16 IPv4/IPv6 addresses. Validate
   reports and keep them bound to the exact scanner; never include credentials in adapter inventory.
+- Otter enrollment and polling reports include the client-reported OS version. Update assignments
+  select a signed release by version tag and resolve its executable target from each scanner's
+  reported build target.
 - Manage enrollment from the Otter Scanners collection popup. All scan options and human import
   overrides belong to Otter Configurations (`otter-profiles`); manual runs select a configuration
   explicitly and schedules reference one. Snapshot scan options, encrypted credentials, and import
@@ -309,6 +325,13 @@ refresh. Work continues in the maintenance queue after the browser closes. For i
 set `OTSERVER_VULNERABILITY_FEEDS=off` in the application and any external maintenance worker;
 **Upload downloaded feeds** remains available without network access.
 
+Automatic vulnerability feed updates are enabled by default and run every seven days. Administrators
+can disable them or change the interval from 1 to 365 days under **Settings > Application settings**.
+The same page accepts additional public HTTPS CSAF aggregator, provider metadata, and JSON ROLIE
+feeds. Online and offline CSAF snapshots include those sources alongside the built-in feeds. Manual
+updates remain available when automatic updates are disabled; `OTSERVER_VULNERABILITY_FEEDS=off`
+disables all online feed downloads regardless of the saved setting.
+
 Offline transfer workflow:
 
 1. Open **Upload downloaded feeds**, choose a source, and save its download instructions.
@@ -323,8 +346,8 @@ Required files:
 - CISA KEV: `known_exploited_vulnerabilities.json`.
 - NVD: each selected `nvdcve-2.0-YYYY.json.gz` (or `.json`) with its matching `.meta` file.
 - ICS Advisory Project: `CISA_ICS_ADV_Master.csv`.
-- CSAF: the CERT@VDE aggregator, every referenced provider metadata/index/advisory file, and both
-  CISA OT/IT indexes with their referenced advisories.
+- CSAF: the CERT@VDE aggregator, every referenced provider metadata/index/advisory file, both
+  CISA OT/IT indexes with their referenced advisories, and all configured custom CSAF sources.
 
 NVD years can be imported in batches; unselected years and other sources remain intact. Coverage
 stays partial until all annual years from 2002 onward have been loaded. For CSAF, check the initial
@@ -535,6 +558,8 @@ origin policy separate from this home-network development exception.
 
 ## Change Discipline
 
+- Use the antislop skill in during mode for every task. Do not ask the user to choose a mode; apply
+  the core filter and any relevant specialized skill.
 - Preserve existing user work in a dirty tree and avoid unrelated cleanup.
 - Prefer existing helpers and standard-library behavior over new abstractions or dependencies.
 - Fix invariants at their shared boundary rather than patching individual callers.
@@ -545,5 +570,7 @@ origin policy separate from this home-network development exception.
 - Admin copy uses sentence case and “Otter configuration” (the API retains `otter-profiles`).
   Passive catalog results are “Potential vulnerability matches”; use “Create” for documents,
   “Enroll” for scanners, and “Select” for choices. Reuse Payload controls and theme tokens.
+- Admin UI uses native Payload components and supported extension points. Do not recreate Payload
+  controls or add standalone controls where a Payload list, field, or action slot fits.
 - Do not weaken validation, access control, auditing, or Otter safety to make a test pass.
 - Update this file only for durable guidance, not temporary status or implementation notes.

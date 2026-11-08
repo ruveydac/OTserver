@@ -11,7 +11,8 @@ import { inTransaction } from '../integrations/payload/transactions'
 import { principalRequest } from '../integrations/payload/requests'
 import { inspectOffline, offlineFiles, validateOfflineContents } from './offline'
 import { lockFeedOperations, syncVulnerabilityFeeds } from './feeds'
-import { feedSources, type FeedSource } from './sources'
+import { feedSources, normalizeCustomCsafFeeds, type FeedSource } from './sources'
+import { readVulnerabilityFeedSettings } from '../application/settings'
 
 const requireAdmin = async (req: PayloadRequest) => {
   if (!(await getAuthorization(req)).isAdmin)
@@ -38,6 +39,7 @@ const batchFromRequest = async (req: PayloadRequest) => {
 
 export const feedControl: PayloadHandler = async (req) => {
   await requireAdmin(req)
+  const settings = await readVulnerabilityFeedSettings(req.payload, req)
   const feeds = await req.payload.find({
     collection: 'vulnerability-feeds',
     depth: 0,
@@ -57,6 +59,9 @@ export const feedControl: PayloadHandler = async (req) => {
   return Response.json(
     {
       onlineEnabled: process.env.OTSERVER_VULNERABILITY_FEEDS !== 'off',
+      automaticUpdates: settings.automaticUpdates,
+      pullIntervalDays: settings.pullIntervalDays,
+      customCsafFeeds: settings.customCsafFeeds,
       feeds: feeds.docs,
       jobs: jobs.docs.map((job) => ({
         id: job.id,
@@ -138,6 +143,7 @@ const queueFeedUpdate = async (
                 batchID: offline.selection.batchID,
                 source,
                 uploadIDs: offline.uploadIDs,
+                customCsafFeeds: offline.customCsafFeeds,
                 ...(skipMissing ? { skipMissing: true } : {}),
               }
             : {}),
@@ -228,6 +234,7 @@ export type FeedJobInput = {
   method: 'online' | 'offline'
   submittedBy: string
   source?: FeedSource | null
+  customCsafFeeds?: unknown
   batchID?: string | null
   uploadIDs?: unknown
   skipMissing?: boolean | null
@@ -257,18 +264,25 @@ export const executeFeedUpdate = async (payload: Payload, input: FeedJobInput) =
       !input.uploadIDs.every((id) => typeof id === 'string')
     )
       throw new APIError('Invalid offline feed job inputs.', 400)
-    const offline = await inspectOffline(req, input.batchID, input.uploadIDs)
-    if (offline.selection.source !== input.source)
+    const customCsafFeeds = normalizeCustomCsafFeeds(input.customCsafFeeds)
+    const offlineWithSnapshot = await inspectOffline(
+      req,
+      input.batchID,
+      input.uploadIDs as string[],
+      customCsafFeeds,
+    )
+    if (offlineWithSnapshot.selection.source !== input.source)
       throw new APIError('The offline source changed.', 400)
-    await validateOfflineContents(offline, { skipMissing: input.skipMissing === true })
+    await validateOfflineContents(offlineWithSnapshot, { skipMissing: input.skipMissing === true })
     return await syncVulnerabilityFeeds(payload, {
       force: true,
       failOnSourceError: true,
       req,
       method: 'offline',
-      source: offline.selection.source,
-      nvdYears: offline.selection.years,
-      download: offline.download,
+      source: offlineWithSnapshot.selection.source,
+      nvdYears: offlineWithSnapshot.selection.years,
+      download: offlineWithSnapshot.download,
+      customCsafFeeds,
     })
   } catch (error) {
     const details = error instanceof Error ? error.message : 'Feed update failed.'

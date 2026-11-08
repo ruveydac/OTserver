@@ -7,6 +7,8 @@ import { ensureAdminRole } from '../../src/collections/UserRoles'
 import {
   configuredControllerURL,
   queuedImportsEnabled,
+  readApplicationSettings,
+  readVulnerabilityFeedSettings,
   validateControllerURL,
 } from '../../src/application/settings'
 
@@ -40,6 +42,27 @@ describe('administrator application settings', () => {
 
     settings = { queuedImports: 'deployment' }
     await expect(queuedImportsEnabled(payload as never)).resolves.toBe(true)
+    await expect(readVulnerabilityFeedSettings(payload as never)).resolves.toEqual({
+      automaticUpdates: true,
+      pullIntervalDays: 7,
+      customCsafFeeds: [],
+    })
+    settings = {
+      vulnerabilityFeeds: {
+        automaticUpdates: false,
+        pullIntervalDays: 14,
+        customCsafFeeds: [
+          { name: 'Vendor', type: 'rolie', url: 'https://feeds.vendor.org/csaf/feed.json' },
+        ],
+      },
+    }
+    await expect(readVulnerabilityFeedSettings(payload as never)).resolves.toMatchObject({
+      automaticUpdates: false,
+      pullIntervalDays: 14,
+      customCsafFeeds: [{ name: 'Vendor', type: 'rolie' }],
+    })
+    settings = { vulnerabilityFeeds: { pullIntervalDays: 0 } }
+    await expect(readVulnerabilityFeedSettings(payload as never)).rejects.toThrow('interval')
     process.env.OTSERVER_QUEUED_IMPORTS = 'off'
     await expect(queuedImportsEnabled(payload as never)).resolves.toBe(false)
   })
@@ -119,6 +142,38 @@ describe('administrator application settings', () => {
     )
   })
 
+  it('exposes daily metadata updates as an opt-in checkbox beside the other application options', () => {
+    expect(ApplicationSettings.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'vulnerabilityFeeds',
+          type: 'group',
+          fields: expect.arrayContaining([
+            expect.objectContaining({
+              name: 'automaticUpdates',
+              type: 'checkbox',
+              defaultValue: true,
+            }),
+            expect.objectContaining({
+              name: 'pullIntervalDays',
+              type: 'number',
+              defaultValue: 7,
+              min: 1,
+              max: 365,
+            }),
+            expect.objectContaining({ name: 'customCsafFeeds', type: 'array' }),
+          ]),
+        }),
+        expect.objectContaining({
+          name: 'metadataImports',
+          label: 'Enable daily device metadata updates',
+          type: 'checkbox',
+          defaultValue: false,
+        }),
+      ]),
+    )
+  })
+
   it('persists settings for administrators only and audits the change', async () => {
     const payload = await getPayload({ config })
     const adminRole = await ensureAdminRole(payload)
@@ -153,6 +208,12 @@ describe('administrator application settings', () => {
     type SettingsDocument = {
       controllerURL?: string | null
       queuedImports?: 'deployment' | 'enabled' | 'disabled' | null
+      metadataImports?: boolean | null
+      vulnerabilityFeeds?: {
+        automaticUpdates?: boolean
+        pullIntervalDays?: number
+        customCsafFeeds?: { name: string; type: string; url: string }[]
+      }
     }
     const settingsAPI = payload as unknown as {
       findGlobal: (args: {
@@ -194,13 +255,40 @@ describe('administrator application settings', () => {
 
       const updated = await settingsAPI.updateGlobal({
         slug: 'application-settings',
-        data: { controllerURL: ' https://saved.example ', queuedImports: 'disabled' },
+        data: {
+          controllerURL: ' https://saved.example ',
+          queuedImports: 'disabled',
+          metadataImports: true,
+          vulnerabilityFeeds: {
+            automaticUpdates: false,
+            pullIntervalDays: 14,
+            customCsafFeeds: [
+              { name: 'Vendor', type: 'rolie', url: ' https://feeds.vendor.org/csaf/feed.json ' },
+            ],
+          },
+        },
         overrideAccess: false,
         req: adminReq,
       })
       expect(updated).toMatchObject({
         controllerURL: 'https://saved.example',
         queuedImports: 'disabled',
+        metadataImports: true,
+        vulnerabilityFeeds: {
+          automaticUpdates: false,
+          pullIntervalDays: 14,
+          customCsafFeeds: [
+            { name: 'Vendor', type: 'rolie', url: 'https://feeds.vendor.org/csaf/feed.json' },
+          ],
+        },
+      })
+      await expect(readApplicationSettings(payload, adminReq)).resolves.toMatchObject({
+        metadataImports: true,
+      })
+      await expect(readVulnerabilityFeedSettings(payload, adminReq)).resolves.toMatchObject({
+        automaticUpdates: false,
+        pullIntervalDays: 14,
+        customCsafFeeds: [{ url: 'https://feeds.vendor.org/csaf/feed.json' }],
       })
       process.env.OTSERVER_PUBLIC_URL = 'https://environment.example'
       process.env.OTSERVER_QUEUED_IMPORTS = 'on'
@@ -232,6 +320,12 @@ describe('administrator application settings', () => {
         data: {
           controllerURL: previous.controllerURL || '',
           queuedImports: previous.queuedImports || 'deployment',
+          metadataImports: previous.metadataImports ?? false,
+          vulnerabilityFeeds: previous.vulnerabilityFeeds ?? {
+            automaticUpdates: true,
+            pullIntervalDays: 7,
+            customCsafFeeds: [],
+          },
         },
         overrideAccess: true,
         req: adminReq,

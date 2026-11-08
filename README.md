@@ -30,6 +30,7 @@ change over time. Add assets manually or import discovery results from
 ## What you can do
 
 - Maintain an inventory of device manufacturers, models, firmware, protocols, ownership, and custom fields.
+- Create manual or rule-matched tags, group them for administration, and filter assets by tag.
 - Organize assets into sites using a hierarchy that fits your organization.
 - Give teams read-only or read/write access to the sites they manage.
 - Combine discovery results while preserving manual edits and the source of each value.
@@ -109,8 +110,9 @@ For a pinned deployment, replace `latest` with an exact release tag (`X.Y.Z`).
 | OTserver and workers | MongoDB | TCP 27017 on a private network only | Application data and jobs |
 | Otter scanners | HTTPS `OTSERVER_PUBLIC_URL` (`/api/otter/v1/*`, including `/api/otter/v1/updates/{id}/binary`, and `/api/asset-imports*`) | Outbound TCP 443; no inbound scanner rule | Enrollment, scans, uploads, and managed updates |
 | OTserver and maintenance worker | CISA KEV: `https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json`<br>NVD: `https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-YYYY.json.gz` and `https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-YYYY.meta` | DNS UDP/TCP 53 and outbound TCP 443, when online sync is enabled | CISA KEV and NVD catalogs |
-| OTserver and maintenance worker | CERT@VDE: `https://aggregator.certvde.com/.well-known/csaf-aggregator/aggregator.json`<br>CISA CSAF OT/IT indexes: `https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/cisa-csaf-ot-feed-tlp-white.json` and `https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/IT/white/cisa-csaf-it-feed-tlp-white.json`<br>ICS Advisory: `https://raw.githubusercontent.com/icsadvprj/ICS-Advisory-Project/main/ICS-CERT_ADV/CISA_ICS_ADV_Master.csv`<br>Also allow provider metadata, feed, and advisory URLs referenced by the CERT@VDE aggregator and CSAF indexes; hosts can vary. | DNS UDP/TCP 53 and outbound TCP 443, when online sync is enabled | CSAF and ICS Advisory catalogs |
+| OTserver and maintenance worker | CERT@VDE: `https://aggregator.certvde.com/.well-known/csaf-aggregator/aggregator.json`<br>CISA CSAF OT/IT indexes: `https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/cisa-csaf-ot-feed-tlp-white.json` and `https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/IT/white/cisa-csaf-it-feed-tlp-white.json`<br>ICS Advisory: `https://raw.githubusercontent.com/icsadvprj/ICS-Advisory-Project/main/ICS-CERT_ADV/CISA_ICS_ADV_Master.csv`<br>Also allow provider metadata, feed, and advisory URLs referenced by the CERT@VDE aggregator, CSAF indexes, and administrator-configured custom CSAF sources; hosts can vary. | DNS UDP/TCP 53 and outbound TCP 443, when online sync is enabled | CSAF and ICS Advisory catalogs |
 | OTserver and maintenance worker; admin browser for manual downloads | `https://api.github.com/repos/ruveydac/otserver-otter/releases/latest`; `https://github.com/ruveydac/otserver-otter/releases`; downloads may redirect to `release-assets.githubusercontent.com` or `objects.githubusercontent.com` | DNS UDP/TCP 53 and outbound TCP 443, when release imports or manual downloads are used | Otter release imports and manual downloads |
+| OTserver and maintenance worker | `https://api.github.com/repos/ruveydac/OTserver-metadata` and `https://raw.githubusercontent.com/ruveydac/OTserver-metadata` | DNS UDP/TCP 53 and outbound TCP 443, when daily metadata updates are enabled | Manufacturer and device metadata updates |
 
 Otter also needs access from the scanner to approved target networks for the configured discovery
 protocols. Ports depend on enabled probes; ARP, PROFINET DCP, and LLDP require the same Layer-2

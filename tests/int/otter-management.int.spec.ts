@@ -110,6 +110,7 @@ describe('Otter management controller', () => {
     let updateID: string | undefined
     let foreignUpdateID: string | undefined
     let releaseID: string | undefined
+    let alternateReleaseID: string | undefined
     let releaseFilename: string | undefined
     let fallbackFailureRunID: string | undefined
     let scheduleID: string | undefined
@@ -378,6 +379,7 @@ describe('Otter management controller', () => {
             body: {
               token: created.enrollmentToken,
               version: '0.9.0',
+              osVersion: 'Debian GNU/Linux 12 (bookworm)',
               capabilities: ['scan-v2', 'controller-v1'],
               interfaces: ['eth0'],
               computerName: 'otter-host-1',
@@ -410,6 +412,7 @@ describe('Otter management controller', () => {
         await payload.findByID({ collection: 'otter-scanners', id: scannerID!, depth: 0 }),
       ).toMatchObject({
         computerName: 'otter-host-1',
+        osVersion: 'Debian GNU/Linux 12 (bookworm)',
         version: '0.9.0',
         interfaces: ['eth0'],
         networkAdapters: [
@@ -427,6 +430,7 @@ describe('Otter management controller', () => {
       expect(await scannerDetails.json()).toMatchObject({
         id: scannerID,
         computerName: 'otter-host-1',
+        osVersion: 'Debian GNU/Linux 12 (bookworm)',
         networkAdapters: [expect.objectContaining({ name: 'eth0' })],
       })
 
@@ -492,6 +496,7 @@ describe('Otter management controller', () => {
           body: {
             binaryDigest: 'b'.repeat(64),
             buildTarget: updateTarget,
+            osVersion: 'Debian GNU/Linux 12.9',
             capabilities: ['scan-v2', 'controller-v1', 'update-v1'],
             interfaces: ['eth0'],
             version: '0.9.0',
@@ -500,6 +505,9 @@ describe('Otter management controller', () => {
           origin: '',
         }),
       )
+      expect(
+        await payload.findByID({ collection: 'otter-scanners', id: scannerID!, depth: 0 }),
+      ).toMatchObject({ osVersion: 'Debian GNU/Linux 12.9' })
       const releasesResponse = await listOtterReleases(
         await request('/otter/v1/updates/releases', {
           method: 'GET',
@@ -512,10 +520,11 @@ describe('Otter management controller', () => {
         ],
       })
       for (const invalidSelection of [
-        { releaseID, scannerIDs: [] },
-        { releaseID, scannerIDs: [scannerID, scannerID] },
-        { releaseID: 1, scannerIDs: [scannerID] },
-        { releaseID, scannerIDs: [null] },
+        { version: nextVersion, scannerIDs: [] },
+        { version: nextVersion, scannerIDs: [scannerID, scannerID] },
+        { version: 1, scannerIDs: [scannerID] },
+        { version: nextVersion, scannerIDs: [null] },
+        { scannerIDs: [scannerID] },
       ])
         await expect(
           queueOtterUpdates(
@@ -528,7 +537,7 @@ describe('Otter management controller', () => {
       await expect(
         queueOtterUpdates(
           await request('/otter/v1/updates', {
-            body: { releaseID, scannerIDs: [foreignScannerID] },
+            body: { version: nextVersion, scannerIDs: [foreignScannerID] },
             token: `JWT ${login.token}`,
           }),
         ),
@@ -543,7 +552,7 @@ describe('Otter management controller', () => {
       await expect(
         queueOtterUpdates(
           await request('/otter/v1/updates', {
-            body: { releaseID, scannerIDs: [scannerID] },
+            body: { version: nextVersion, scannerIDs: [scannerID] },
             token: `JWT ${login.token}`,
           }),
         ),
@@ -557,17 +566,75 @@ describe('Otter management controller', () => {
       })
       const queuedResponse = await queueOtterUpdates(
         await request('/otter/v1/updates', {
-          body: { releaseID, scannerIDs: [scannerID] },
+          body: { version: nextVersion, scannerIDs: [scannerID] },
           token: `JWT ${login.token}`,
         }),
       )
       expect(queuedResponse.status).toBe(202)
       const queued = (await queuedResponse.json()) as { queued: Array<{ id: string }> }
       updateID = queued.queued[0]!.id
+      const alternateTarget = 'aarch64-unknown-linux-gnu'
+      const alternateRelease = await payload.db.collections['otter-releases'].collection.insertOne({
+        binaryDigest: updateDigest,
+        createdAt: new Date(),
+        filename: `${randomUUID()}.otter`,
+        filesize: updateBinary.length,
+        mimeType: 'application/octet-stream',
+        target: alternateTarget,
+        updatedAt: new Date(),
+        version: nextVersion,
+      })
+      alternateReleaseID = String(alternateRelease.insertedId)
+      await payload.delete({
+        collection: 'otter-updates',
+        id: updateID,
+        overrideAccess: true,
+        user,
+      })
+      updateID = undefined
+      await payload.update({
+        collection: 'otter-scanners',
+        context: { otterScannerUpdate: true },
+        data: { buildTarget: alternateTarget, currentUpdate: null },
+        id: scannerID!,
+        overrideAccess: true,
+      })
+      const automaticallyTargeted = await queueOtterUpdates(
+        await request('/otter/v1/updates', {
+          body: { version: nextVersion, scannerIDs: [scannerID] },
+          token: `JWT ${login.token}`,
+        }),
+      )
+      const alternateUpdateID = (
+        (await automaticallyTargeted.json()) as { queued: Array<{ id: string }> }
+      ).queued[0]!.id
+      expect(
+        await payload.findByID({ collection: 'otter-updates', id: alternateUpdateID, depth: 0 }),
+      ).toMatchObject({ target: alternateTarget, targetVersion: nextVersion })
+      await payload.delete({
+        collection: 'otter-updates',
+        id: alternateUpdateID,
+        overrideAccess: true,
+        user,
+      })
+      await payload.update({
+        collection: 'otter-scanners',
+        context: { otterScannerUpdate: true },
+        data: { buildTarget: updateTarget, currentUpdate: null },
+        id: scannerID!,
+        overrideAccess: true,
+      })
+      const queuedAgain = await queueOtterUpdates(
+        await request('/otter/v1/updates', {
+          body: { version: nextVersion, scannerIDs: [scannerID] },
+          token: `JWT ${login.token}`,
+        }),
+      )
+      updateID = ((await queuedAgain.json()) as { queued: Array<{ id: string }> }).queued[0]!.id
       await expect(
         queueOtterUpdates(
           await request('/otter/v1/updates', {
-            body: { releaseID, scannerIDs: [scannerID] },
+            body: { version: nextVersion, scannerIDs: [scannerID] },
             token: `JWT ${login.token}`,
           }),
         ),
@@ -1125,7 +1192,12 @@ describe('Otter management controller', () => {
           }),
         ),
       ).rejects.toMatchObject({ status: 400 })
-      for (const body of [{ buildTarget: 'unsupported' }, { binaryDigest: 'not-a-digest' }])
+      for (const body of [
+        { buildTarget: 'unsupported' },
+        { binaryDigest: 'not-a-digest' },
+        { osVersion: '' },
+        { osVersion: 'x'.repeat(257) },
+      ])
         await expect(
           pollOtter(
             await request('/otter/v1/poll', {
@@ -1918,11 +1990,17 @@ describe('Otter management controller', () => {
         await request('/otter/v1/overview', { method: 'GET', token: `JWT ${login.token}` }),
       )
       const overviewData = (await overview.json()) as {
-        scanners: Array<{ id: string; name: string }>
+        scanners: Array<{ id: string; name: string; osVersion?: string }>
         runs: Array<{ id: string; status: string }>
       }
       expect(overviewData.scanners).toEqual(
-        expect.arrayContaining([expect.objectContaining({ id: scannerID, name: 'Plant Otter' })]),
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: scannerID,
+            name: 'Plant Otter',
+            osVersion: 'Debian GNU/Linux 12.9',
+          }),
+        ]),
       )
       expect(overviewData.runs).toEqual(
         expect.arrayContaining([expect.objectContaining({ id: runID, status: 'completed' })]),
@@ -1950,6 +2028,10 @@ describe('Otter management controller', () => {
       if (releaseID)
         await payload
           .delete({ collection: 'otter-releases', id: releaseID, overrideAccess: true })
+          .catch(() => {})
+      if (alternateReleaseID)
+        await payload
+          .delete({ collection: 'otter-releases', id: alternateReleaseID, overrideAccess: true })
           .catch(() => {})
       if (releaseFilename)
         await rm(

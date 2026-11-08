@@ -113,8 +113,10 @@ makes it available for selection; operators still assign scanner updates explici
 Operators with Otter Config and write access to a scanner's site can queue an update from that
 scanner's document or select individual scanners in the scanner list for a bulk update. Each scanner
 gets a separate audited update record. Bulk requests accept up to 100 scanners. A scanner finishes
-its active scan before it receives the update. The selected release must match its build target and
-be newer than its current version. The scanner must advertise `update-v1`.
+its active scan before it receives the update. Operators choose a signed release version tag; OTserver
+selects that version's executable for each scanner's reported build target. The version must be newer
+than the scanner's current version, and the scanner must advertise `update-v1`. The client also reports
+its host OS version for inventory; executable selection uses the build target, not the OS-version text.
 
 Existing installations running a client without `update-v1` need one manual upgrade first. Stop the
 existing controller, download the signed executable for its platform, verify it with
@@ -307,6 +309,8 @@ Content-Type: application/json
 {
   "token":"<single-use-enrollment-token>",
   "version":"0.9.0",
+  "buildTarget":"x86_64-unknown-linux-gnu",
+  "osVersion":"Debian GNU/Linux 12 (bookworm)",
   "capabilities":["scan-v2","controller-v1"],
   "interfaces":["eth0"],
   "computerName":"otter-host",
@@ -333,6 +337,8 @@ Content-Type: application/json
 
 {
   "version":"0.9.0",
+  "buildTarget":"x86_64-unknown-linux-gnu",
+  "osVersion":"Debian GNU/Linux 12 (bookworm)",
   "capabilities":["scan-v2","controller-v1"],
   "interfaces":["eth0"],
   "computerName":"otter-host",
@@ -439,8 +445,9 @@ GET  /api/otter/v1/updates/:id/binary
 POST /api/otter/v1/updates/:id/status
 ```
 
-The management request body is `{ "releaseID": "...", "scannerIDs": ["..."] }`. Client status
-reports use `verified`, `installing`, `failed`, or `rolled-back`; failure reasons are fixed
+The management request body is `{ "version": "0.9.1", "scannerIDs": ["..."] }`; the controller
+resolves each scanner's signed executable by the requested version and its enrolled build target.
+Client status reports use `verified`, `installing`, `failed`, or `rolled-back`; failure reasons are fixed
 allowlisted values. OTserver records `queued`, `downloading`, `verified`, `installing`, and terminal
 outcomes in the audited **Otter Updates** collection. A matching version, target, and executable
 digest in a later scanner poll completes the assignment.

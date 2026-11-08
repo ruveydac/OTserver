@@ -181,7 +181,6 @@ describe('asset network fields', () => {
           updatedAt: '2026-08-08T09:00:00.000Z',
         },
         createdAt: '2026-08-08T10:00:00.000Z',
-        criticality: 'high',
         customFields: { 'field-enabled': false, 'field-level': 0 },
         description: 'Main line controller',
         firmwareVersion: '2.5',
@@ -356,7 +355,6 @@ describe('asset network fields', () => {
       doc: {
         assetClass: 'class-other',
         createdAt: '2026-08-08T10:00:00.000Z',
-        criticality: 'low',
         customFields: null,
         description: '',
         id: 'asset-2',
@@ -435,7 +433,6 @@ describe('asset network fields', () => {
       doc: {
         assetClass: 'class-1',
         createdAt: '2026-08-08T10:00:00.000Z',
-        criticality: 'high',
         customFields: { active: true, installed: '2026-08-08', invalid: false },
         firmwareVersion: '2.5',
         id: 'asset-3',

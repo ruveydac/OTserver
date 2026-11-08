@@ -20,13 +20,6 @@ export const protocolLabels: Record<string, string> = {
   s7: 'S7',
 }
 
-export const criticalityLabels: Record<string, string> = {
-  critical: 'Critical',
-  high: 'High',
-  low: 'Low',
-  medium: 'Medium',
-}
-
 const dateFormatter = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
 const dateOnlyFormatter = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'UTC' })
 

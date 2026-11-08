@@ -7,12 +7,15 @@ import { safeFailure } from './errors'
 import { systemRequest } from '../integrations/payload/requests'
 import { expireOtterLeases } from '../otter/controller'
 import { scheduleOtterReleaseSync } from '../otter/releaseSync'
+import { scheduleMetadataSync } from '../metadata/sync'
+import { scheduleVulnerabilityFeedSync } from '../vulnerabilities/feeds'
+import { scheduleAssetTagReapply } from '../tags/assign'
 
 const OTTER_LEASE_SWEEP_MS = 15_000
 
 // Reclassifications are quick administrator-triggered refreshes. A separate drain keeps an
 // import's reclassification from waiting behind the long weekly maintenance job.
-const REAPPLY_TASK = 'reapply-asset-classes-v1'
+const REAPPLY_TASKS = ['reapply-asset-classes-v1', 'reapply-asset-tags-v1']
 
 export const recoverQueue = async (payload: Payload, fence: WorkerFence) =>
   withWorkerFence(fence, async () => {
@@ -84,7 +87,7 @@ const drainReapplyJobs = async (
         sequential: true,
         processingOrder: 'createdAt',
         silent: true,
-        where: { taskSlug: { equals: REAPPLY_TASK } },
+        where: { taskSlug: { in: REAPPLY_TASKS } },
       }),
     )
     await delay(1000, undefined, { signal }).catch(() => {})
@@ -98,7 +101,7 @@ export const runWorker = async (payload: Payload, queue: Queue, signal: AbortSig
   let stopped = false
   let heartbeat: Promise<void> = Promise.resolve()
   let timer: ReturnType<typeof setInterval> | undefined
-  let nextReleaseCheck = 0
+  let nextUpdaterCheck = 0
   try {
     await recoverQueue(payload, fence)
     if (queue === 'maintenance') await withWorkerFence(fence, () => expireOtterLeases(payload))
@@ -130,9 +133,12 @@ export const runWorker = async (payload: Payload, queue: Queue, signal: AbortSig
     while (!signal.aborted && !lost) {
       if (queue === 'maintenance') {
         await scheduleMaintenance(payload, fence)
-        if (Date.now() >= nextReleaseCheck) {
+        if (Date.now() >= nextUpdaterCheck) {
+          await withWorkerFence(fence, () => scheduleVulnerabilityFeedSync(payload))
           await withWorkerFence(fence, () => scheduleOtterReleaseSync(payload))
-          nextReleaseCheck = Date.now() + 60_000
+          await withWorkerFence(fence, () => scheduleMetadataSync(payload))
+          await withWorkerFence(fence, () => scheduleAssetTagReapply(payload))
+          nextUpdaterCheck = Date.now() + 60_000
         }
       }
       await withWorkerFence(fence, () =>
@@ -142,7 +148,12 @@ export const runWorker = async (payload: Payload, queue: Queue, signal: AbortSig
           sequential: true,
           processingOrder: 'createdAt',
           silent: true,
-          where: queue === 'maintenance' ? { taskSlug: { not_equals: REAPPLY_TASK } } : undefined,
+          where:
+            queue === 'maintenance'
+              ? {
+                  and: REAPPLY_TASKS.map((taskSlug) => ({ taskSlug: { not_equals: taskSlug } })),
+                }
+              : undefined,
         }),
       )
       await delay(1000, undefined, { signal }).catch(() => {})

@@ -208,7 +208,6 @@ const processImportInContext = async ({
       } else if (!current) {
         const defaultProvenance: FieldProvenance = {
           assetClass: { quality: 'low', source: 'default' },
-          criticality: { quality: 'low', source: 'default' },
           status: { quality: 'low', source: 'default' },
         }
         resolved = await req.payload.create({

@@ -2,6 +2,8 @@ import { default as default_1bd814bbeb1f2e089fcf3d8859fcb6f3 } from '@/component
 import { default as default_e4eda90535596a882064b1deac0ab4f0 } from '@/components/SiteTreeView'
 import { default as default_2e07829097744f37849fa311510e1aee } from '@/components/AssetClassAssetsCell'
 import { default as default_73aa8a55bcc57156906af3c0f8537645 } from '@/components/AssetClassListView'
+import { default as default_6cbba3aadd6ffd96040a5ea451eb0f24 } from '@/components/TagRuleField'
+import { default as default_d3dd3c4197a1a1438c8aee70d70fdd51 } from '@/components/TagListGroupTabs'
 import { default as default_3f76011ea90f707ace06549950e91439 } from '@/components/AssetOwnerField'
 import { default as default_f020c52e6ea8cb54738a31fe010f551d } from '@/components/CustomAssetFields'
 import { default as default_8c78f84184d3f470067b66c225a03900 } from '@/components/AssetListInteractions'
@@ -12,7 +14,7 @@ import { default as default_8712540e86c8ec1b8842171d5455844e } from '@/component
 import { default as default_269ec8e6f70d6b068e7aa5ffa27b8110 } from '@/components/ImportInstructions'
 import { default as default_fc33955082dea31f4b0ec6d0cb077a17 } from '@/components/OtterScannerActions'
 import { default as default_c1520f8119081daafc04e2023c3ef070 } from '@/components/OtterEnrollment'
-import { default as default_88f44dbae57d7f69c3efa115d7e7fcb5 } from '@/components/OtterBulkUpdates'
+import { default as default_57e1d02951085b75686de79503992134 } from '@/components/OtterScannerListView'
 import { default as default_d2eff891bab6ced06a1d8428d5433c5a } from '@/components/OtterReleaseActions'
 import { default as default_1cf71388346ca687235889e34b2c8889 } from '@/components/OtterInterfaceField'
 import { default as default_75fff05379f2361cc5722c257b69b4b9 } from '@/components/OtterManagedSettingsField'
@@ -36,6 +38,8 @@ export const importMap = {
   '@/components/SiteTreeView#default': default_e4eda90535596a882064b1deac0ab4f0,
   '@/components/AssetClassAssetsCell#default': default_2e07829097744f37849fa311510e1aee,
   '@/components/AssetClassListView#default': default_73aa8a55bcc57156906af3c0f8537645,
+  '@/components/TagRuleField#default': default_6cbba3aadd6ffd96040a5ea451eb0f24,
+  '@/components/TagListGroupTabs#default': default_d3dd3c4197a1a1438c8aee70d70fdd51,
   '@/components/AssetOwnerField#default': default_3f76011ea90f707ace06549950e91439,
   '@/components/CustomAssetFields#default': default_f020c52e6ea8cb54738a31fe010f551d,
   '@/components/AssetListInteractions#default': default_8c78f84184d3f470067b66c225a03900,
@@ -46,7 +50,7 @@ export const importMap = {
   '@/components/ImportInstructions#default': default_269ec8e6f70d6b068e7aa5ffa27b8110,
   '@/components/OtterScannerActions#default': default_fc33955082dea31f4b0ec6d0cb077a17,
   '@/components/OtterEnrollment#default': default_c1520f8119081daafc04e2023c3ef070,
-  '@/components/OtterBulkUpdates#default': default_88f44dbae57d7f69c3efa115d7e7fcb5,
+  '@/components/OtterScannerListView#default': default_57e1d02951085b75686de79503992134,
   '@/components/OtterReleaseActions#default': default_d2eff891bab6ced06a1d8428d5433c5a,
   '@/components/OtterInterfaceField#default': default_1cf71388346ca687235889e34b2c8889,
   '@/components/OtterManagedSettingsField#default': default_75fff05379f2361cc5722c257b69b4b9,

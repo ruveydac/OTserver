@@ -6,6 +6,7 @@ import {
   searchTokens,
   text,
 } from './matching'
+import { validateCsafFeedURL } from './sources'
 
 const MAX_AFFECTED = 200
 export const MAX_DESCRIPTION = 4000
@@ -229,14 +230,9 @@ export const parseCisaCatalog = (
 
 const trustedCsafURL = (value: unknown): string | undefined => {
   const candidate = text(value)
-  if (!URL.canParse(candidate)) return undefined
+  if (validateCsafFeedURL(candidate) !== true) return undefined
   const url = new URL(candidate)
-  if (
-    url.protocol === 'https:' &&
-    ['aggregator.certvde.com', 'raw.githubusercontent.com'].includes(url.hostname)
-  )
-    return url.href
-  return undefined
+  return url.href
 }
 
 export const parseCsafAggregator = (input: unknown): string[] => {

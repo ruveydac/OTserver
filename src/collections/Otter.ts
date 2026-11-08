@@ -315,7 +315,9 @@ export const OtterScanners: CollectionConfig = {
   admin: {
     components: {
       beforeList: ['@/components/OtterEnrollment'],
-      beforeListTable: ['@/components/OtterBulkUpdates'],
+      views: {
+        list: { Component: '@/components/OtterScannerListView' },
+      },
     },
     defaultColumns: [
       'name',
@@ -323,6 +325,7 @@ export const OtterScanners: CollectionConfig = {
       'computerName',
       'enabled',
       'version',
+      'osVersion',
       'currentUpdate',
       'lastSeenAt',
     ],
@@ -359,6 +362,13 @@ export const OtterScanners: CollectionConfig = {
     { name: 'enrolledAt', type: 'date', access: serverReadOnly, admin: { readOnly: true } },
     { name: 'lastSeenAt', type: 'date', access: serverReadOnly, admin: { readOnly: true } },
     { name: 'version', type: 'text', access: serverReadOnly, admin: { readOnly: true } },
+    {
+      name: 'osVersion',
+      type: 'text',
+      label: 'OS version',
+      access: serverReadOnly,
+      admin: { readOnly: true },
+    },
     { name: 'buildTarget', type: 'text', access: serverReadOnly, admin: { readOnly: true } },
     { name: 'binaryDigest', type: 'text', access: serverReadOnly, admin: { readOnly: true } },
     { name: 'capabilities', type: 'json', access: serverReadOnly, admin: { readOnly: true } },

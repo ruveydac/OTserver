@@ -6,6 +6,8 @@ import { record } from './matching'
 import { recountAssetVulnerabilities } from './match'
 import { rawCollection } from '../integrations/payload/catalog'
 import { systemRequest } from '../integrations/payload/requests'
+import { inTransaction } from '../integrations/payload/transactions'
+import { readVulnerabilityFeedSettings } from '../application/settings'
 import { MAX_DESCRIPTION } from './parsers'
 import { downloadFeed, feedText, feedUnavailable, type DownloadFeed } from './feedIO'
 import { importNvdFeed } from './nvd'
@@ -19,6 +21,7 @@ import {
   ICS_ADVISORY_URL,
   NVD_FEED_BASE_URL,
   FIRST_NVD_YEAR,
+  type CustomCsafFeed,
   type FeedSource,
 } from './sources'
 import {
@@ -32,8 +35,6 @@ import {
   mergeCsafDocuments,
   parseIcsAdvisories,
 } from './parsers'
-
-export const SYNC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000
 
 const BATCH_SIZE = 500
 export const MAX_CSAF_FEEDS = 500
@@ -188,13 +189,17 @@ const saveFeedState = async (
   })
 }
 
-const lastSynchronizedAt = async (payload: Payload): Promise<Date | undefined> => {
+export const lastSynchronizedAt = async (
+  payload: Payload,
+  req?: PayloadRequest,
+): Promise<Date | undefined> => {
   const result = await payload.find({
     collection: 'vulnerability-feeds',
     depth: 0,
     overrideAccess: true,
     pagination: false,
     select: { lastSyncedAt: true, status: true },
+    ...(req ? { req } : {}),
   })
   const dates = result.docs
     .map((doc) =>
@@ -207,6 +212,7 @@ const lastSynchronizedAt = async (payload: Payload): Promise<Date | undefined> =
 export const loadCsafSnapshot = async (
   download: DownloadFeed,
   previousState: Record<string, unknown>,
+  customFeeds: CustomCsafFeed[] = [],
 ): Promise<{
   documents?: FeedDocument[]
   state: Record<string, string>
@@ -225,8 +231,21 @@ export const loadCsafSnapshot = async (
     }
   }
   const aggregator = parseCsafAggregator(JSON.parse(await feedText(fetchFeed, CSAF_AGGREGATOR_URL)))
+  const providerURLs = new Set(aggregator)
   const feedURLs = new Set<string>(CISA_CSAF_FEED_URLS)
-  for (const metadataURL of aggregator) {
+  for (const custom of customFeeds) {
+    if (custom.type === 'rolie') {
+      feedURLs.add(custom.url)
+      continue
+    }
+    const content = JSON.parse(await feedText(fetchFeed, custom.url))
+    if (custom.type === 'aggregator') {
+      for (const url of parseCsafAggregator(content)) providerURLs.add(url)
+    } else {
+      for (const url of parseCsafProviderMetadata(content)) feedURLs.add(url)
+    }
+  }
+  for (const metadataURL of providerURLs) {
     const feeds = parseCsafProviderMetadata(JSON.parse(await feedText(fetchFeed, metadataURL)))
     for (const url of feeds) feedURLs.add(url)
   }
@@ -284,6 +303,7 @@ const runSync = async (
     source,
     nvdYears,
     method = 'online',
+    customCsafFeeds,
   }: {
     download?: DownloadFeed
     force?: boolean
@@ -292,12 +312,16 @@ const runSync = async (
     source?: FeedSource
     nvdYears?: number[]
     method?: 'online' | 'offline'
+    customCsafFeeds?: CustomCsafFeed[]
   },
 ): Promise<SyncResult> => {
+  const feedSettings = await readVulnerabilityFeedSettings(payload, req)
+  const configuredCustomFeeds = customCsafFeeds ?? feedSettings.customCsafFeeds
   const saveState = (source: string, data: Record<string, unknown>) =>
     saveFeedState(payload, source, data, req)
-  const lastSyncedAt = await lastSynchronizedAt(payload)
-  if (!force && lastSyncedAt && Date.now() - lastSyncedAt.getTime() < SYNC_INTERVAL_MS) {
+  const lastSyncedAt = await lastSynchronizedAt(payload, req)
+  const intervalMs = feedSettings.pullIntervalDays * 24 * 60 * 60 * 1000
+  if (!force && lastSyncedAt && Date.now() - lastSyncedAt.getTime() < intervalMs) {
     return {
       documentCount: (await payload.count({ collection: 'vulnerabilities', overrideAccess: true }))
         .totalDocs,
@@ -348,7 +372,7 @@ const runSync = async (
     try {
       const previousFeed = await feedState(payload, 'csaf')
       const previousState = record(previousFeed?.state)
-      const snapshot = await loadCsafSnapshot(download, previousState)
+      const snapshot = await loadCsafSnapshot(download, previousState, configuredCustomFeeds)
       if (snapshot.unavailable.length)
         payload.logger.warn({
           event: 'csaf.unavailable-documents',
@@ -507,6 +531,7 @@ export const syncVulnerabilityFeeds = async (
     source?: FeedSource
     nvdYears?: number[]
     method?: 'online' | 'offline'
+    customCsafFeeds?: CustomCsafFeed[]
   } = {},
 ): Promise<SyncResult> => {
   if (inFlight) return inFlight
@@ -520,15 +545,67 @@ export const syncVulnerabilityFeeds = async (
   return run
 }
 
+export const scheduleVulnerabilityFeedSync = async (payload: Payload): Promise<void> => {
+  if (process.env.OTSERVER_VULNERABILITY_FEEDS === 'off') return
+  const req = await systemRequest(payload)
+  await inTransaction(req, async () => {
+    const settings = await readVulnerabilityFeedSettings(payload, req)
+    if (!settings.automaticUpdates) return
+    await lockFeedOperations(req)
+    const intervalMs = settings.pullIntervalDays * 24 * 60 * 60 * 1000
+    const lastSynced = await lastSynchronizedAt(payload, req)
+    if (lastSynced && Date.now() - lastSynced.getTime() < intervalMs) return
+    const pending = await payload.find({
+      collection: 'payload-jobs',
+      depth: 0,
+      limit: 1,
+      req,
+      where: {
+        and: [
+          { taskSlug: { in: ['vulnerability-feed-auto-sync-v1', 'vulnerability-feed-sync-v1'] } },
+          { completedAt: { exists: false } },
+        ],
+      },
+    })
+    if (pending.docs[0]) return
+    const recent = await payload.find({
+      collection: 'payload-jobs',
+      depth: 0,
+      limit: 1,
+      sort: '-createdAt',
+      req,
+      where: { taskSlug: { equals: 'vulnerability-feed-auto-sync-v1' } },
+    })
+    if (recent.docs[0] && Date.now() - Date.parse(recent.docs[0].createdAt) < intervalMs) return
+    await payload.jobs.queue({
+      task: 'vulnerability-feed-auto-sync-v1',
+      queue: 'maintenance',
+      input: { version: 1 },
+      req,
+    })
+  })
+}
+
+export const executeScheduledVulnerabilityFeedSync = async (payload: Payload) => {
+  if (process.env.OTSERVER_VULNERABILITY_FEEDS === 'off') return
+  const req = await systemRequest(payload)
+  if (!(await readVulnerabilityFeedSettings(payload, req)).automaticUpdates) return
+  return syncVulnerabilityFeeds(payload, { failOnSourceError: true, req })
+}
+
 export const initializeVulnerabilityFeeds = async (payload: Payload): Promise<void> => {
   // Integration tests drive the sync with fixtures, and air-gapped plants have no egress.
   const mode = process.env['OTSERVER_VULNERABILITY_FEEDS']
   if (mode === 'off' || (process.env.NODE_ENV === 'test' && mode !== 'on')) return
 
   const sync = () =>
-    void syncVulnerabilityFeeds(payload).catch((error) =>
+    void (async () => {
+      if (process.env.OTSERVER_VULNERABILITY_FEEDS === 'off') return
+      if (!(await readVulnerabilityFeedSettings(payload)).automaticUpdates) return
+      await syncVulnerabilityFeeds(payload)
+    })().catch((error) =>
       payload.logger.error(`Vulnerability catalog sync failed: ${message(error)}`),
     )
   sync()
-  setInterval(sync, SYNC_INTERVAL_MS)
+  setInterval(sync, 60_000)
 }

@@ -229,7 +229,6 @@ describe('site-type import restrictions', () => {
         name: 'Manually recorded asset',
         site: parent.id,
         assetClass,
-        criticality: 'low',
         status: 'unknown',
       },
       overrideAccess: false,

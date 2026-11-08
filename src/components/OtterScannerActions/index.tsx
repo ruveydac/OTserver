@@ -14,7 +14,7 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { EnrollmentInstructions, otterAction, type Enrollment } from '../OtterEnrollment'
 
-type Release = { id: string; version: string; target: string }
+type Release = { version: string }
 
 export default function OtterScannerActions() {
   const {
@@ -31,7 +31,7 @@ export default function OtterScannerActions() {
   const [busy, setBusy] = useState(false)
   const [enrollment, setEnrollment] = useState<Enrollment>()
   const [releases, setReleases] = useState<Release[]>([])
-  const [releaseID, setReleaseID] = useState('')
+  const [version, setVersion] = useState('')
   const [loadingReleases, setLoadingReleases] = useState(true)
   const updateModal = 'otter-single-update-confirm'
 
@@ -46,7 +46,7 @@ export default function OtterScannerActions() {
       .then(({ releases: available }) => {
         if (!Array.isArray(available)) throw new Error('Could not load signed Otter releases.')
         setReleases(available)
-        setReleaseID(available[0]?.id || '')
+        setVersion(available[0]?.version || '')
       })
       .catch((reason: unknown) => {
         if (!abort.signal.aborted)
@@ -145,22 +145,22 @@ export default function OtterScannerActions() {
       </Button>
       <div>
         <label>
-          Signed release{' '}
+          Version tag{' '}
           <select
             className="field-type__input"
-            value={releaseID}
+            value={version}
             disabled={loadingReleases || !releases.length}
-            onChange={(event) => setReleaseID(event.target.value)}
+            onChange={(event) => setVersion(event.target.value)}
           >
-            {releases.map((release) => (
-              <option key={release.id} value={release.id}>
-                {release.version} ({release.target})
+            {[...new Set(releases.map(({ version: tag }) => tag))].map((tag) => (
+              <option key={tag} value={tag}>
+                {tag}
               </option>
             ))}
           </select>
         </label>{' '}
         <Button
-          disabled={busy || loadingReleases || !releaseID}
+          disabled={busy || loadingReleases || !version}
           type="button"
           onClick={() => openModal(updateModal)}
         >
@@ -186,10 +186,10 @@ export default function OtterScannerActions() {
       <ConfirmationModal
         modalSlug={updateModal}
         heading="Queue Otter update?"
-        body="The scanner finishes any active scan before downloading and verifying the selected signed release."
+        body={`The scanner finishes any active scan, then downloads and verifies the signed ${version} release for its operating system.`}
         confirmLabel="Queue update"
         cancelLabel="Cancel"
-        onConfirm={() => act(`${api}/otter/v1/updates`, { releaseID, scannerIDs: [id] })}
+        onConfirm={() => act(`${api}/otter/v1/updates`, { version, scannerIDs: [id] })}
       />
       <ConfirmationModal
         modalSlug="otter-revoke-confirm"

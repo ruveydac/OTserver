@@ -10,6 +10,7 @@ import { createLocalReq, getPayload, type Payload, type TypedUser } from 'payloa
 
 import { ensureAssetClass } from '../../src/collections/AssetClasses'
 import { ensureAdminRole } from '../../src/collections/UserRoles'
+import { MAX_CUSTOM_CSAF_FEEDS } from '../../src/vulnerabilities/sources'
 vi.mock('../../src/components/AssetVulnerabilityReviewActions', () => ({ default: () => null }))
 import AssetVulnerabilitiesView from '../../src/components/AssetVulnerabilitiesView'
 import {
@@ -31,7 +32,11 @@ import {
   FIRST_NVD_YEAR,
   ICS_ADVISORY_URL,
   initializeVulnerabilityFeeds,
+  executeScheduledVulnerabilityFeedSync,
   NVD_FEED_BASE_URL,
+  isPublicFeedAddress,
+  validateCsafFeedURL,
+  validateCustomCsafFeeds,
   parseCisaCatalog,
   parseCpe,
   parseCsafAggregator,
@@ -378,6 +383,99 @@ describe('feed parsing', () => {
     expect(() => parseCsafProviderMetadata({ metadata_version: '2.0' })).toThrow('metadata')
     expect(() => parseRolieFeed({ feed: { entry: [], updated: 'invalid' } })).toThrow('ROLIE')
     expect(() => parseCsafDocument({ document: {}, vulnerabilities: [] })).toThrow('version 2.0')
+    expect(
+      parseCsafAggregator({
+        aggregator_version: '2.0',
+        csaf_providers: [{ mirrors: ['https://feeds.vendor.org/csaf/provider.json'] }],
+      }),
+    ).toEqual(['https://feeds.vendor.org/csaf/provider.json'])
+    expect(validateCsafFeedURL('https://feeds.vendor.org/csaf/feed.json')).toBe(true)
+    expect(validateCsafFeedURL('not a URL')).toContain('valid HTTPS URL')
+    expect(validateCustomCsafFeeds(Array(MAX_CUSTOM_CSAF_FEEDS + 1).fill(null))).toContain(
+      'no more than',
+    )
+    expect(validateCustomCsafFeeds([null])).toContain('needs a name')
+    for (const url of [
+      'http://feeds.vendor.org/feed.json',
+      'https://127.0.0.1/feed.json',
+      'https://feeds.vendor.org/feed.json?token=secret',
+      'https://user:pass@feeds.vendor.org/feed.json',
+    ])
+      expect(validateCsafFeedURL(url)).not.toBe(true)
+    expect(
+      validateCustomCsafFeeds([
+        { name: 'Vendor feed', type: 'rolie', url: 'https://feeds.vendor.org/csaf/feed.json' },
+      ]),
+    ).toBe(true)
+    expect(
+      validateCustomCsafFeeds([
+        { name: 'One', type: 'rolie', url: 'https://feeds.vendor.org/csaf/feed.json' },
+        { name: 'Two', type: 'rolie', url: 'https://feeds.vendor.org/csaf/feed.json' },
+      ]),
+    ).toContain('unique')
+    expect(isPublicFeedAddress('8.8.8.8')).toBe(true)
+    expect(isPublicFeedAddress('127.0.0.1')).toBe(false)
+    expect(isPublicFeedAddress('::1')).toBe(false)
+    expect(isPublicFeedAddress('fd00::1')).toBe(false)
+    expect(isPublicFeedAddress('2606:4700:4700::1111')).toBe(true)
+    expect(isPublicFeedAddress('::ffff:8.8.8.8')).toBe(false)
+    expect(isPublicFeedAddress('2001:db8::1')).toBe(false)
+    expect(isPublicFeedAddress('192.0.2.1')).toBe(false)
+    expect(isPublicFeedAddress('224.0.0.1')).toBe(false)
+  })
+
+  it('discovers configured CSAF aggregators, provider metadata, and ROLIE feeds', async () => {
+    const customURL = 'https://feeds.vendor.org/csaf/feed.json'
+    const customAggregatorURL = 'https://feeds.vendor.org/csaf/aggregator.json'
+    const customProviderURL = 'https://feeds.vendor.org/csaf/provider-metadata.json'
+    const customProviderFeedURL = 'https://feeds.vendor.org/csaf/provider-feed.json'
+    const customAdvisoryURL = 'https://feeds.vendor.org/csaf/2026/vendor-2026-001.json'
+    const customRolie = JSON.parse(JSON.stringify(await csafRolie())) as {
+      feed: { updated: string; entry: { updated: string; content: { src: string } }[] }
+    }
+    customRolie.feed.updated = '2026-09-12T06:30:00Z'
+    customRolie.feed.entry[0].content.src = customAdvisoryURL
+    const customAggregator = JSON.parse(JSON.stringify(await csafAggregator())) as {
+      csaf_providers: { mirrors: string[] }[]
+    }
+    customAggregator.csaf_providers[0].mirrors = [customProviderURL]
+    const customProvider = JSON.parse(JSON.stringify(await csafProviderMetadata())) as {
+      distributions: { rolie: { feeds: { url: string }[] } }[]
+    }
+    customProvider.distributions[0].rolie.feeds[0].url = customProviderFeedURL
+    const customFeeds = [
+      { name: 'Vendor aggregator', type: 'aggregator' as const, url: customAggregatorURL },
+      { name: 'Vendor provider', type: 'provider-metadata' as const, url: customProviderURL },
+      { name: 'Vendor ROLIE', type: 'rolie' as const, url: customURL },
+    ]
+    const requested: string[] = []
+    const snapshot = await loadCsafSnapshot(
+      async (url) => {
+        requested.push(url)
+        if (url === CSAF_AGGREGATOR_URL) return Buffer.from(JSON.stringify(await csafAggregator()))
+        if (url === customAggregatorURL) return Buffer.from(JSON.stringify(customAggregator))
+        if (url === customProviderURL) return Buffer.from(JSON.stringify(customProvider))
+        if (url.endsWith('/provider-metadata.json'))
+          return Buffer.from(JSON.stringify(await csafProviderMetadata()))
+        if (
+          url === customURL ||
+          url === customProviderFeedURL ||
+          url.endsWith('/feed.json') ||
+          CISA_CSAF_FEED_URLS.includes(url as never)
+        )
+          return Buffer.from(JSON.stringify(url === customURL ? customRolie : await csafRolie()))
+        if (url.endsWith('.json')) return Buffer.from(JSON.stringify(await csafDocument()))
+        throw new Error(`Unexpected feed URL: ${url}`)
+      },
+      {},
+      customFeeds,
+    )
+    expect(requested).toContain(customURL)
+    expect(requested).toContain(customAggregatorURL)
+    expect(requested).toContain(customProviderFeedURL)
+    expect(requested).toContain(customAdvisoryURL)
+    expect(snapshot.state[customURL]).toBe('2026-09-12T06:30:00Z')
+    expect(snapshot.documents).toHaveLength(1)
   })
 
   it('skips CSAF documents the publisher lists but does not serve', async () => {
@@ -1028,49 +1126,47 @@ describe('downloadFeed', () => {
   it('redacts failed requests and logs errors while consuming response streams', async () => {
     const warn = vi.fn()
     const logger = { warn } as unknown as Payload['logger']
+    const server = createServer((request, response) => {
+      if (request.url === '/empty') {
+        response.writeHead(204).end()
+        return
+      }
+      if (request.url === '/stream') {
+        response.writeHead(200, { 'content-length': '100' }).end('partial')
+        return
+      }
+      response.writeHead(404).end()
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`
     try {
-      const failure = Object.assign(
-        new Error('Could not reach https://user:pass@example.test/feed?token=private'),
-        { cause: { code: 'ECONNRESET' } },
-      )
-      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(failure))
-      await expect(downloadFeed('not a URL?token=secret', undefined, logger)).rejects.toBe(failure)
+      await expect(
+        downloadFeed('https://user:pass@example.com/feed?token=private', undefined, logger),
+      ).rejects.toThrow('public HTTPS')
       expect(warn).toHaveBeenCalledWith(
         expect.objectContaining({
           event: 'vulnerability-feed.request-failed',
-          url: '[invalid URL]',
-          code: 'ECONNRESET',
-          error: 'Could not reach https://example.test/feed',
+          url: 'https://example.com/feed',
         }),
       )
-      expect(JSON.stringify(warn.mock.calls)).not.toContain('secret')
       expect(JSON.stringify(warn.mock.calls)).not.toContain('private')
 
-      vi.stubGlobal('fetch', vi.fn().mockRejectedValue('offline'))
-      await expect(downloadFeed('not a URL')).rejects.toBe('offline')
-
-      const empty = new Response(null, { status: 204 })
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(empty))
-      await expect(
-        downloadFeed('https://feed.example.test/empty', undefined, logger),
-      ).rejects.toThrow('responded with 204')
-
-      const broken = new Response(
-        new ReadableStream({ start: (controller) => controller.error(new Error('stream broke')) }),
+      await expect(downloadFeed(`${base}/empty`, undefined, logger)).rejects.toThrow(
+        'responded with 204',
       )
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(broken))
+
       await expect(
-        readFeed(await downloadFeed('https://feed.example.test/stream', undefined, logger)),
-      ).rejects.toThrow('stream broke')
+        readFeed(await downloadFeed(`${base}/stream`, undefined, logger)),
+      ).rejects.toThrow()
       expect(warn).toHaveBeenLastCalledWith(
         expect.objectContaining({
           event: 'vulnerability-feed.request-failed',
-          url: 'https://feed.example.test/stream',
+          url: `${base}/stream`,
           status: 200,
         }),
       )
     } finally {
-      vi.unstubAllGlobals()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
     }
   })
 })
@@ -2053,38 +2149,30 @@ describe('vulnerability catalog', () => {
     expect(unauthenticated).not.toContain('CVE-2099-0002')
   })
 
-  it('synchronizes through the real downloader when not in test mode', async () => {
+  it('synchronizes fixture feeds and honors the deployment network opt-out', async () => {
     const nvdJson = Buffer.from(JSON.stringify(await nvdFeed()))
     const gzip = gzipSync(nvdJson)
     // Mirrors NVD's real contract: the published digest covers the uncompressed feed.
     const sha256 = createHash('sha256').update(nvdJson).digest('hex')
-    const fetchMock = vi.fn(async (url: string) => {
-      if (url === CISA_KEV_URL) return new Response(JSON.stringify(await kevCatalog()))
+    const downloadMock = vi.fn(async (url: string) => {
+      if (url === CISA_KEV_URL) return Buffer.from(JSON.stringify(await kevCatalog()))
       if (url === `${NVD_FEED_BASE_URL}/nvdcve-2.0-2024.meta`) {
-        return new Response(`lastModifiedDate:2026-09-10T03:00:00-04:00\nsha256:${sha256}\n`)
+        return Buffer.from(`lastModifiedDate:2026-09-10T03:00:00-04:00\nsha256:${sha256}\n`)
       }
-      if (url === `${NVD_FEED_BASE_URL}/nvdcve-2.0-2024.json.gz`) return new Response(gzip)
-      return new Response('not published', { status: 404 })
+      if (url === `${NVD_FEED_BASE_URL}/nvdcve-2.0-2024.json.gz`) return gzip
+      if (url.startsWith(`${NVD_FEED_BASE_URL}/`) && url.endsWith('.meta'))
+        throw Object.assign(new Error(`${url} responded with 404.`), { status: 404 })
+      throw new Error(`${url} is unavailable`)
     })
-    vi.stubGlobal('fetch', fetchMock)
-    const interval = vi.spyOn(globalThis, 'setInterval').mockReturnValue(0 as never)
     process.env['OTSERVER_VULNERABILITY_FEEDS'] = 'on'
 
     try {
-      await initializeVulnerabilityFeeds(payload)
-      // The first call joins the startup freshness check; the second forces a real refresh.
-      await syncVulnerabilityFeeds(payload, { force: true })
-      await syncVulnerabilityFeeds(payload, { force: true })
-      expect(fetchMock).toHaveBeenCalledWith(
-        CISA_KEV_URL,
-        expect.objectContaining({ headers: expect.any(Object) }),
-      )
-      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('.json.gz'))).toBe(true)
-      expect(interval).toHaveBeenCalled()
+      await syncVulnerabilityFeeds(payload, { download: downloadMock, force: true })
+      await syncVulnerabilityFeeds(payload, { download: downloadMock, force: true })
+      expect(downloadMock).toHaveBeenCalledWith(CISA_KEV_URL)
+      expect(downloadMock.mock.calls.some(([url]) => url.endsWith('.json.gz'))).toBe(true)
     } finally {
       delete process.env['OTSERVER_VULNERABILITY_FEEDS']
-      interval.mockRestore()
-      vi.unstubAllGlobals()
     }
 
     const feeds = await payload.find({
@@ -2097,13 +2185,50 @@ describe('vulnerability catalog', () => {
     expect(feeds.docs[3].error).toContain('responded with 404')
 
     process.env.OTSERVER_VULNERABILITY_FEEDS = 'off'
-    const calls = fetchMock.mock.calls.length
+    const calls = downloadMock.mock.calls.length
     try {
       await initializeVulnerabilityFeeds(payload)
-      expect(fetchMock).toHaveBeenCalledTimes(calls)
+      expect(downloadMock).toHaveBeenCalledTimes(calls)
     } finally {
       delete process.env.OTSERVER_VULNERABILITY_FEEDS
     }
     expect(FIRST_NVD_YEAR).toBeLessThan(new Date().getUTCFullYear())
+  })
+
+  it('honors the automatic feed setting in scheduled and periodic checks', async () => {
+    const previous = await payload.findGlobal({
+      slug: 'application-settings',
+      overrideAccess: true,
+    })
+    const timer = vi.spyOn(globalThis, 'setInterval').mockReturnValue({} as never)
+    try {
+      process.env.OTSERVER_VULNERABILITY_FEEDS = 'off'
+      await expect(executeScheduledVulnerabilityFeedSync(payload)).resolves.toBeUndefined()
+
+      process.env.OTSERVER_VULNERABILITY_FEEDS = 'on'
+      await payload.updateGlobal({
+        slug: 'application-settings',
+        data: { vulnerabilityFeeds: { automaticUpdates: false, pullIntervalDays: 7 } },
+        overrideAccess: true,
+      })
+      await expect(executeScheduledVulnerabilityFeedSync(payload)).resolves.toBeUndefined()
+      await initializeVulnerabilityFeeds(payload)
+      expect(timer).toHaveBeenCalledWith(expect.any(Function), 60_000)
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    } finally {
+      timer.mockRestore()
+      await payload.updateGlobal({
+        slug: 'application-settings',
+        data: {
+          vulnerabilityFeeds: previous.vulnerabilityFeeds ?? {
+            automaticUpdates: true,
+            pullIntervalDays: 7,
+            customCsafFeeds: [],
+          },
+        },
+        overrideAccess: true,
+      })
+      delete process.env.OTSERVER_VULNERABILITY_FEEDS
+    }
   })
 })

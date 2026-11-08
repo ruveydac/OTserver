@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import { whereToLucene } from '@/search/whereToLucene'
+import BulkManualTags from '@/components/AssetListInteractions/BulkManualTags'
 
 const AssetListInteractions = () => {
   const router = useRouter()
@@ -95,14 +96,17 @@ const AssetListInteractions = () => {
       {count > 0 &&
         actionsTarget &&
         createPortal(
-          <Button
-            buttonStyle="none"
-            className="list-selection__button asset-export-csv"
-            onClick={() => void downloadCSV()}
-            disabled={exporting}
-          >
-            {exporting ? 'Exporting…' : 'Export diagnostic CSV'}
-          </Button>,
+          <>
+            <BulkManualTags />
+            <Button
+              buttonStyle="none"
+              className="list-selection__button asset-export-csv"
+              onClick={() => void downloadCSV()}
+              disabled={exporting}
+            >
+              {exporting ? 'Exporting…' : 'Export diagnostic CSV'}
+            </Button>
+          </>,
           actionsTarget,
         )}
       {exportError ? (
@@ -113,7 +117,7 @@ const AssetListInteractions = () => {
       <p className="asset-search-help">
         Type Lucene directly or use <strong>Filters</strong> to build it graphically. Examples:{' '}
         <code>status:online AND vendor:Siemens</code>, <code>class:PLC</code>, or{' '}
-        <code>osAccuracy:[80 TO 100]</code>.
+        <code>osAccuracy:[80 TO 100]</code>, or <code>tag:&quot;Outdated Firmware&quot;</code>.
       </p>
     </>
   )

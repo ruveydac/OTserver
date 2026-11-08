@@ -70,6 +70,8 @@ export interface Config {
     'site-types': SiteType;
     sites: Site;
     'asset-classes': AssetClass;
+    'tag-groups': TagGroup;
+    tags: Tag;
     assets: Asset;
     'network-endpoints': NetworkEndpoint;
     'service-bindings': ServiceBinding;
@@ -107,6 +109,8 @@ export interface Config {
     'site-types': SiteTypesSelect<false> | SiteTypesSelect<true>;
     sites: SitesSelect<false> | SitesSelect<true>;
     'asset-classes': AssetClassesSelect<false> | AssetClassesSelect<true>;
+    'tag-groups': TagGroupsSelect<false> | TagGroupsSelect<true>;
+    tags: TagsSelect<false> | TagsSelect<true>;
     assets: AssetsSelect<false> | AssetsSelect<true>;
     'network-endpoints': NetworkEndpointsSelect<false> | NetworkEndpointsSelect<true>;
     'service-bindings': ServiceBindingsSelect<false> | ServiceBindingsSelect<true>;
@@ -156,11 +160,14 @@ export interface Config {
   user: User;
   jobs: {
     tasks: {
+      'device-metadata-sync-v1': TaskDeviceMetadataSyncV1;
       'otter-release-sync-v1': TaskOtterReleaseSyncV1;
       'vulnerability-feed-sync-v1': TaskVulnerabilityFeedSyncV1;
+      'vulnerability-feed-auto-sync-v1': TaskVulnerabilityFeedAutoSyncV1;
       'import-v1': TaskImportV1;
       'maintenance-v1': TaskMaintenanceV1;
       'reapply-asset-classes-v1': TaskReapplyAssetClassesV1;
+      'reapply-asset-tags-v1': TaskReapplyAssetTagsV1;
       inline: {
         input: unknown;
         output: unknown;
@@ -361,6 +368,76 @@ export interface AssetField {
   createdAt: string;
 }
 /**
+ * Organize tags for administration. Groups do not affect tag matching.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "tag-groups".
+ */
+export interface TagGroup {
+  id: string;
+  name: string;
+  description?: string | null;
+  systemKey?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * Create manual tags or rules that automatically match assets.
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "tags".
+ */
+export interface Tag {
+  id: string;
+  name: string;
+  description?: string | null;
+  group?: (string | null) | TagGroup;
+  /**
+   * Six-digit hexadecimal color, for example #64748B.
+   */
+  color: string;
+  /**
+   * Manual tags are assigned by people. Other tags are assigned by rules.
+   */
+  manual?: boolean | null;
+  /**
+   * Any enabled rule can match. All conditions inside that rule must match. Choose from asset, custom asset, connected catalog, and confirmed vulnerability fields. Version comparisons require a single unambiguous numeric version on each side.
+   */
+  rules?:
+    | {
+        enabled?: boolean | null;
+        conditions?:
+          | {
+              /**
+               * Choose an asset field, custom asset field, connected catalog field, or confirmed vulnerability field.
+               */
+              field: string;
+              operator:
+                | 'equals'
+                | 'contains'
+                | 'regex'
+                | 'greater_than'
+                | 'less_than'
+                | 'older_than_days'
+                | 'exists'
+                | 'version_less_than_field'
+                | 'version_greater_than_field';
+              value?: string | null;
+              /**
+               * Choose the field to compare against.
+               */
+              compareField?: string | null;
+              id?: string | null;
+            }[]
+          | null;
+        id?: string | null;
+      }[]
+    | null;
+  systemKey?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
  * Industrial devices, network endpoints, and control-system equipment.
  *
  * This interface was referenced by `Config`'s JSON-Schema
@@ -416,6 +493,13 @@ export interface Asset {
   assetClass: string | AssetClass;
   assetOwner?: string | null;
   location?: string | null;
+  /**
+   * People can assign and remove these tags. Automatic tags are rule-managed.
+   */
+  manualTags?: (string | Tag)[] | null;
+  automaticTags?: (string | Tag)[] | null;
+  tags?: (string | Tag)[] | null;
+  tagNames?: string[] | null;
   customFields?:
     | {
         [k: string]: unknown;
@@ -469,7 +553,6 @@ export interface Asset {
       )[]
     | null;
   status: 'online' | 'offline' | 'maintenance' | 'unknown';
-  criticality: 'low' | 'medium' | 'high' | 'critical';
   /**
    * Current unconfirmed matches and confirmed unresolved vulnerability findings. Dismissed and resolved findings are excluded.
    */
@@ -738,6 +821,7 @@ export interface OtterScanner {
   enrolledAt?: string | null;
   lastSeenAt?: string | null;
   version?: string | null;
+  osVersion?: string | null;
   buildTarget?: string | null;
   binaryDigest?: string | null;
   capabilities?:
@@ -1462,11 +1546,14 @@ export interface PayloadJob {
         completedAt: string;
         taskSlug:
           | 'inline'
+          | 'device-metadata-sync-v1'
           | 'otter-release-sync-v1'
           | 'vulnerability-feed-sync-v1'
+          | 'vulnerability-feed-auto-sync-v1'
           | 'import-v1'
           | 'maintenance-v1'
-          | 'reapply-asset-classes-v1';
+          | 'reapply-asset-classes-v1'
+          | 'reapply-asset-tags-v1';
         taskID: string;
         input?:
           | {
@@ -1502,11 +1589,14 @@ export interface PayloadJob {
   taskSlug?:
     | (
         | 'inline'
+        | 'device-metadata-sync-v1'
         | 'otter-release-sync-v1'
         | 'vulnerability-feed-sync-v1'
+        | 'vulnerability-feed-auto-sync-v1'
         | 'import-v1'
         | 'maintenance-v1'
         | 'reapply-asset-classes-v1'
+        | 'reapply-asset-tags-v1'
       )
     | null;
   queue?: string | null;
@@ -1533,6 +1623,14 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'asset-classes';
         value: string | AssetClass;
+      } | null)
+    | ({
+        relationTo: 'tag-groups';
+        value: string | TagGroup;
+      } | null)
+    | ({
+        relationTo: 'tags';
+        value: string | Tag;
       } | null)
     | ({
         relationTo: 'assets';
@@ -1697,6 +1795,46 @@ export interface AssetClassesSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "tag-groups_select".
+ */
+export interface TagGroupsSelect<T extends boolean = true> {
+  name?: T;
+  description?: T;
+  systemKey?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "tags_select".
+ */
+export interface TagsSelect<T extends boolean = true> {
+  name?: T;
+  description?: T;
+  group?: T;
+  color?: T;
+  manual?: T;
+  rules?:
+    | T
+    | {
+        enabled?: T;
+        conditions?:
+          | T
+          | {
+              field?: T;
+              operator?: T;
+              value?: T;
+              compareField?: T;
+              id?: T;
+            };
+        id?: T;
+      };
+  systemKey?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "assets_select".
  */
 export interface AssetsSelect<T extends boolean = true> {
@@ -1734,6 +1872,10 @@ export interface AssetsSelect<T extends boolean = true> {
   assetClass?: T;
   assetOwner?: T;
   location?: T;
+  manualTags?: T;
+  automaticTags?: T;
+  tags?: T;
+  tagNames?: T;
   customFields?: T;
   fieldProvenance?: T;
   assetType?: T;
@@ -1750,7 +1892,6 @@ export interface AssetsSelect<T extends boolean = true> {
   hardwareVersion?: T;
   protocols?: T;
   status?: T;
-  criticality?: T;
   vulnerabilityCount?: T;
   lastSeen?: T;
   importSource?: T;
@@ -1930,6 +2071,7 @@ export interface OtterScannersSelect<T extends boolean = true> {
   enrolledAt?: T;
   lastSeenAt?: T;
   version?: T;
+  osVersion?: T;
   buildTarget?: T;
   binaryDigest?: T;
   capabilities?: T;
@@ -2417,10 +2559,43 @@ export interface PayloadMigrationsSelect<T extends boolean = true> {
  */
 export interface ApplicationSetting {
   id: string;
+  vulnerabilityFeeds?: {
+    /**
+     * Automatically download feeds. Manual updates and offline imports remain available when this is disabled.
+     */
+    automaticUpdates?: boolean | null;
+    /**
+     * Automatic updates run at this interval, from 1 to 365 days.
+     */
+    pullIntervalDays?: number | null;
+    /**
+     * Add public HTTPS CSAF aggregators, provider metadata, or ROLIE feeds. Referenced feeds and advisories are discovered automatically.
+     */
+    customCsafFeeds?:
+      | {
+          name: string;
+          type: 'aggregator' | 'provider-metadata' | 'rolie';
+          url: string;
+          id?: string | null;
+        }[]
+      | null;
+  };
   /**
    * Import the latest stable GitHub release for all supported platforms every 24 hours. Scanner updates are assigned separately.
    */
   otterReleaseImports?: boolean | null;
+  /**
+   * Check OTserver Metadata on GitHub every 24 hours and import validated manufacturer and device records. Existing records missing upstream are retained.
+   */
+  metadataImports?: boolean | null;
+  metadataSync?: {
+    requestedAt?: string | null;
+    lastCheckedAt?: string | null;
+    lastSyncedAt?: string | null;
+    commitSHA?: string | null;
+    error?: string | null;
+    jobID?: string | null;
+  };
   otterReleaseSync?: {
     requestedAt?: string | null;
     lastCheckedAt?: string | null;
@@ -2445,7 +2620,32 @@ export interface ApplicationSetting {
  * via the `definition` "application-settings_select".
  */
 export interface ApplicationSettingsSelect<T extends boolean = true> {
+  vulnerabilityFeeds?:
+    | T
+    | {
+        automaticUpdates?: T;
+        pullIntervalDays?: T;
+        customCsafFeeds?:
+          | T
+          | {
+              name?: T;
+              type?: T;
+              url?: T;
+              id?: T;
+            };
+      };
   otterReleaseImports?: T;
+  metadataImports?: T;
+  metadataSync?:
+    | T
+    | {
+        requestedAt?: T;
+        lastCheckedAt?: T;
+        lastSyncedAt?: T;
+        commitSHA?: T;
+        error?: T;
+        jobID?: T;
+      };
   otterReleaseSync?:
     | T
     | {
@@ -2471,6 +2671,18 @@ export interface CollectionsWidget {
     [k: string]: unknown;
   };
   width: 'full';
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskDevice-metadata-sync-v1".
+ */
+export interface TaskDeviceMetadataSyncV1 {
+  input: {
+    version: number;
+  };
+  output: {
+    updated: boolean;
+  };
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -2506,7 +2718,26 @@ export interface TaskVulnerabilityFeedSyncV1 {
       | number
       | boolean
       | null;
+    customCsafFeeds?:
+      | {
+          [k: string]: unknown;
+        }
+      | unknown[]
+      | string
+      | number
+      | boolean
+      | null;
     skipMissing?: boolean | null;
+  };
+  output?: unknown;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskVulnerability-feed-auto-sync-v1".
+ */
+export interface TaskVulnerabilityFeedAutoSyncV1 {
+  input: {
+    version: number;
   };
   output?: unknown;
 }
@@ -2540,6 +2771,16 @@ export interface TaskReapplyAssetClassesV1 {
     version: number;
     assetClassID: string;
     catalogRevision?: string | null;
+  };
+  output?: unknown;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "TaskReapply-asset-tags-v1".
+ */
+export interface TaskReapplyAssetTagsV1 {
+  input: {
+    version: number;
   };
   output?: unknown;
 }

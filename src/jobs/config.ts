@@ -6,10 +6,13 @@ import { runMaintenance } from './maintenance'
 import { safeFailure, transientFailure } from './errors'
 import { currentWorker } from '../integrations/payload/workerContext'
 import { reapplyAssetClassRules } from '../collections/AssetClasses'
+import { reapplyAssetTags } from '../tags/assign'
 import { executeFeedUpdate } from '../vulnerabilities/actions'
+import { executeScheduledVulnerabilityFeedSync } from '../vulnerabilities/feeds'
 import { feedSources } from '../vulnerabilities/sources'
 import { activeCatalog } from '../metadata/runtime'
 import { executeOtterReleaseSync, OTTER_RELEASE_SYNC_TASK } from '../otter/releaseSync'
+import { executeMetadataSync, METADATA_SYNC_TASK } from '../metadata/sync'
 
 export const jobs: JobsConfig = {
   access: { run: () => false, queue: () => false, cancel: () => false },
@@ -31,6 +34,25 @@ export const jobs: JobsConfig = {
       ],
     }),
   tasks: [
+    {
+      slug: METADATA_SYNC_TASK,
+      retries: { attempts: 2, backoff: { type: 'exponential', delay: 60_000 } },
+      inputSchema: [{ name: 'version', type: 'number', required: true }],
+      outputSchema: [{ name: 'updated', type: 'checkbox', required: true }],
+      handler: async ({ input, req }) => {
+        if (input.version !== 1 || currentWorker()?.queue !== 'maintenance')
+          throw new JobCancelledError('Unsupported worker input or execution context.')
+        try {
+          return { output: await executeMetadataSync(req.payload) }
+        } catch (error) {
+          if (transientFailure(error)) throw new Error(safeFailure(error))
+          if ((error as { status?: number }).status === 503) throw error
+          throw new JobCancelledError(
+            error instanceof APIError ? error.message : safeFailure(error),
+          )
+        }
+      },
+    },
     {
       slug: OTTER_RELEASE_SYNC_TASK,
       retries: { attempts: 2, backoff: { type: 'exponential', delay: 60_000 } },
@@ -70,6 +92,7 @@ export const jobs: JobsConfig = {
         },
         { name: 'batchID', type: 'text' },
         { name: 'uploadIDs', type: 'json' },
+        { name: 'customCsafFeeds', type: 'json' },
         { name: 'skipMissing', type: 'checkbox' },
       ],
       handler: async ({ input, req }) => {
@@ -77,6 +100,22 @@ export const jobs: JobsConfig = {
           throw new JobCancelledError('Unsupported worker input or execution context.')
         try {
           await executeFeedUpdate(req.payload, input)
+        } catch (error) {
+          if (!transientFailure(error)) throw new JobCancelledError(safeFailure(error))
+          throw error
+        }
+        return { output: {} }
+      },
+    },
+    {
+      slug: 'vulnerability-feed-auto-sync-v1',
+      retries: { attempts: 2, backoff: { type: 'exponential', delay: 30_000 } },
+      inputSchema: [{ name: 'version', type: 'number', required: true }],
+      handler: async ({ input, req }) => {
+        if (input.version !== 1 || currentWorker()?.queue !== 'maintenance')
+          throw new JobCancelledError('Unsupported worker input or execution context.')
+        try {
+          await executeScheduledVulnerabilityFeedSync(req.payload)
         } catch (error) {
           if (!transientFailure(error)) throw new JobCancelledError(safeFailure(error))
           throw error
@@ -184,6 +223,36 @@ export const jobs: JobsConfig = {
           throw new Error(sanitized)
         } finally {
           delete req.context.deviceMetadataCatalog
+        }
+        return { output: {} }
+      },
+    },
+    {
+      slug: 'reapply-asset-tags-v1',
+      retries: { attempts: 2, backoff: { type: 'exponential', delay: 5000 } },
+      inputSchema: [{ name: 'version', type: 'number', required: true }],
+      handler: async ({ input, req, job }) => {
+        if (input.version !== 1 || currentWorker()?.queue !== 'maintenance')
+          throw new JobCancelledError('Unsupported worker input or execution context.')
+        const started = Date.now()
+        try {
+          const result = await reapplyAssetTags(req)
+          req.payload.logger.info({
+            event: 'asset-tags.reapplied',
+            jobID: job.id,
+            durationMs: Date.now() - started,
+            ...result,
+          })
+        } catch (error) {
+          const sanitized = safeFailure(error)
+          req.payload.logger.warn({
+            event: 'asset-tags.reapply-failed',
+            jobID: job.id,
+            durationMs: Date.now() - started,
+            error: sanitized,
+          })
+          if (!transientFailure(error)) throw new JobCancelledError(sanitized)
+          throw new Error(sanitized)
         }
         return { output: {} }
       },

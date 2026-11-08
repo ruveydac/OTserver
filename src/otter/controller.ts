@@ -63,6 +63,14 @@ const scannerReport = (input: Record<string, unknown>) => {
   )
     throw new APIError('Scanner build target is invalid.', 400)
   if (
+    input.osVersion !== undefined &&
+    (typeof input.osVersion !== 'string' ||
+      !input.osVersion.trim() ||
+      input.osVersion.length > 256 ||
+      /[\u0000-\u001f]/.test(input.osVersion))
+  )
+    throw new APIError('Scanner OS version is invalid.', 400)
+  if (
     input.binaryDigest !== undefined &&
     (typeof input.binaryDigest !== 'string' || !/^[a-f\d]{64}$/i.test(input.binaryDigest))
   )
@@ -138,6 +146,7 @@ const scannerReport = (input: Record<string, unknown>) => {
   return {
     ...(typeof input.version === 'string' ? { version: input.version } : {}),
     ...(typeof input.buildTarget === 'string' ? { buildTarget: input.buildTarget } : {}),
+    ...(typeof input.osVersion === 'string' ? { osVersion: input.osVersion.trim() } : {}),
     ...(typeof input.binaryDigest === 'string'
       ? { binaryDigest: input.binaryDigest.toLowerCase() }
       : {}),
@@ -672,6 +681,7 @@ export const otterOverview: Endpoint['handler'] = async (req) => {
         inventoryReportedAt,
         lastSeenAt,
         version,
+        osVersion,
         currentRun,
       }) => ({
         id,
@@ -682,6 +692,7 @@ export const otterOverview: Endpoint['handler'] = async (req) => {
         enrolledAt,
         lastSeenAt,
         version,
+        osVersion,
         interfaces: Array.isArray(interfaces)
           ? interfaces.filter((entry): entry is string => typeof entry === 'string')
           : [],
@@ -728,6 +739,7 @@ export const getOtterScanner: Endpoint['handler'] = async (req) => {
     networkAdapters: Array.isArray(scanner.networkAdapters) ? scanner.networkAdapters : [],
     version: scanner.version,
     buildTarget: scanner.buildTarget,
+    osVersion: scanner.osVersion,
     currentUpdate: relationshipID(scanner.currentUpdate),
   })
 }
@@ -757,22 +769,18 @@ export const queueOtterUpdates: Endpoint['handler'] = async (req) => {
   await humanOrigin(req)
   const data = await body(req)
   if (
-    typeof data.releaseID !== 'string' ||
+    typeof data.version !== 'string' ||
+    !data.version.trim() ||
+    data.version.length > 64 ||
     !Array.isArray(data.scannerIDs) ||
     data.scannerIDs.length < 1 ||
     data.scannerIDs.length > 100 ||
     data.scannerIDs.some((id) => typeof id !== 'string' || !id) ||
     new Set(data.scannerIDs).size !== data.scannerIDs.length
   )
-    throw new APIError('Select one to 100 unique scanners and an Otter release.', 400)
+    throw new APIError('Select one to 100 unique scanners and an Otter release version.', 400)
 
-  const release = await req.payload.findByID({
-    collection: 'otter-releases',
-    depth: 0,
-    id: data.releaseID,
-    overrideAccess: true,
-    req,
-  })
+  const version = data.version.trim()
   const results = await inTransaction(req, async () => {
     const queued: Array<{ id: string; scannerID: string; name: string }> = []
     for (const id of data.scannerIDs as string[]) {
@@ -784,10 +792,28 @@ export const queueOtterUpdates: Endpoint['handler'] = async (req) => {
         req,
       })
       await requireHuman(req, scanner.site, true)
+      const releases = await req.payload.find({
+        collection: 'otter-releases',
+        depth: 0,
+        limit: 1,
+        overrideAccess: true,
+        req,
+        where: {
+          and: [
+            { version: { equals: version } },
+            { target: { equals: scanner.buildTarget || '' } },
+          ],
+        },
+      })
+      const release = releases.docs[0]
+      if (!release)
+        throw new APIError(
+          `${scanner.name} has no signed executable for version ${version} and its platform.`,
+          409,
+        )
       if (
         !scanner.enabled ||
         !scanner.enrolledAt ||
-        scanner.buildTarget !== release.target ||
         !Array.isArray(scanner.capabilities) ||
         !scanner.capabilities.includes('update-v1')
       )
@@ -797,7 +823,7 @@ export const queueOtterUpdates: Endpoint['handler'] = async (req) => {
         )
       if (
         typeof scanner.version !== 'string' ||
-        compareOtterVersions(String(release.version), scanner.version) <= 0
+        compareOtterVersions(version, scanner.version) <= 0
       )
         throw new APIError(`${scanner.name} is already running this version or a newer one.`, 409)
 
@@ -818,12 +844,12 @@ export const queueOtterUpdates: Endpoint['handler'] = async (req) => {
         collection: 'otter-updates',
         context: { otterUpdateWrite: true },
         data: {
-          name: `${scanner.name} to ${release.version}`,
+          name: `${scanner.name} to ${version}`,
           site: String(relationshipID(scanner.site)),
           scanner: String(scanner.id),
           release: String(release.id),
           target: String(release.target),
-          targetVersion: String(release.version),
+          targetVersion: version,
           binaryDigest: String(release.binaryDigest),
           binarySize: Number(release.filesize),
           previousVersion: scanner.version,

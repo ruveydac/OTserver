@@ -59,7 +59,6 @@ const createAsset = async (name: string, site = plant.id, levels?: Asset['purdue
       site,
       assetClass,
       status: 'unknown',
-      criticality: 'medium',
       purdueLevels: levels,
     },
   })

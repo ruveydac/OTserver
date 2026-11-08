@@ -8,12 +8,11 @@ import {
   useModal,
   useSelection,
 } from '@payloadcms/ui'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
 import { otterAction } from '../OtterEnrollment'
 
-type Release = { id: string; version: string; target: string }
+type Release = { version: string }
 
 export default function OtterBulkUpdates() {
   const {
@@ -25,7 +24,7 @@ export default function OtterBulkUpdates() {
   const { openModal } = useModal()
   const router = useRouter()
   const [releases, setReleases] = useState<Release[]>([])
-  const [releaseID, setReleaseID] = useState('')
+  const [version, setVersion] = useState('')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -49,7 +48,7 @@ export default function OtterBulkUpdates() {
       .then(({ releases: available }) => {
         if (!Array.isArray(available)) throw new Error('Could not load signed Otter releases.')
         setReleases(available)
-        setReleaseID(available[0]?.id || '')
+        setVersion(available[0]?.version || '')
       })
       .catch((reason: unknown) => {
         if (!abort.signal.aborted)
@@ -61,12 +60,14 @@ export default function OtterBulkUpdates() {
     return () => abort.abort()
   }, [api])
 
+  const versions = useMemo(() => [...new Set(releases.map(({ version }) => version))], [releases])
+
   const queue = async () => {
     setBusy(true)
     setError('')
     setMessage('')
     try {
-      const result = await otterAction(`${api}/otter/v1/updates`, { releaseID, scannerIDs })
+      const result = await otterAction(`${api}/otter/v1/updates`, { version, scannerIDs })
       setMessage(
         `Update queued for ${result.queued.length} scanner${result.queued.length === 1 ? '' : 's'}.`,
       )
@@ -78,64 +79,78 @@ export default function OtterBulkUpdates() {
     }
   }
 
-  if (loading) return <p role="status">Loading signed Otter releases…</p>
-  if (error && !releases.length)
-    return (
-      <div role="alert">
-        <Banner type="error">{error}</Banner>
-      </div>
-    )
-  if (!releases.length)
-    return (
-      <p>
-        No signed Otter executables have been uploaded.{' '}
-        <Link href={`${admin}/collections/otter-releases`}>Upload a signed release</Link>.
-      </p>
-    )
-
   return (
-    <section>
-      <label>
-        Signed release{' '}
-        <select
-          className="field-type__input"
-          value={releaseID}
-          onChange={(event) => setReleaseID(event.target.value)}
-        >
-          {releases.map((release) => (
-            <option key={release.id} value={release.id}>
-              {release.version} ({release.target})
-            </option>
-          ))}
-        </select>
-      </label>{' '}
-      <Button
-        disabled={busy || count === 0 || selectAll === 'allAvailable' || !scannerIDs.length}
-        type="button"
-        onClick={() => openModal(modal)}
-      >
-        Update selected Otters
+    <>
+      <Button el="link" url={`${admin}/collections/otter-updates`}>
+        Update history
       </Button>
-      {selectAll === 'allAvailable' ? (
-        <p>Select individual scanner rows for a bulk update.</p>
+      {count > 0 ? (
+        <>
+          <Button
+            disabled={
+              busy ||
+              loading ||
+              !versions.length ||
+              selectAll === 'allAvailable' ||
+              !scannerIDs.length
+            }
+            type="button"
+            onClick={() => openModal(modal)}
+          >
+            Update selected
+          </Button>
+          {loading ? <span role="status">Loading signed releases…</span> : null}
+          {selectAll === 'allAvailable' ? (
+            <span>Select individual scanners for a bulk update.</span>
+          ) : null}
+          {error && !versions.length ? (
+            <div role="alert">
+              <Banner type="error">{error}</Banner>
+            </div>
+          ) : null}
+          {!loading && !error && !versions.length ? (
+            <Button el="link" url={`${admin}/collections/otter-releases`}>
+              Upload a signed release
+            </Button>
+          ) : null}
+          {message ? <span role="status">{message}</span> : null}
+          {error && versions.length ? (
+            <div role="alert">
+              <Banner type="error">{error}</Banner>
+            </div>
+          ) : null}
+          <ConfirmationModal
+            modalSlug={modal}
+            heading="Queue Otter updates?"
+            body={
+              <>
+                <label>
+                  Version tag{' '}
+                  <select
+                    className="field-type__input"
+                    value={version}
+                    onChange={(event) => setVersion(event.target.value)}
+                  >
+                    {versions.map((tag) => (
+                      <option key={tag} value={tag}>
+                        {tag}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p>
+                  Queue {version} for {scannerIDs.length} selected scanner
+                  {scannerIDs.length === 1 ? '' : 's'}? The matching signed executable is chosen for
+                  each scanner automatically. Scanners finish active scans before updating.
+                </p>
+              </>
+            }
+            confirmLabel="Queue updates"
+            cancelLabel="Cancel"
+            onConfirm={() => void queue()}
+          />
+        </>
       ) : null}
-      {message ? <p role="status">{message}</p> : null}
-      {error ? (
-        <div role="alert">
-          <Banner type="error">{error}</Banner>
-        </div>
-      ) : null}
-      <ConfirmationModal
-        modalSlug={modal}
-        heading="Queue Otter updates?"
-        body={`Queue ${releaseID ? releases.find(({ id }) => id === releaseID)?.version : 'this release'} for ${scannerIDs.length} selected scanner${scannerIDs.length === 1 ? '' : 's'}? Scanners finish active scans before updating.`}
-        confirmLabel="Queue updates"
-        cancelLabel="Cancel"
-        onConfirm={() => void queue()}
-      />
-      <p>
-        <Link href={`${admin}/collections/otter-updates`}>View update history and outcomes</Link>
-      </p>
-    </section>
+    </>
   )
 }

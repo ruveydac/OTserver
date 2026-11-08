@@ -3,17 +3,13 @@ import type { DocumentViewServerProps } from 'payload'
 import type { ReactNode } from 'react'
 
 import CopyButton from '@/components/AssetView/CopyButton'
+import ManualAssetTags, { type ManualTagOption } from '@/components/AssetView/ManualAssetTags'
 import CatalogReference from '@/components/AssetView/CatalogReference'
 import { activeCatalog } from '@/metadata/runtime'
 import DensityToggle from '@/components/AssetView/DensityToggle'
 import AssetVulnerabilityReviewActions from '@/components/AssetVulnerabilityReviewActions'
 import { VULNERABILITY_PAGE_SIZE } from '@/components/AssetVulnerabilitiesView'
-import {
-  criticalityLabels,
-  formatDateTime,
-  protocolLabels,
-  statusLabels,
-} from '@/components/labels'
+import { formatDateTime, protocolLabels, statusLabels } from '@/components/labels'
 import DeviceIdentity from '@/components/DeviceIdentity'
 import { loadAssetPanel } from '@/application/assetPanel'
 import type { Asset, AssetObservation, AuditLog, TopologyLink } from '@/payload-types'
@@ -79,6 +75,17 @@ const relationLabel = (value: unknown, fallback = 'Unavailable') => {
   if (typeof item.name === 'string' && item.name) return item.name
   if (typeof item.path === 'string' && item.path) return item.path
   return relationID(value) || fallback
+}
+
+const tagTextColor = (hex: string) => {
+  const channels = hex.match(/[\da-f]{2}/gi)?.map((part) => parseInt(part, 16) / 255) || [0, 0, 0]
+  const luminance = channels
+    .slice(0, 3)
+    .map((channel) => (channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4))
+    .reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index], 0)
+  const contrast = (foreground: number) =>
+    (Math.max(luminance, foreground) + 0.05) / (Math.min(luminance, foreground) + 0.05)
+  return contrast(0.01) >= contrast(1) ? '#111111' : '#ffffff'
 }
 
 const cvssBand = (score: number): Exclude<VulnerabilitySeverity, 'UNRATED'> =>
@@ -383,6 +390,55 @@ const AssetView = async (props: DocumentViewServerProps) => {
   const canReviewVulnerabilities = Boolean(
     authorization.isAdmin || authorization.writableSiteIDs.includes(idOf(asset.site)),
   )
+  const tagSnapshot = await props.payload.findByID({
+    collection: 'assets',
+    id: asset.id,
+    depth: 1,
+    overrideAccess: false,
+    req: request,
+    select: { manualTags: true, tags: true },
+  })
+  const displayedTags = array(tagSnapshot?.tags).flatMap((item) => {
+    const tag = record(item)
+    return typeof tag.id === 'string' || typeof tag.id === 'number'
+      ? [
+          {
+            id: String(tag.id),
+            name: typeof tag.name === 'string' ? tag.name : String(tag.id),
+            color:
+              typeof tag.color === 'string' && /^#[\da-f]{6}$/i.test(tag.color)
+                ? tag.color
+                : '#64748B',
+          },
+        ]
+      : []
+  })
+  const manualTagIDs = array(tagSnapshot?.manualTags)
+    .map(relationID)
+    .filter((id): id is string => Boolean(id))
+  const availableManualTags: ManualTagOption[] = canReviewVulnerabilities
+    ? (
+        await props.payload.find({
+          collection: 'tags',
+          depth: 1,
+          limit: 1000,
+          pagination: false,
+          overrideAccess: false,
+          req: request,
+          sort: 'name',
+          where: { manual: { equals: true } },
+          select: { name: true, color: true, group: true },
+        })
+      ).docs.map((tag) => ({
+        id: String(tag.id),
+        name: tag.name,
+        color: tag.color,
+        group:
+          typeof tag.group === 'object' && tag.group
+            ? { id: String(tag.group.id), name: tag.group.name }
+            : undefined,
+      }))
+    : []
   const findings = vulnerabilityFindings
     .slice()
     .sort(
@@ -537,7 +593,6 @@ const AssetView = async (props: DocumentViewServerProps) => {
       <Section
         details={[
           { label: 'Recorded status', value: statusLabels[asset.status] },
-          { label: 'Criticality', value: criticalityLabels[asset.criticality] },
           {
             label: 'Protocols',
             value: asset.protocols?.map((protocol) => protocolLabels[protocol]).join(', '),
@@ -1047,23 +1102,32 @@ const AssetView = async (props: DocumentViewServerProps) => {
               Export diagnostic CSV
             </Link>
             <DensityToggle />
+            {canReviewVulnerabilities ? (
+              <ManualAssetTags
+                assetID={String(asset.id)}
+                availableTags={availableManualTags}
+                manualTagIDs={manualTagIDs}
+              />
+            ) : null}
             <Link className="asset-view__edit" href={`${assetURL}/edit`}>
               Edit asset
             </Link>
           </div>
         </div>
-        <div className="asset-view__badges">
-          <span className={`asset-view__badge status-tone status-tone--${asset.status}`}>
-            {statusLabels[asset.status]}
-          </span>
-          <span className={`asset-view__badge asset-view__badge--${asset.criticality}`}>
-            {criticalityLabels[asset.criticality]} criticality
-          </span>
-          <span className="asset-view__badge">{asset.lifecycle || 'active'}</span>
-          {asset.replacedBy ? (
-            <span className="asset-view__badge">Replacement recorded</span>
-          ) : null}
-          {asset.mergedInto ? <span className="asset-view__badge">Merged record</span> : null}
+        <div className="asset-view__badges" aria-label="Asset tags">
+          {displayedTags.length ? (
+            displayedTags.map((tag) => (
+              <span
+                className="asset-view__badge"
+                key={tag.id}
+                style={{ backgroundColor: tag.color, color: tagTextColor(tag.color) }}
+              >
+                {tag.name}
+              </span>
+            ))
+          ) : (
+            <span className="asset-view__no-tags">No tags assigned</span>
+          )}
         </div>
       </header>
 

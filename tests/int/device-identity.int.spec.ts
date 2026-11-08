@@ -284,7 +284,6 @@ describe('device identity', () => {
         name: `Device ${randomUUID()}`,
         site,
         status: 'unknown',
-        criticality: 'medium',
         ...data,
       } as never,
       user,
@@ -1209,7 +1208,6 @@ describe('device identity', () => {
             macAddress: mac(),
             ipAddress: imported ? '192.0.2.20' : '192.0.2.21',
             status: 'unknown',
-            criticality: 'medium',
             ...(imported
               ? {
                   lastSeen: '2026-09-08T00:00:00Z',

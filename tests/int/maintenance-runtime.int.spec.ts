@@ -6,7 +6,6 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('../../src/vulnerabilities/feeds', () => ({
-  SYNC_INTERVAL_MS: 604_800_000,
   syncVulnerabilityFeeds: mocks.sync,
 }))
 
@@ -58,13 +57,11 @@ describe('maintenance task', () => {
     expect(mocks.sync).not.toHaveBeenCalled()
   })
 
-  it('refreshes the catalog when feeds are enabled', async () => {
+  it('leaves feed scheduling independent from weekly housekeeping', async () => {
     process.env.OTSERVER_VULNERABILITY_FEEDS = 'on'
     const payload = makePayload([[]])
     await runMaintenance(payload as never)
 
-    expect(mocks.sync).toHaveBeenCalledWith(payload, {
-      failOnSourceError: true,
-    })
+    expect(mocks.sync).not.toHaveBeenCalled()
   })
 })
