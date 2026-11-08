@@ -656,7 +656,7 @@ describe('bulk manual asset tags', () => {
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('Write denied')
     await act(async () => apply().click())
     expect(container.querySelector('[role="alert"]')?.textContent).toContain(
-      'Could not update tags.',
+      'Could not update manual tags.',
     )
   })
 

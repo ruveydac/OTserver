@@ -257,7 +257,7 @@ describe('automatic device metadata updates', () => {
     try {
       expect(job).toMatchObject({ taskSlug: 'device-metadata-sync-v1' })
       expect((await readApplicationSettings(payload)).metadataSync?.jobID).toBe(String(job!.id))
-      await expect(scheduleMetadataSync(payload)).resolves.toMatchObject({ id: job!.id })
+      await expect(scheduleMetadataSync(payload)).resolves.toBeUndefined()
       await setSettings({
         metadataImports: true,
         metadataSync: { requestedAt: '2000-01-01T00:00:00.000Z' },
