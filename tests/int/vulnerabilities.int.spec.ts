@@ -10,6 +10,7 @@ import { createLocalReq, getPayload, type Payload, type TypedUser } from 'payloa
 
 import { ensureAssetClass } from '../../src/collections/AssetClasses'
 import { ensureAdminRole } from '../../src/collections/UserRoles'
+import { MAX_CUSTOM_CSAF_FEEDS } from '../../src/vulnerabilities/sources'
 vi.mock('../../src/components/AssetVulnerabilityReviewActions', () => ({ default: () => null }))
 import AssetVulnerabilitiesView from '../../src/components/AssetVulnerabilitiesView'
 import {
@@ -31,6 +32,7 @@ import {
   FIRST_NVD_YEAR,
   ICS_ADVISORY_URL,
   initializeVulnerabilityFeeds,
+  executeScheduledVulnerabilityFeedSync,
   NVD_FEED_BASE_URL,
   isPublicFeedAddress,
   validateCsafFeedURL,
@@ -388,6 +390,11 @@ describe('feed parsing', () => {
       }),
     ).toEqual(['https://feeds.vendor.org/csaf/provider.json'])
     expect(validateCsafFeedURL('https://feeds.vendor.org/csaf/feed.json')).toBe(true)
+    expect(validateCsafFeedURL('not a URL')).toContain('valid HTTPS URL')
+    expect(validateCustomCsafFeeds(Array(MAX_CUSTOM_CSAF_FEEDS + 1).fill(null))).toContain(
+      'no more than',
+    )
+    expect(validateCustomCsafFeeds([null])).toContain('needs a name')
     for (const url of [
       'http://feeds.vendor.org/feed.json',
       'https://127.0.0.1/feed.json',
@@ -411,6 +418,10 @@ describe('feed parsing', () => {
     expect(isPublicFeedAddress('::1')).toBe(false)
     expect(isPublicFeedAddress('fd00::1')).toBe(false)
     expect(isPublicFeedAddress('2606:4700:4700::1111')).toBe(true)
+    expect(isPublicFeedAddress('::ffff:8.8.8.8')).toBe(false)
+    expect(isPublicFeedAddress('2001:db8::1')).toBe(false)
+    expect(isPublicFeedAddress('192.0.2.1')).toBe(false)
+    expect(isPublicFeedAddress('224.0.0.1')).toBe(false)
   })
 
   it('discovers configured CSAF aggregators, provider metadata, and ROLIE feeds', async () => {
@@ -2182,5 +2193,42 @@ describe('vulnerability catalog', () => {
       delete process.env.OTSERVER_VULNERABILITY_FEEDS
     }
     expect(FIRST_NVD_YEAR).toBeLessThan(new Date().getUTCFullYear())
+  })
+
+  it('honors the automatic feed setting in scheduled and periodic checks', async () => {
+    const previous = await payload.findGlobal({
+      slug: 'application-settings',
+      overrideAccess: true,
+    })
+    const timer = vi.spyOn(globalThis, 'setInterval').mockReturnValue({} as never)
+    try {
+      process.env.OTSERVER_VULNERABILITY_FEEDS = 'off'
+      await expect(executeScheduledVulnerabilityFeedSync(payload)).resolves.toBeUndefined()
+
+      process.env.OTSERVER_VULNERABILITY_FEEDS = 'on'
+      await payload.updateGlobal({
+        slug: 'application-settings',
+        data: { vulnerabilityFeeds: { automaticUpdates: false, pullIntervalDays: 7 } },
+        overrideAccess: true,
+      })
+      await expect(executeScheduledVulnerabilityFeedSync(payload)).resolves.toBeUndefined()
+      await initializeVulnerabilityFeeds(payload)
+      expect(timer).toHaveBeenCalledWith(expect.any(Function), 60_000)
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    } finally {
+      timer.mockRestore()
+      await payload.updateGlobal({
+        slug: 'application-settings',
+        data: {
+          vulnerabilityFeeds: previous.vulnerabilityFeeds ?? {
+            automaticUpdates: true,
+            pullIntervalDays: 7,
+            customCsafFeeds: [],
+          },
+        },
+        overrideAccess: true,
+      })
+      delete process.env.OTSERVER_VULNERABILITY_FEEDS
+    }
   })
 })

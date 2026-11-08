@@ -356,6 +356,41 @@ describe('asset tags', () => {
     expect(find.mock.calls[1]?.[0]).toMatchObject({ page: 2 })
   })
 
+  it('reapplies tag changes across asset pages', async () => {
+    const tag = {
+      id: 'automatic',
+      name: 'Active',
+      manual: false,
+      rules: [{ conditions: [{ field: 'asset.vendor', operator: 'equals', value: 'Example' }] }],
+    }
+    const asset = {
+      id: 'asset-1',
+      vendor: 'Example',
+      manualTags: [],
+      automaticTags: [],
+      tags: [],
+      tagNames: [],
+    }
+    const find = vi.fn(async ({ collection, page }: { collection: string; page?: number }) => {
+      if (collection === 'tags') return { docs: [tag] }
+      if (collection === 'assets' && page === 1) return { docs: [asset], hasNextPage: true }
+      if (collection === 'assets') return { docs: [], hasNextPage: false }
+      return { docs: [] }
+    })
+    const update = vi.fn()
+    const req = { context: {}, payload: { find, update } }
+
+    await expect(reapplyAssetTags(req as never)).resolves.toEqual({ scanned: 1, updated: 1 })
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        collection: 'assets',
+        id: 'asset-1',
+        data: expect.objectContaining({ automaticTags: ['automatic'] }),
+      }),
+    )
+    expect(find).toHaveBeenCalledWith(expect.objectContaining({ collection: 'assets', page: 2 }))
+  })
+
   it('does not schedule duplicate tag-reapply jobs while one is pending or recent', async () => {
     const pendingFind = vi.fn(async () => ({ docs: [{ id: 'pending-job' }] }))
     await scheduleAssetTagReapply({ find: pendingFind } as never)
@@ -512,6 +547,9 @@ describe('asset tags', () => {
     )
     expect(valid({ field: 'asset.unknown', operator: 'exists' })).toBe(
       'Unsupported asset field: asset.unknown.',
+    )
+    expect(valid({ field: 'unknown.value', operator: 'exists' })).toBe(
+      'Unsupported tag rule field: unknown.value.',
     )
     expect(valid({ field: 'customFields.missing', operator: 'exists' })).toBe(
       'Unknown custom asset field: customFields.missing.',
@@ -693,6 +731,15 @@ describe('asset tags', () => {
     expect(
       matchesTagRules(
         [{ conditions: [{ field: 'asset.vendor', operator: 'unknown' }] }],
+        asset,
+        [],
+        [],
+        now,
+      ),
+    ).toBe(false)
+    expect(
+      matchesTagRules(
+        [{ conditions: [{ field: 'unknown.value', operator: 'equals', value: 'x' }] }],
         asset,
         [],
         [],

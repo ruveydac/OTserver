@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events'
+import type { LookupFunction } from 'node:net'
 import { Readable } from 'node:stream'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -48,7 +49,7 @@ describe('public vulnerability feed requests', () => {
       { address: '1.1.1.1', family: 4 },
     ])
     mocks.request
-      .mockImplementationOnce(((_options: unknown) => {
+      .mockImplementationOnce((() => {
         const request = new EventEmitter() as EventEmitter & { end: () => void }
         request.end = () => queueMicrotask(() => request.emit('error', new Error('first failed')))
         return request
@@ -64,7 +65,7 @@ describe('public vulnerability feed requests', () => {
     ).resolves.toEqual(Buffer.from('feed'))
 
     const calls = mocks.request.mock.calls as unknown as [
-      { hostname: string; path: string; servername: string; lookup: Function },
+      { hostname: string; path: string; servername: string; lookup: LookupFunction },
       unknown,
     ][]
     const options = calls[1]![0]
@@ -82,7 +83,7 @@ describe('public vulnerability feed requests', () => {
   })
 
   it('rejects when every resolved address fails to connect', async () => {
-    mocks.request.mockImplementation(((_options: unknown) => {
+    mocks.request.mockImplementation((() => {
       const request = new EventEmitter() as EventEmitter & { end: () => void }
       request.end = () => queueMicrotask(() => request.emit('error', new Error('connect failed')))
       return request

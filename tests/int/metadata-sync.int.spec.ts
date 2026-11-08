@@ -5,7 +5,12 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { catalog } from '../fixtures/device-metadata'
 import { readApplicationSettings } from '../../src/application/settings'
 import { activeCatalog } from '../../src/metadata/runtime'
-import { executeMetadataSync, queueMetadataSync } from '../../src/metadata/sync'
+import {
+  executeMetadataSync,
+  queueMetadataSync,
+  scheduleMetadataSync,
+} from '../../src/metadata/sync'
+import { MAX_METADATA_BYTES } from '../../src/metadata/import'
 
 let payload: Payload
 let originalSettings: Awaited<ReturnType<typeof readApplicationSettings>>
@@ -144,6 +149,70 @@ describe('automatic device metadata updates', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
+  it('rejects invalid metadata JSON, incomplete manifests, malformed entries, and oversized snapshots', async () => {
+    await setSettings({ metadataImports: true, metadataSync: {} })
+    const commitSHA = '3'.repeat(40)
+    const treeSHA = '4'.repeat(40)
+    const commit = JSON.stringify({ sha: commitSHA, commit: { tree: { sha: treeSHA } } })
+    const requiredFiles = [
+      {
+        path: 'data/ot-manufacturers.json',
+        type: 'blob',
+        sha: '5'.repeat(40),
+        size: 1,
+      },
+      { path: 'data/ot-devices-test.json', type: 'blob', sha: '6'.repeat(40), size: 1 },
+    ]
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('not JSON'))
+      .mockResolvedValueOnce(new Response(commit))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ truncated: false, tree: [] })))
+      .mockResolvedValueOnce(new Response(commit))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            truncated: false,
+            tree: [{ ...requiredFiles[0]!, type: 'tree' }, requiredFiles[1]],
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(new Response(commit))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            truncated: false,
+            tree: [{ ...requiredFiles[0]!, size: MAX_METADATA_BYTES + 1 }, requiredFiles[1]],
+          }),
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(executeMetadataSync(payload)).rejects.toThrow('invalid metadata commit')
+    await expect(executeMetadataSync(payload)).rejects.toThrow('missing required')
+    await expect(executeMetadataSync(payload)).rejects.toThrow('invalid metadata file information')
+    await expect(executeMetadataSync(payload)).rejects.toThrow('exceeds 8 MiB')
+  })
+
+  it('logs when the failed-sync status cannot be saved', async () => {
+    await setSettings({ metadataImports: true, metadataSync: {} })
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('GitHub unavailable')))
+    const updateGlobal = vi
+      .spyOn(payload, 'updateGlobal')
+      .mockRejectedValueOnce(new Error('status write failed'))
+    const warn = vi.spyOn(payload.logger, 'warn')
+
+    try {
+      await expect(executeMetadataSync(payload)).rejects.toThrow('GitHub could not be reached')
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({ event: 'metadata-sync.status-write-failed' }),
+      )
+    } finally {
+      updateGlobal.mockRestore()
+      warn.mockRestore()
+    }
+  })
+
   it('imports a commit-pinned catalog, skips the same commit, and leaves the catalog unchanged on integrity failure', async () => {
     const firstCommit = '1'.repeat(40)
     await setSettings({ metadataImports: true, metadataSync: {} })
@@ -188,6 +257,7 @@ describe('automatic device metadata updates', () => {
     try {
       expect(job).toMatchObject({ taskSlug: 'device-metadata-sync-v1' })
       expect((await readApplicationSettings(payload)).metadataSync?.jobID).toBe(String(job!.id))
+      await expect(scheduleMetadataSync(payload)).resolves.toMatchObject({ id: job!.id })
       await setSettings({
         metadataImports: true,
         metadataSync: { requestedAt: '2000-01-01T00:00:00.000Z' },
