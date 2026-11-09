@@ -1,6 +1,5 @@
 import { APIError, JobCancelledError, type JobsConfig } from 'payload'
 import { adminOnly, hideFromNonAdmins } from '../access/authorization'
-import { withAudit } from '../collections/AuditLogs'
 import { executeQueuedImport } from '../application/queuedImports'
 import { runMaintenance } from './maintenance'
 import { safeFailure, transientFailure } from './errors'
@@ -23,16 +22,15 @@ export const jobs: JobsConfig = {
   // operator object as a Log value and rejects failed-job bookkeeping. Application-level job
   // effects remain audited; the generated jobs collection is operational metadata.
   runHooks: false,
-  jobsCollectionOverrides: ({ defaultJobsCollection }) =>
-    withAudit({
-      ...defaultJobsCollection,
-      access: { create: () => false, update: () => false, delete: () => false, read: adminOnly },
-      admin: { ...defaultJobsCollection.admin, group: 'Operations', hidden: hideFromNonAdmins },
-      indexes: [
-        ...(defaultJobsCollection.indexes || []),
-        { fields: ['queue', 'processing', 'hasError', 'completedAt', 'createdAt'] },
-      ],
-    }),
+  jobsCollectionOverrides: ({ defaultJobsCollection }) => ({
+    ...defaultJobsCollection,
+    access: { create: () => false, update: () => false, delete: () => false, read: adminOnly },
+    admin: { ...defaultJobsCollection.admin, group: 'Operations', hidden: hideFromNonAdmins },
+    indexes: [
+      ...(defaultJobsCollection.indexes || []),
+      { fields: ['queue', 'processing', 'hasError', 'completedAt', 'createdAt'] },
+    ],
+  }),
   tasks: [
     {
       slug: METADATA_SYNC_TASK,

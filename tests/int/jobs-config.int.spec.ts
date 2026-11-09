@@ -168,7 +168,7 @@ describe('Payload job configuration', () => {
     )
     await expect(run(args)).rejects.toBeInstanceOf(JobCancelledError)
   })
-  it('keeps the raw queue operations private and audits its collection', async () => {
+  it('keeps raw queue operations private without adding disabled hooks', async () => {
     expect(await jobs.access!.run!({} as never)).toBe(false)
     expect(await jobs.access!.queue!({} as never)).toBe(false)
     expect(await jobs.access!.cancel!({} as never)).toBe(false)
@@ -185,6 +185,7 @@ describe('Payload job configuration', () => {
         indexes: [{ fields: ['taskSlug'] }],
       },
     } as never)
+    expect(collection.hooks).toEqual({})
     expect(collection.admin).toMatchObject({ group: 'Operations' })
     expect(collection.indexes).toEqual(
       expect.arrayContaining([

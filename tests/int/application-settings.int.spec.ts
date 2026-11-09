@@ -210,7 +210,7 @@ describe('administrator application settings', () => {
 
     const cleanupFields = (
       ApplicationSettings.fields.find(
-        (field) => field.name === 'assetImportCleanup',
+        (field) => field.type === 'group' && 'name' in field && field.name === 'assetImportCleanup',
       ) as unknown as {
         fields: { name: string; validate?: (value: unknown) => true | string }[]
       }
