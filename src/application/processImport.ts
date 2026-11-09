@@ -56,12 +56,20 @@ const processImportInContext = async ({
   let created = 0
   let updated = 0
   let mutating = false
+  let phase = 'parse'
+  let site: string | undefined
+  let assetCount: number | undefined
+  let linkCount: number | undefined
+  let assetsProcessed = 0
+  let linksProcessed = 0
 
   try {
     const contents = data.toString('utf8')
     const topology = parsers[doc.source as ImportSource](contents)
     const importedAt = new Date().toISOString()
-    const site = typeof doc.site === 'object' ? doc.site?.id : doc.site
+    site = typeof doc.site === 'object' ? doc.site?.id : doc.site
+    assetCount = topology.assets.length
+    linkCount = topology.links?.length || 0
     const sourceVersion = topology.sourceVersion || doc.sourceVersion || 'unknown'
     const assetOverrides = getAssetOverrides(doc.assetOverrides)
     const customFieldOverrides =
@@ -71,14 +79,18 @@ const processImportInContext = async ({
         ? doc.customFieldOverrides
         : {}
 
+    phase = 'validate-import'
     if (!site) throw new Error('Select a site before importing assets.')
     if (topology.assets.length + (topology.links?.length || 0) > 2000)
       throw new Error(
         'Identity imports are limited to 2000 device/component/link records per transaction. Split this file into smaller scans.',
       )
+    phase = 'require-transaction'
     await requireTransaction(req)
+    phase = 'check-site-policy'
     await assertSiteAllowsImports(site, req)
     mutating = true
+    phase = 'check-replay'
     const appliedKey = scopedKey(
       'import-v1',
       site,
@@ -121,6 +133,7 @@ const processImportInContext = async ({
 
     // Keep each synchronous or queued import in one bounded transaction.
     for (const asset of topology.assets) {
+      phase = 'resolve-identity'
       const { observations, ...assetData } = asset
       const resolution = await resolveImportedIdentity(asset, String(site), req)
       const current = resolution.current
@@ -128,6 +141,7 @@ const processImportInContext = async ({
       if (resolution.unresolved) {
         topology.unresolved ||= []
         topology.unresolved.push({ reason: 'Identity requires reconciliation', observations })
+        assetsProcessed++
         continue
       }
       const automaticData = {
@@ -189,6 +203,7 @@ const processImportInContext = async ({
       }
       let resolved: Asset
 
+      phase = 'write-asset'
       if (current && merged.changed) {
         resolved = await req.payload.update({
           collection: 'assets',
@@ -229,6 +244,7 @@ const processImportInContext = async ({
         resolved = current
       }
       const assetID = String(resolved.id)
+      phase = 'bind-endpoints'
       const endpoints = await bindImportedIdentity(
         asset,
         resolved,
@@ -244,6 +260,7 @@ const processImportInContext = async ({
         await suggestAdjacentInterfaces(resolved, asset.macAddress, req)
 
       for (const observation of observations || []) {
+        phase = 'write-observation'
         await req.payload.create({
           collection: 'asset-observations',
           data: {
@@ -265,8 +282,10 @@ const processImportInContext = async ({
           req,
         })
       }
+      assetsProcessed++
     }
 
+    phase = 'record-containment'
     for (const asset of topology.assets) {
       const id = asset.componentRef && componentIDs.get(asset.componentRef)
       const parent = asset.parentComponentRef && componentIDs.get(asset.parentComponentRef)
@@ -282,6 +301,7 @@ const processImportInContext = async ({
     }
 
     const findAssetID = async (endpoint: Record<string, unknown>) => {
+      phase = 'resolve-topology-endpoint'
       const macAddress = typeof endpoint.macAddress === 'string' ? endpoint.macAddress : ''
       if (!macAddress) return undefined
       if (assetIDs.has(macAddress)) return assetIDs.get(macAddress)
@@ -305,6 +325,7 @@ const processImportInContext = async ({
     for (const link of topology.links || []) {
       const localAsset = await findAssetID(link.local)
       const remoteAsset = await findAssetID(link.remote)
+      phase = 'suggest-attachment-change'
       if (localAsset && remoteAsset && typeof link.local.portId === 'string')
         await suggestAttachmentChange(
           String(site),
@@ -314,6 +335,7 @@ const processImportInContext = async ({
           link.observedAt,
           req,
         )
+      phase = 'write-topology-link'
       await req.payload.create({
         collection: 'topology-links',
         data: {
@@ -330,8 +352,10 @@ const processImportInContext = async ({
         overrideAccess: true,
         req,
       })
+      linksProcessed++
     }
 
+    phase = 'complete-import'
     const durationSeconds = (Date.now() - startedAt) / 1000
     const warnings = [
       ...topology.warnings,
@@ -371,7 +395,22 @@ const processImportInContext = async ({
       }),
     )
   } catch (error) {
-    if (!throwValidationErrors) req.payload.logger.error(error)
+    if (!throwValidationErrors)
+      req.payload.logger.error({
+        event: 'asset-import.failed',
+        importID: String(doc.id),
+        source: doc.source,
+        ...(site ? { siteID: String(site) } : {}),
+        phase,
+        assetCount,
+        assetsProcessed,
+        assetsCreatedBeforeFailure: created,
+        assetsUpdatedBeforeFailure: updated,
+        linkCount,
+        linksProcessed,
+        durationMs: Date.now() - startedAt,
+        err: error,
+      })
     // A write failure must escape the hook so Payload rolls back the entire inventory transaction.
     if (mutating || throwValidationErrors) throw error
     return withRequestContext(req, { skipAssetImport: true }, () =>

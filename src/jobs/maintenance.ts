@@ -1,12 +1,15 @@
 import type { Payload } from 'payload'
 import { systemRequest } from '../integrations/payload/requests'
 import { removeExpiredFeedUploads } from '../vulnerabilities/offline'
+import { cleanupAssetImportFiles } from '../application/assetImportCleanup'
 
 export const SYNC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000
 export const TRASH_RETENTION_DAYS = 90
 
 export const runMaintenance = async (payload: Payload) => {
+  const req = await systemRequest(payload)
   await removeExpiredFeedUploads(payload)
+  await cleanupAssetImportFiles(payload, req)
   const cutoff = new Date(Date.now() - TRASH_RETENTION_DAYS * 86_400_000).toISOString()
   for (;;) {
     const expired = await payload.find({
@@ -22,7 +25,6 @@ export const runMaintenance = async (payload: Payload) => {
     for (const asset of expired.docs)
       await payload.delete({ collection: 'assets', id: asset.id, trash: true })
   }
-  const req = await systemRequest(payload)
   await payload.update({
     collection: 'worker-leases',
     where: { queue: { equals: 'maintenance' } },

@@ -6,6 +6,7 @@ import { ApplicationSettings } from '../../src/globals/ApplicationSettings'
 import { ensureAdminRole } from '../../src/collections/UserRoles'
 import {
   configuredControllerURL,
+  readAssetImportCleanupSettings,
   queuedImportsEnabled,
   readApplicationSettings,
   readVulnerabilityFeedSettings,
@@ -60,6 +61,20 @@ describe('administrator application settings', () => {
       automaticUpdates: false,
       pullIntervalDays: 14,
       customCsafFeeds: [{ name: 'Vendor', type: 'rolie' }],
+    })
+    settings = { assetImportCleanup: { enabled: true, maxFiles: 500, maxAgeDays: 60 } }
+    await expect(readAssetImportCleanupSettings(payload as never)).resolves.toEqual({
+      enabled: true,
+      maxFiles: 500,
+      maxAgeDays: 60,
+    })
+    settings = { assetImportCleanup: { enabled: true, maxFiles: 0, maxAgeDays: 60 } }
+    await expect(readAssetImportCleanupSettings(payload as never)).rejects.toThrow('file limit')
+    settings = {}
+    await expect(readAssetImportCleanupSettings(payload as never)).resolves.toEqual({
+      enabled: false,
+      maxFiles: 1000,
+      maxAgeDays: 90,
     })
     settings = { vulnerabilityFeeds: { pullIntervalDays: 0 } }
     await expect(readVulnerabilityFeedSettings(payload as never)).rejects.toThrow('interval')
@@ -170,6 +185,15 @@ describe('administrator application settings', () => {
           type: 'checkbox',
           defaultValue: false,
         }),
+        expect.objectContaining({
+          name: 'assetImportCleanup',
+          type: 'group',
+          fields: expect.arrayContaining([
+            expect.objectContaining({ name: 'enabled', type: 'checkbox', defaultValue: false }),
+            expect.objectContaining({ name: 'maxFiles', type: 'number', defaultValue: 1000 }),
+            expect.objectContaining({ name: 'maxAgeDays', type: 'number', defaultValue: 90 }),
+          ]),
+        }),
       ]),
     )
   })
@@ -209,6 +233,11 @@ describe('administrator application settings', () => {
       controllerURL?: string | null
       queuedImports?: 'deployment' | 'enabled' | 'disabled' | null
       metadataImports?: boolean | null
+      assetImportCleanup?: {
+        enabled?: boolean
+        maxFiles?: number
+        maxAgeDays?: number
+      }
       vulnerabilityFeeds?: {
         automaticUpdates?: boolean
         pullIntervalDays?: number
@@ -259,6 +288,7 @@ describe('administrator application settings', () => {
           controllerURL: ' https://saved.example ',
           queuedImports: 'disabled',
           metadataImports: true,
+          assetImportCleanup: { enabled: true, maxFiles: 500, maxAgeDays: 60 },
           vulnerabilityFeeds: {
             automaticUpdates: false,
             pullIntervalDays: 14,
@@ -274,6 +304,7 @@ describe('administrator application settings', () => {
         controllerURL: 'https://saved.example',
         queuedImports: 'disabled',
         metadataImports: true,
+        assetImportCleanup: { enabled: true, maxFiles: 500, maxAgeDays: 60 },
         vulnerabilityFeeds: {
           automaticUpdates: false,
           pullIntervalDays: 14,
@@ -284,6 +315,12 @@ describe('administrator application settings', () => {
       })
       await expect(readApplicationSettings(payload, adminReq)).resolves.toMatchObject({
         metadataImports: true,
+        assetImportCleanup: { enabled: true, maxFiles: 500, maxAgeDays: 60 },
+      })
+      await expect(readAssetImportCleanupSettings(payload, adminReq)).resolves.toEqual({
+        enabled: true,
+        maxFiles: 500,
+        maxAgeDays: 60,
       })
       await expect(readVulnerabilityFeedSettings(payload, adminReq)).resolves.toMatchObject({
         automaticUpdates: false,
@@ -321,6 +358,11 @@ describe('administrator application settings', () => {
           controllerURL: previous.controllerURL || '',
           queuedImports: previous.queuedImports || 'deployment',
           metadataImports: previous.metadataImports ?? false,
+          assetImportCleanup: previous.assetImportCleanup ?? {
+            enabled: false,
+            maxFiles: 1000,
+            maxAgeDays: 90,
+          },
           vulnerabilityFeeds: previous.vulnerabilityFeeds ?? {
             automaticUpdates: true,
             pullIntervalDays: 7,

@@ -1,10 +1,13 @@
 import {
   APIError,
+  FileUploadError,
   type CollectionConfig,
+  type CollectionAfterErrorHook,
   type CollectionBeforeValidateHook,
   type CollectionAfterChangeHook,
   type CollectionBeforeChangeHook,
   type CollectionBeforeOperationHook,
+  type PayloadRequest,
 } from 'payload'
 import { isDeepStrictEqual } from 'node:util'
 import {
@@ -55,6 +58,23 @@ const runImport: CollectionAfterChangeHook = async ({ context, doc, req, operati
   return processImport({ doc, data: req.file.data, req })
 }
 
+const logUploadFailure: CollectionAfterErrorHook = ({ error, req }) => {
+  const code = (error as NodeJS.ErrnoException).code
+  if (
+    !(error instanceof FileUploadError) &&
+    !['EDQUOT', 'EACCES', 'EIO', 'ENOSPC', 'EROFS'].includes(code || '')
+  )
+    return
+  req.payload.logger.error({
+    event: 'asset-import.upload.failed',
+    fileName: req.file?.name,
+    fileSize: req.file?.size,
+    method: req.method,
+    requestPath: req.pathname,
+    err: error,
+  })
+}
+
 const managed = [
   'status',
   'jobID',
@@ -81,6 +101,7 @@ const managed = [
   'unresolved',
   'scanner',
   'otterRun',
+  'fileRemovedAt',
 ]
 const immutable = [
   'executionMode',
@@ -94,6 +115,11 @@ const immutable = [
   'filename',
 ]
 const internalFieldAccess = { create: () => false, read: () => false, update: () => false }
+const fileRemovedAtAccess = {
+  create: () => false,
+  read: () => false,
+  update: ({ req }: { req: PayloadRequest }) => req.context.assetImportFileReplacement === true,
+}
 const protectProcessing: CollectionBeforeChangeHook = async ({
   data,
   originalDoc,
@@ -115,6 +141,7 @@ const protectProcessing: CollectionBeforeChangeHook = async ({
           throw new APIError('Queued processing inputs are immutable.', 409)
     } else if (data.executionMode === 'queued')
       throw new APIError('Select queued mode when creating the upload.', 400)
+    if (req.file) data.fileRemovedAt = null
     return data
   }
   // Discard caller-supplied processing state, including through generic REST/GraphQL APIs.
@@ -238,6 +265,7 @@ const protectUpload: CollectionBeforeOperationHook = async ({ args, operation, r
         if (!existing.hasNextPage) break
         page++
       }
+      req.context.assetImportFileReplacement = true
     }
   }
   return args
@@ -311,6 +339,12 @@ export const AssetImports: CollectionConfig = {
       name: 'processingInput',
       type: 'json',
       access: internalFieldAccess,
+      admin: { hidden: true },
+    },
+    {
+      name: 'fileRemovedAt',
+      type: 'date',
+      access: fileRemovedAtAccess,
       admin: { hidden: true },
     },
     ...['queuedAt', 'startedAt', 'completedAt'].map((name) => ({
@@ -480,6 +514,7 @@ export const AssetImports: CollectionConfig = {
     },
   ],
   hooks: {
+    afterError: [logUploadFailure],
     beforeOperation: [protectUpload],
     afterChange: [runImport],
     beforeValidate: [normalizeLegacyOtterSource, bindOtterUpload],

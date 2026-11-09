@@ -164,4 +164,62 @@ describe('processImport runtime boundaries', () => {
     expect(mocks.requireTransaction).not.toHaveBeenCalled()
     expect(req.context).toEqual({ assetImport: false, importWrite: 'outer-operation' })
   })
+
+  it('logs the failing import phase and can process the next import after a write error', async () => {
+    mocks.parseNmap.mockReturnValue({
+      assets: [{ name: 'device', macAddress: '02:00:00:00:00:01' }],
+      links: [],
+      warnings: [],
+    })
+    mocks.resolveImportedIdentity.mockResolvedValue({
+      current: undefined,
+      blocked: false,
+      unresolved: false,
+    })
+    const failure = new Error('injected asset write failure')
+    const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+      id: 'asset-1',
+      ...data,
+    }))
+    create.mockRejectedValueOnce(failure)
+    const loggerError = vi.fn()
+    const req = {
+      context: {},
+      payload: {
+        create,
+        find: vi.fn(async () => ({ docs: [] })),
+        findByID: vi.fn(async ({ collection }: { collection: string }) =>
+          collection === 'sites' ? { type: 'type-1' } : { blockImports: false },
+        ),
+        logger: { error: loggerError },
+        update: vi.fn(async ({ id, data }: { id: string; data: Record<string, unknown> }) => ({
+          id,
+          ...data,
+        })),
+      },
+    }
+
+    await expect(
+      processImport({ data: Buffer.from('<nmaprun />'), doc: doc as never, req: req as never }),
+    ).rejects.toBe(failure)
+    expect(loggerError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'asset-import.failed',
+        importID: 'import-1',
+        source: 'nmap',
+        siteID: 'site-1',
+        phase: 'write-asset',
+        assetCount: 1,
+        assetsProcessed: 0,
+        assetsCreatedBeforeFailure: 0,
+        err: failure,
+      }),
+    )
+
+    await expect(
+      processImport({ data: Buffer.from('<nmaprun />'), doc: doc as never, req: req as never }),
+    ).resolves.toMatchObject({ status: 'completed' })
+    expect(create).toHaveBeenCalledTimes(2)
+    expect(req.context).toEqual({})
+  })
 })
