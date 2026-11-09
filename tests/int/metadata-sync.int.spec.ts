@@ -67,6 +67,12 @@ afterAll(async () => {
     metadataImports: originalSettings.metadataImports ?? false,
     metadataSync: originalSettings.metadataSync ?? null,
   })
+  const catalog = await payload.find({
+    collection: 'device-catalog',
+    where: { id: { equals: 'active' } },
+    limit: 1,
+  })
+  if (catalog.docs.length) await payload.delete({ collection: 'device-catalog', id: 'active' })
   await payload.destroy()
 })
 
