@@ -8,7 +8,13 @@ import { adminOnly, hideFromNonAdmins } from '../access/authorization'
 import { writeAudit } from '../collections/AuditLogs'
 import { guardWorkerWrite } from '../integrations/payload/workerContext'
 import { primeTransaction } from '../integrations/payload/transactions'
-import { validateControllerURL } from '../application/settings'
+import {
+  DEFAULT_ASSET_IMPORT_CLEANUP_MAX_AGE_DAYS,
+  DEFAULT_ASSET_IMPORT_CLEANUP_MAX_FILES,
+  MAX_ASSET_IMPORT_CLEANUP_AGE_DAYS,
+  MAX_ASSET_IMPORT_CLEANUP_FILES,
+  validateControllerURL,
+} from '../application/settings'
 import {
   CSAF_FEED_TYPES,
   MAX_CUSTOM_CSAF_FEEDS,
@@ -203,6 +209,61 @@ export const ApplicationSettings: GlobalConfig = {
         description:
           'Controls new queued import submissions and retries. Jobs already accepted continue processing. The deployment default uses OTSERVER_QUEUED_IMPORTS.',
       },
+    },
+    {
+      name: 'assetImportCleanup',
+      type: 'group',
+      label: 'Asset import file cleanup',
+      fields: [
+        {
+          name: 'enabled',
+          type: 'checkbox',
+          defaultValue: false,
+          label: 'Enable completed import file cleanup',
+          admin: {
+            description:
+              'The maintenance worker checks this policy weekly. Import records remain. Only completed import files are removed; pending, running, and failed imports keep their files.',
+          },
+        },
+        {
+          name: 'maxFiles',
+          type: 'number',
+          defaultValue: DEFAULT_ASSET_IMPORT_CLEANUP_MAX_FILES,
+          min: 1,
+          max: MAX_ASSET_IMPORT_CLEANUP_FILES,
+          label: 'Maximum retained files',
+          admin: {
+            step: 1,
+            description:
+              'Remove the oldest completed files when the total exceeds this count. Non-completed imports can keep the total above the limit.',
+          },
+          validate: (value: unknown) =>
+            (typeof value === 'number' &&
+              Number.isInteger(value) &&
+              value >= 1 &&
+              value <= MAX_ASSET_IMPORT_CLEANUP_FILES) ||
+            `Enter a whole number from 1 to ${MAX_ASSET_IMPORT_CLEANUP_FILES}.`,
+        },
+        {
+          name: 'maxAgeDays',
+          type: 'number',
+          defaultValue: DEFAULT_ASSET_IMPORT_CLEANUP_MAX_AGE_DAYS,
+          min: 1,
+          max: MAX_ASSET_IMPORT_CLEANUP_AGE_DAYS,
+          label: 'Maximum file age (days)',
+          admin: {
+            step: 1,
+            description:
+              'Remove completed import files older than this age during maintenance, regardless of the file-count limit.',
+          },
+          validate: (value: unknown) =>
+            (typeof value === 'number' &&
+              Number.isInteger(value) &&
+              value >= 1 &&
+              value <= MAX_ASSET_IMPORT_CLEANUP_AGE_DAYS) ||
+            `Enter a whole number from 1 to ${MAX_ASSET_IMPORT_CLEANUP_AGE_DAYS}.`,
+        },
+      ],
     },
   ],
 }

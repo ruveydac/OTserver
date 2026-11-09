@@ -463,6 +463,52 @@ describe('device identity', () => {
     expect(observations.totalDocs).toBe(2)
   })
 
+  it('recovers after a failed multi-device import rolls its transaction back', async () => {
+    const siteID = await site()
+    for (const ipAddress of ['192.0.2.50', '192.0.2.51', '192.0.2.52']) {
+      const successful = await upload(siteID, scan(serial(), [[mac(), ipAddress]]))
+      expect(successful.status).toBe('completed')
+    }
+    const secondSerial = serial()
+    const input = scan(serial(), [
+      [mac(), '192.0.2.60'],
+      [mac(), '192.0.2.61'],
+    ])
+    input.devices[1]!.observations[0]!.fields.serialNumber = secondSerial
+    input.devices[1]!.observations[0]!.raw.serialClaim.original = secondSerial
+
+    const assetsConfig = payload.collections.assets.config
+    const originalHooks = assetsConfig.hooks
+    assetsConfig.hooks = {
+      ...originalHooks,
+      afterChange: [
+        ...(originalHooks?.afterChange || []),
+        async ({ doc, req }) => {
+          if (req.context.assetImport && doc.serialNumber === secondSerial)
+            throw new Error('Injected asset write failure.')
+          return doc
+        },
+      ],
+    }
+    try {
+      await expect(upload(siteID, input)).rejects.toThrow('Injected asset write failure.')
+    } finally {
+      assetsConfig.hooks = originalHooks
+    }
+
+    expect(
+      (await payload.count({ collection: 'assets', where: { site: { equals: siteID } } }))
+        .totalDocs,
+    ).toBe(3)
+    expect(
+      Object.keys((payload.db as unknown as { sessions?: Record<string, unknown> }).sessions || {}),
+    ).toHaveLength(0)
+
+    const recovered = await upload(siteID, scan(serial(), [[mac(), '192.0.2.62']]))
+    expect(recovered.status).toBe('completed')
+    await expect(asset(siteID)).resolves.toMatchObject({ site: { id: siteID } })
+  })
+
   it('allows unchanged identity projections in asset edits but rejects changed projections', async () => {
     const siteID = await site()
     await upload(

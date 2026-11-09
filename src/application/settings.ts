@@ -7,6 +7,11 @@ export type ApplicationSettings = {
     pullIntervalDays?: number | null
     customCsafFeeds?: CustomCsafFeed[] | null
   } | null
+  assetImportCleanup?: {
+    enabled?: boolean | null
+    maxFiles?: number | null
+    maxAgeDays?: number | null
+  } | null
   metadataImports?: boolean | null
   metadataSync?: {
     requestedAt?: string | null
@@ -30,6 +35,34 @@ export type ApplicationSettings = {
 }
 
 export const DEFAULT_VULNERABILITY_FEED_INTERVAL_DAYS = 7
+export const DEFAULT_ASSET_IMPORT_CLEANUP_MAX_FILES = 1000
+export const DEFAULT_ASSET_IMPORT_CLEANUP_MAX_AGE_DAYS = 90
+export const MAX_ASSET_IMPORT_CLEANUP_FILES = 100_000
+export const MAX_ASSET_IMPORT_CLEANUP_AGE_DAYS = 3650
+
+export const readAssetImportCleanupSettings = async (payload: Payload, req?: PayloadRequest) => {
+  const settings = (await readApplicationSettings(payload, req)).assetImportCleanup
+  const enabled = settings?.enabled ?? false
+  const maxFiles = settings?.maxFiles ?? DEFAULT_ASSET_IMPORT_CLEANUP_MAX_FILES
+  const maxAgeDays = settings?.maxAgeDays ?? DEFAULT_ASSET_IMPORT_CLEANUP_MAX_AGE_DAYS
+
+  if (typeof enabled !== 'boolean')
+    throw new Error('Asset import cleanup enabled must be a boolean.')
+  if (!Number.isInteger(maxFiles) || maxFiles < 1 || maxFiles > MAX_ASSET_IMPORT_CLEANUP_FILES)
+    throw new Error(
+      `Asset import cleanup file limit must be from 1 to ${MAX_ASSET_IMPORT_CLEANUP_FILES}.`,
+    )
+  if (
+    !Number.isInteger(maxAgeDays) ||
+    maxAgeDays < 1 ||
+    maxAgeDays > MAX_ASSET_IMPORT_CLEANUP_AGE_DAYS
+  )
+    throw new Error(
+      `Asset import cleanup age must be from 1 to ${MAX_ASSET_IMPORT_CLEANUP_AGE_DAYS} days.`,
+    )
+
+  return { enabled, maxFiles, maxAgeDays }
+}
 
 export const readVulnerabilityFeedSettings = async (payload: Payload, req?: PayloadRequest) => {
   const settings = (await readApplicationSettings(payload, req)).vulnerabilityFeeds

@@ -739,6 +739,7 @@ export interface AssetImport {
     | number
     | boolean
     | null;
+  fileRemovedAt?: string | null;
   queuedAt?: string | null;
   startedAt?: string | null;
   completedAt?: string | null;
@@ -2020,6 +2021,7 @@ export interface AssetImportsSelect<T extends boolean = true> {
   retriedBy?: T;
   fileDigest?: T;
   processingInput?: T;
+  fileRemovedAt?: T;
   queuedAt?: T;
   startedAt?: T;
   completedAt?: T;
@@ -2612,6 +2614,20 @@ export interface ApplicationSetting {
    * Controls new queued import submissions and retries. Jobs already accepted continue processing. The deployment default uses OTSERVER_QUEUED_IMPORTS.
    */
   queuedImports?: ('deployment' | 'enabled' | 'disabled') | null;
+  assetImportCleanup?: {
+    /**
+     * The maintenance worker checks this policy weekly. Import records remain. Only completed import files are removed; pending, running, and failed imports keep their files.
+     */
+    enabled?: boolean | null;
+    /**
+     * Remove the oldest completed files when the total exceeds this count. Non-completed imports can keep the total above the limit.
+     */
+    maxFiles?: number | null;
+    /**
+     * Remove completed import files older than this age during maintenance, regardless of the file-count limit.
+     */
+    maxAgeDays?: number | null;
+  };
   updatedAt?: string | null;
   createdAt?: string | null;
 }
@@ -2658,6 +2674,13 @@ export interface ApplicationSettingsSelect<T extends boolean = true> {
       };
   controllerURL?: T;
   queuedImports?: T;
+  assetImportCleanup?:
+    | T
+    | {
+        enabled?: T;
+        maxFiles?: T;
+        maxAgeDays?: T;
+      };
   updatedAt?: T;
   createdAt?: T;
   globalType?: T;

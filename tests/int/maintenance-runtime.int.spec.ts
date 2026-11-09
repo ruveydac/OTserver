@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
+  cleanup: vi.fn(),
   sync: vi.fn(),
   systemRequest: vi.fn(async () => ({ context: {} })),
 }))
@@ -14,6 +15,9 @@ vi.mock('../../src/integrations/payload/requests', () => ({
 }))
 
 vi.mock('../../src/vulnerabilities/offline', () => ({ removeExpiredFeedUploads: vi.fn() }))
+vi.mock('../../src/application/assetImportCleanup', () => ({
+  cleanupAssetImportFiles: mocks.cleanup,
+}))
 
 import { runMaintenance, TRASH_RETENTION_DAYS } from '../../src/jobs/maintenance'
 
@@ -48,6 +52,7 @@ describe('maintenance task', () => {
       }),
     )
     expect(payload.delete).toHaveBeenCalledTimes(2)
+    expect(mocks.cleanup).toHaveBeenCalledTimes(1)
     expect(payload.update).toHaveBeenCalledWith(
       expect.objectContaining({
         collection: 'worker-leases',
@@ -62,6 +67,7 @@ describe('maintenance task', () => {
     const payload = makePayload([[]])
     await runMaintenance(payload as never)
 
+    expect(mocks.cleanup).toHaveBeenCalledTimes(1)
     expect(mocks.sync).not.toHaveBeenCalled()
   })
 })
