@@ -192,6 +192,137 @@ describe('asset import file cleanup', () => {
     expect(find).not.toHaveBeenCalled()
   })
 
+  it('requires a configured upload directory and rejects unsafe import filenames', async () => {
+    const settings = vi.fn(async () => ({
+      assetImportCleanup: { enabled: true, maxFiles: 1, maxAgeDays: 90 },
+    }))
+    const missingDirectory = {
+      collections: { 'asset-imports': { config: { upload: {} } } },
+      findGlobal: settings,
+    }
+    await expect(
+      cleanupAssetImportFiles(
+        missingDirectory as never,
+        { context: {}, payload: missingDirectory } as never,
+      ),
+    ).rejects.toThrow('upload directory is not configured')
+
+    for (const filename of ['', '../outside.json']) {
+      const logger = { error: vi.fn(), info: vi.fn(), warn: vi.fn() }
+      const payload = {
+        collections: { 'asset-imports': { config: { upload: { staticDir: '/tmp' } } } },
+        count: vi
+          .fn()
+          .mockResolvedValueOnce({ totalDocs: 2 })
+          .mockResolvedValueOnce({ totalDocs: 0 }),
+        find: vi.fn(async () => ({
+          docs: [{ id: 'unsafe', filename, createdAt: new Date().toISOString() }],
+        })),
+        findGlobal: settings,
+        logger,
+        update: vi.fn(),
+      }
+
+      await cleanupAssetImportFiles(payload as never, { context: {}, payload } as never)
+
+      expect(logger.warn).toHaveBeenCalledWith({
+        event: 'asset-import.file-cleanup.invalid-filename',
+        importID: 'unsafe',
+      })
+      expect(payload.update).not.toHaveBeenCalled()
+    }
+  })
+
+  it('marks missing files with no timestamp removed without reporting an unlink error', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'otserver-import-cleanup-'))
+    const logger = { error: vi.fn(), info: vi.fn(), warn: vi.fn() }
+    const payload = {
+      collections: { 'asset-imports': { config: { upload: { staticDir: directory } } } },
+      count: vi
+        .fn()
+        .mockResolvedValueOnce({ totalDocs: 2 })
+        .mockResolvedValueOnce({ totalDocs: 0 }),
+      find: vi.fn(async () => ({
+        docs: [{ id: 'missing', filename: 'missing.json', createdAt: '' }],
+      })),
+      findGlobal: vi.fn(async () => ({
+        assetImportCleanup: { enabled: true, maxFiles: 1, maxAgeDays: 90 },
+      })),
+      logger,
+      update: vi.fn(),
+    }
+
+    try {
+      await cleanupAssetImportFiles(payload as never, { context: {}, payload } as never)
+
+      expect(payload.update).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'missing', data: { fileRemovedAt: expect.any(String) } }),
+      )
+      expect(logger.error).not.toHaveBeenCalled()
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.objectContaining({ event: 'asset-import.files-cleaned', filesMarkedRemoved: 1 }),
+      )
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
+  it('stops and logs when an import file cannot be removed', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'otserver-import-cleanup-'))
+    const logger = { error: vi.fn(), info: vi.fn(), warn: vi.fn() }
+    const payload = {
+      collections: { 'asset-imports': { config: { upload: { staticDir: directory } } } },
+      count: vi
+        .fn()
+        .mockResolvedValueOnce({ totalDocs: 1 })
+        .mockResolvedValueOnce({ totalDocs: 0 }),
+      find: vi.fn(async () => ({
+        docs: [{ id: 'blocked', filename: 'blocked.json', createdAt: '2020-01-01T00:00:00.000Z' }],
+      })),
+      findGlobal: vi.fn(async () => ({
+        assetImportCleanup: { enabled: true, maxFiles: 1, maxAgeDays: 1 },
+      })),
+      logger,
+      update: vi.fn(),
+    }
+
+    try {
+      await mkdir(path.join(directory, 'blocked.json'))
+      await cleanupAssetImportFiles(payload as never, { context: {}, payload } as never)
+
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'asset-import.file-cleanup.failed',
+          importID: 'blocked',
+          fileName: 'blocked.json',
+          err: expect.objectContaining({ code: 'EISDIR' }),
+        }),
+      )
+      expect(payload.update).not.toHaveBeenCalled()
+      expect(logger.info).not.toHaveBeenCalled()
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
+  it('returns quietly when there are no completed import files', async () => {
+    const logger = { error: vi.fn(), info: vi.fn(), warn: vi.fn() }
+    const payload = {
+      collections: { 'asset-imports': { config: { upload: { staticDir: '/tmp' } } } },
+      count: vi.fn().mockResolvedValue({ totalDocs: 0 }),
+      find: vi.fn(async () => ({ docs: [] })),
+      findGlobal: vi.fn(async () => ({
+        assetImportCleanup: { enabled: true, maxFiles: 10, maxAgeDays: 90 },
+      })),
+      logger,
+    }
+
+    await cleanupAssetImportFiles(payload as never, { context: {}, payload } as never)
+
+    expect(payload.find).toHaveBeenCalledOnce()
+    expect(logger.info).not.toHaveBeenCalled()
+  })
+
   it('clears the cleanup marker when a synchronous import file is replaced', async () => {
     const beforeChange = AssetImports.hooks?.beforeChange?.[1]
     const req = { context: { assetImportFileReplacement: true }, file: { name: 'new.xml' } }

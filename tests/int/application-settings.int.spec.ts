@@ -70,6 +70,17 @@ describe('administrator application settings', () => {
     })
     settings = { assetImportCleanup: { enabled: true, maxFiles: 0, maxAgeDays: 60 } }
     await expect(readAssetImportCleanupSettings(payload as never)).rejects.toThrow('file limit')
+    for (const assetImportCleanup of [
+      { enabled: 'yes' },
+      { enabled: true, maxFiles: 1.5 },
+      { enabled: true, maxFiles: 100_001 },
+      { enabled: true, maxAgeDays: 0 },
+      { enabled: true, maxAgeDays: 1.5 },
+      { enabled: true, maxAgeDays: 3651 },
+    ]) {
+      settings = { assetImportCleanup }
+      await expect(readAssetImportCleanupSettings(payload as never)).rejects.toThrow()
+    }
     settings = {}
     await expect(readAssetImportCleanupSettings(payload as never)).resolves.toEqual({
       enabled: false,
@@ -196,6 +207,23 @@ describe('administrator application settings', () => {
         }),
       ]),
     )
+
+    const cleanupFields = (
+      ApplicationSettings.fields.find(
+        (field) => field.name === 'assetImportCleanup',
+      ) as unknown as {
+        fields: { name: string; validate?: (value: unknown) => true | string }[]
+      }
+    ).fields
+    for (const [name, maximum] of [
+      ['maxFiles', 100_000],
+      ['maxAgeDays', 3650],
+    ] as const) {
+      const validate = cleanupFields.find((field) => field.name === name)?.validate
+      expect(validate?.(1)).toBe(true)
+      for (const value of [0, 1.5, '1', maximum + 1])
+        expect(validate?.(value)).toBe(`Enter a whole number from 1 to ${maximum}.`)
+    }
   })
 
   it('persists settings for administrators only and audits the change', async () => {
