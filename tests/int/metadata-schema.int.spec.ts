@@ -30,7 +30,10 @@ describe('OTserver metadata schema compatibility', () => {
     expect(validateManufacturers(readJSON(resolve(dataRoot, 'ot-manufacturers.json')))).toBe(true)
 
     for (const name of readdirSync(dataRoot).filter((name) => name.startsWith('ot-devices-'))) {
-      expect(validateDevices(readJSON(resolve(dataRoot, name))), validateDevices.errors).toBe(true)
+      expect(
+        validateDevices(readJSON(resolve(dataRoot, name))),
+        JSON.stringify(validateDevices.errors),
+      ).toBe(true)
     }
   })
 })
