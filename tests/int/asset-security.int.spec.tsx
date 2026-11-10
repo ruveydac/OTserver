@@ -19,10 +19,23 @@ vi.mock('@payloadcms/ui', async () => {
   const { createElement } = await import('react')
   return {
     Banner: ({ children }: { children: React.ReactNode }) => createElement('div', null, children),
-    Button: ({ children, ...props }: Record<string, unknown>) =>
-      createElement('button', props, children as never),
+    Button: ({ children, el, url, ...props }: Record<string, unknown>) =>
+      createElement(
+        el === 'link' || el === 'anchor' ? 'a' : 'button',
+        { ...props, href: url, margin: undefined, buttonStyle: undefined },
+        children as never,
+      ),
     ConfirmationModal: ({ body }: { body: React.ReactNode }) => createElement('div', null, body),
     CopyToClipboard: () => null,
+    Link: ({
+      children,
+      href,
+      ...rest
+    }: {
+      children: React.ReactNode
+      href: string
+      scroll?: boolean
+    }) => createElement('a', { href, ...rest, scroll: undefined }, children),
     useConfig: () => ({ config: { routes: { api: '/api' } } }),
     useModal: () => ({ openModal: vi.fn() }),
   }
@@ -93,12 +106,15 @@ beforeEach(() => {
     historyScopeTruncated: false,
   } as unknown as Panel
   vi.mocked(loadAssetPanel).mockImplementation(async () => panel)
-  descriptionRead = vi.fn(async ({ where }) => ({
-    docs: where.cve.in.map((cve: string) => ({
-      cve,
-      description: cve === 'CVE-2099-1001' ? longDescription : null,
-      kevName: cve === 'CVE-2099-1029' ? 'Controller service interruption' : null,
-    })),
+  descriptionRead = vi.fn(async ({ collection, where }) => ({
+    docs:
+      collection === 'tags'
+        ? []
+        : where.cve.in.map((cve: string) => ({
+            cve,
+            description: cve === 'CVE-2099-1001' ? longDescription : null,
+            kevName: cve === 'CVE-2099-1029' ? 'Controller service interruption' : null,
+          })),
   }))
   props = {
     doc: {
@@ -119,6 +135,16 @@ beforeEach(() => {
 })
 
 describe('asset Security overview', () => {
+  it('shows Edit asset only to users with write access at the asset site', async () => {
+    expect((await render()).textContent).not.toContain('Edit asset')
+    vi.mocked(getAuthorization).mockResolvedValue({
+      isAdmin: false,
+      writableSiteIDs: ['site-1'],
+    } as never)
+    expect((await render()).querySelector('.asset-view__edit')?.getAttribute('href')).toBe(
+      '/admin/collections/assets/asset-1/edit',
+    )
+  })
   it('previews catalog descriptions and links each hardware finding to its full details', async () => {
     const view = await render()
     expect(rows(view)).toHaveLength(25)

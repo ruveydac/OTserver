@@ -75,20 +75,62 @@ vi.mock('@payloadcms/ui', async () => {
       path,
       readOnly,
       htmlAttributes,
+      label,
     }: {
       value?: string
       onChange: React.ChangeEventHandler<HTMLInputElement>
       path: string
       readOnly?: boolean
       htmlAttributes?: React.InputHTMLAttributes<HTMLInputElement>
+      label?: string
     }) =>
-      createElement('input', {
-        ...htmlAttributes,
-        value,
-        onChange,
-        disabled: readOnly,
-        'data-path': path,
-      }),
+      createElement(
+        'div',
+        null,
+        createElement('label', { htmlFor: `field-${path.replaceAll('.', '__')}` }, label),
+        createElement('input', {
+          ...htmlAttributes,
+          id: `field-${path.replaceAll('.', '__')}`,
+          value,
+          onChange,
+          disabled: readOnly,
+          'data-path': path,
+        }),
+      ),
+    TextareaInput: ({
+      label,
+      onChange,
+      path,
+      value,
+    }: {
+      label: string
+      onChange: React.ChangeEventHandler<HTMLTextAreaElement>
+      path: string
+      value: string
+    }) =>
+      createElement(
+        'div',
+        null,
+        createElement('label', { htmlFor: `field-${path.replaceAll('.', '__')}` }, label),
+        createElement('textarea', { id: `field-${path.replaceAll('.', '__')}`, onChange, value }),
+      ),
+    CheckboxInput: ({
+      checked,
+      id,
+      label,
+      onToggle,
+    }: {
+      checked: boolean
+      id: string
+      label: string
+      onToggle: React.ChangeEventHandler<HTMLInputElement>
+    }) =>
+      createElement(
+        'label',
+        null,
+        createElement('input', { checked, id, onChange: onToggle, type: 'checkbox' }),
+        label,
+      ),
     ConfirmationModal: ({
       body,
       onConfirm,
@@ -287,7 +329,7 @@ describe('custom asset fields', () => {
     })
     expect(mocks.setValue).toHaveBeenCalledWith(expect.objectContaining({ number: 12 }))
 
-    const text = container.querySelector<HTMLInputElement>('#customFields-text')!
+    const text = container.querySelector<HTMLInputElement>('#field-customFields__text')!
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(text, '')
       text.dispatchEvent(new Event('input', { bubbles: true }))
@@ -296,7 +338,7 @@ describe('custom asset fields', () => {
       expect.not.objectContaining({ text: expect.anything() }),
     )
 
-    const textarea = container.querySelector<HTMLTextAreaElement>('#customFields-textarea')!
+    const textarea = container.querySelector<HTMLTextAreaElement>('#field-customFields__textarea')!
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(
         textarea,
@@ -827,6 +869,8 @@ describe('Otter profile credentials field', () => {
     expect(container.textContent).toContain('Credentials added')
 
     await click('Clear all credentials')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    await click('Clear all credentials now')
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
       '/api/otter/v1/profiles/profile-1/credentials',
@@ -880,6 +924,8 @@ describe('Otter profile credentials field', () => {
     expect(container.textContent).not.toContain('fresh-secret')
 
     await click('Remove OPC UA')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    await click('Remove credential')
     expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({
       action: 'remove',
       revision: 'revision-2',
@@ -1028,7 +1074,12 @@ describe('Otter profile credentials field', () => {
     expect(container.textContent).toContain('Credentials changed in another session')
     expect(container.textContent).toContain('Username: latest-user')
 
-    await click('Cancel')
+    await act(async () =>
+      [...container.querySelectorAll('button')]
+        .filter((button) => button.textContent === 'Cancel')
+        .at(-1)!
+        .click(),
+    )
     await click('Replace OPC UA')
     await setInput('Password', 'replacement-secret')
     await click('Replace credential')

@@ -19,7 +19,11 @@ vi.mock('@payloadcms/ui', async () => {
     ConfirmationModal: ({ body }: { body: unknown }) => createElement('div', null, body as never),
     CopyToClipboard: ({ defaultMessage }: { defaultMessage: string }) =>
       createElement('span', null, defaultMessage),
-    DefaultListView: () => createElement('div', null, 'Default list'),
+    DefaultListView: ({ hasCreatePermission }: { hasCreatePermission?: boolean }) =>
+      createElement('div', null, 'Default list', hasCreatePermission ? ' Create site' : ''),
+    Gutter: ({ children }: { children: React.ReactNode }) => createElement('div', null, children),
+    Link: ({ children, href }: { children: React.ReactNode; href: string }) =>
+      createElement('a', { href }, children),
     useDocumentInfo: () => ({}),
     useField: () => ({ setValue: ui.setValue, value: 'nmap' }),
     useModal: () => ({ openModal: ui.openModal }),

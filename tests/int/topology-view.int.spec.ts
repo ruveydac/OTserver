@@ -14,7 +14,10 @@ import {
 } from '../../src/components/TopologyView/graph'
 import { ensureAdminRole } from '../../src/collections/UserRoles'
 
-vi.mock('@payloadcms/ui', () => ({ DefaultListView: () => null }))
+vi.mock('@payloadcms/ui', () => ({
+  DefaultListView: () => null,
+  Gutter: ({ children }: { children: React.ReactNode }) => children,
+}))
 vi.mock('@payloadcms/next/templates', () => ({
   DefaultTemplate: ({ children }: { children?: unknown }) => children ?? null,
 }))

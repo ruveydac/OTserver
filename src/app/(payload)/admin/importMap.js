@@ -1,7 +1,6 @@
 import { default as default_1bd814bbeb1f2e089fcf3d8859fcb6f3 } from '@/components/SiteIDField'
 import { default as default_e4eda90535596a882064b1deac0ab4f0 } from '@/components/SiteTreeView'
 import { default as default_2e07829097744f37849fa311510e1aee } from '@/components/AssetClassAssetsCell'
-import { default as default_73aa8a55bcc57156906af3c0f8537645 } from '@/components/AssetClassListView'
 import { default as default_6cbba3aadd6ffd96040a5ea451eb0f24 } from '@/components/TagRuleField'
 import { default as default_d3dd3c4197a1a1438c8aee70d70fdd51 } from '@/components/TagListGroupTabs'
 import { default as default_3f76011ea90f707ace06549950e91439 } from '@/components/AssetOwnerField'
@@ -37,7 +36,6 @@ export const importMap = {
   '@/components/SiteIDField#default': default_1bd814bbeb1f2e089fcf3d8859fcb6f3,
   '@/components/SiteTreeView#default': default_e4eda90535596a882064b1deac0ab4f0,
   '@/components/AssetClassAssetsCell#default': default_2e07829097744f37849fa311510e1aee,
-  '@/components/AssetClassListView#default': default_73aa8a55bcc57156906af3c0f8537645,
   '@/components/TagRuleField#default': default_6cbba3aadd6ffd96040a5ea451eb0f24,
   '@/components/TagListGroupTabs#default': default_d3dd3c4197a1a1438c8aee70d70fdd51,
   '@/components/AssetOwnerField#default': default_3f76011ea90f707ace06549950e91439,

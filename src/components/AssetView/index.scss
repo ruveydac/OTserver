@@ -5,7 +5,7 @@
   max-width: 1440px;
   padding: 1rem var(--gutter-h) var(--spacing-view-bottom);
 
-  a {
+  :where(a:not(.btn)) {
     color: var(--theme-elevation-800);
 
     &:focus-visible {
@@ -53,8 +53,7 @@
   &__header {
     background: var(--theme-elevation-0);
     border: 1px solid var(--theme-elevation-150);
-    border-radius: 10px;
-    box-shadow: 0 8px 24px rgb(0 0 0 / 6%);
+    border-radius: var(--style-radius-s);
     margin-bottom: 0.75rem;
     padding: 1rem 1.25rem;
     position: sticky;
@@ -99,12 +98,13 @@
     gap: 0.5rem;
   }
 
-  &__edit,
-  &__secondary-action,
   &__density {
     align-items: center;
     border: 1px solid var(--theme-elevation-300);
-    border-radius: 5px;
+    border-radius: var(--style-radius-s);
+    background: var(--theme-elevation-0);
+    color: var(--theme-text);
+    cursor: pointer;
     display: inline-flex;
     font-size: 0.78rem;
     font-weight: 600;
@@ -112,27 +112,6 @@
     min-height: 44px;
     padding: 0.55rem 0.75rem;
     text-decoration: none;
-  }
-
-  &__edit {
-    background: var(--theme-text);
-    border-color: var(--theme-text);
-    color: var(--theme-bg) !important;
-  }
-
-  &__secondary-action,
-  &__density {
-    background: var(--theme-elevation-0);
-    color: var(--theme-text);
-  }
-
-  button.asset-view__secondary-action {
-    cursor: pointer;
-    font-family: inherit;
-  }
-
-  &__density {
-    cursor: pointer;
   }
 
   &__badges {
