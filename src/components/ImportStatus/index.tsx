@@ -1,11 +1,13 @@
 'use client'
 
-import { useDocumentInfo, useField, Button } from '@payloadcms/ui'
+import { useConfig, useDocumentInfo, useField, Button } from '@payloadcms/ui'
 import { useEffect, useState } from 'react'
 
 type Progress = { status?: string; error?: string; attemptCount?: number }
 
 export default function ImportStatus() {
+  const { config } = useConfig()
+  const api = config.routes.api
   const { id } = useDocumentInfo()
   const { value: mode } = useField<string>({ path: 'executionMode' })
   const { value: initialStatus } = useField<string>({ path: 'status' })
@@ -21,7 +23,7 @@ export default function ImportStatus() {
     const controller = new AbortController()
     const poll = async () => {
       try {
-        const response = await fetch(`/api/asset-imports/${encodeURIComponent(id)}?depth=0`, {
+        const response = await fetch(`${api}/asset-imports/${encodeURIComponent(id)}?depth=0`, {
           signal: controller.signal,
         })
         if (!response.ok) throw new Error('Could not load import status.')
@@ -40,7 +42,7 @@ export default function ImportStatus() {
       clearTimeout(timer)
       controller.abort()
     }
-  }, [id, mode, pollKey])
+  }, [api, id, mode, pollKey])
 
   if (!id || mode !== 'queued') return null
   return (
@@ -55,7 +57,7 @@ export default function ImportStatus() {
           type="button"
           onClick={async () => {
             try {
-              const response = await fetch(`/api/asset-imports/${encodeURIComponent(id)}/retry`, {
+              const response = await fetch(`${api}/asset-imports/${encodeURIComponent(id)}/retry`, {
                 method: 'POST',
               })
               if (!response.ok) throw new Error()

@@ -1,6 +1,7 @@
 import type { AdminViewServerProps } from 'payload'
 import type { DefaultTemplateProps } from '@payloadcms/next/templates'
 import { DefaultTemplate } from '@payloadcms/next/templates'
+import { Gutter } from '@payloadcms/ui'
 
 import { SiteSelector } from './SiteSelector'
 import { TopologyCanvas } from './TopologyCanvas'
@@ -50,13 +51,15 @@ const TopologyView = async (props: AdminViewServerProps) => {
   if (!selectedSiteId) {
     return (
       <DefaultTemplate {...templateProps}>
-        <main className="topology-view">
-          <header className="topology-view__header">
-            <h1>Network topology</h1>
-            <p>Select a site to display its discovered network architecture.</p>
-          </header>
-          <SiteSelector adminRoute={adminRoute} sites={siteOptions} />
-        </main>
+        <Gutter>
+          <main className="topology-view">
+            <header className="topology-view__header">
+              <h1>Network topology</h1>
+              <p>Select a site to display its discovered network architecture.</p>
+            </header>
+            <SiteSelector adminRoute={adminRoute} sites={siteOptions} />
+          </main>
+        </Gutter>
       </DefaultTemplate>
     )
   }
@@ -100,23 +103,25 @@ const TopologyView = async (props: AdminViewServerProps) => {
   if (assets.docs.length > 2000) {
     return (
       <DefaultTemplate {...templateProps}>
-        <main className="topology-view">
-          <header className="topology-view__header">
-            <h1>Network topology</h1>
-            <SiteSelector
-              adminRoute={adminRoute}
-              filter={assetFilter}
-              selectedSiteId={selectedSiteId}
-              sites={siteOptions}
-            />
-          </header>
-          <div className="topology-view__empty">
-            <p>
-              This scope contains more than 2,000 assets. Filter by asset name, IP address, or MAC
-              address to display a bounded view.
-            </p>
-          </div>
-        </main>
+        <Gutter>
+          <main className="topology-view">
+            <header className="topology-view__header">
+              <h1>Network topology</h1>
+              <SiteSelector
+                adminRoute={adminRoute}
+                filter={assetFilter}
+                selectedSiteId={selectedSiteId}
+                sites={siteOptions}
+              />
+            </header>
+            <div className="topology-view__empty">
+              <p>
+                This scope contains more than 2,000 assets. Filter by asset name, IP address, or MAC
+                address to display a bounded view.
+              </p>
+            </div>
+          </main>
+        </Gutter>
       </DefaultTemplate>
     )
   }
@@ -188,40 +193,42 @@ const TopologyView = async (props: AdminViewServerProps) => {
 
   return (
     <DefaultTemplate {...templateProps}>
-      <main className="topology-view">
-        <header className="topology-view__header">
-          <h1>Network topology</h1>
-          <SiteSelector
-            adminRoute={adminRoute}
-            filter={assetFilter}
-            selectedSiteId={selectedSiteId}
-            sites={siteOptions}
-          />
-          {selectedSite && (
+      <Gutter>
+        <main className="topology-view">
+          <header className="topology-view__header">
+            <h1>Network topology</h1>
+            <SiteSelector
+              adminRoute={adminRoute}
+              filter={assetFilter}
+              selectedSiteId={selectedSiteId}
+              sites={siteOptions}
+            />
+            {selectedSite && (
+              <span className="topology-view__site-label">
+                {selectedSite.name} · {nodes.filter((n) => n.type !== 'layer2').length} assets ·{' '}
+                {edges
+                  .filter((edge) => edge.type === 'explicit')
+                  .reduce((total, edge) => total + (edge.count ?? 1), 0)}{' '}
+                links
+              </span>
+            )}
             <span className="topology-view__site-label">
-              {selectedSite.name} · {nodes.filter((n) => n.type !== 'layer2').length} assets ·{' '}
-              {edges
-                .filter((edge) => edge.type === 'explicit')
-                .reduce((total, edge) => total + (edge.count ?? 1), 0)}{' '}
-              links
+              Scope: exact site “{selectedSite?.name || selectedSiteId}”
+              {assetFilter ? `, assets matching “${assetFilter}”` : ''}.
+              {evidenceWasBounded
+                ? ' Showing the newest 10,000 matching topology/evidence records.'
+                : ''}
             </span>
+          </header>
+          {nodes.length === 0 ? (
+            <div className="topology-view__empty">
+              <p>No assets found in this site.</p>
+            </div>
+          ) : (
+            <TopologyCanvas adminRoute={adminRoute} edges={edges} nodes={nodes} />
           )}
-          <span className="topology-view__site-label">
-            Scope: exact site “{selectedSite?.name || selectedSiteId}”
-            {assetFilter ? `, assets matching “${assetFilter}”` : ''}.
-            {evidenceWasBounded
-              ? ' Showing the newest 10,000 matching topology/evidence records.'
-              : ''}
-          </span>
-        </header>
-        {nodes.length === 0 ? (
-          <div className="topology-view__empty">
-            <p>No assets found in this site.</p>
-          </div>
-        ) : (
-          <TopologyCanvas adminRoute={adminRoute} edges={edges} nodes={nodes} />
-        )}
-      </main>
+        </main>
+      </Gutter>
     </DefaultTemplate>
   )
 }

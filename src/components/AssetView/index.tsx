@@ -1,4 +1,4 @@
-import Link from 'next/link'
+import { Button, Link } from '@payloadcms/ui'
 import type { DocumentViewServerProps } from 'payload'
 import type { ReactNode } from 'react'
 
@@ -1095,12 +1095,14 @@ const AssetView = async (props: DocumentViewServerProps) => {
             </p>
           </div>
           <div className="asset-view__actions">
-            <Link
-              className="asset-view__secondary-action"
-              href={`${apiRoute}/assets/export-csv?where[id][equals]=${encodeURIComponent(asset.id)}`}
+            <Button
+              buttonStyle="secondary"
+              el="anchor"
+              margin={false}
+              url={`${apiRoute}/assets/export-csv?where[id][equals]=${encodeURIComponent(asset.id)}`}
             >
               Export diagnostic CSV
-            </Link>
+            </Button>
             <DensityToggle />
             {canReviewVulnerabilities ? (
               <ManualAssetTags
@@ -1109,9 +1111,16 @@ const AssetView = async (props: DocumentViewServerProps) => {
                 manualTagIDs={manualTagIDs}
               />
             ) : null}
-            <Link className="asset-view__edit" href={`${assetURL}/edit`}>
-              Edit asset
-            </Link>
+            {canReviewVulnerabilities ? (
+              <Button
+                className="asset-view__edit"
+                el="link"
+                margin={false}
+                url={`${assetURL}/edit`}
+              >
+                Edit asset
+              </Button>
+            ) : null}
           </div>
         </div>
         <div className="asset-view__badges" aria-label="Asset tags">
