@@ -27,3 +27,4 @@ otserver-scan.json
 __pycache__/
 coverage/
 .opencode
+graphify-out/
