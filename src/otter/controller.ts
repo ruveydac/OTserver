@@ -1417,29 +1417,186 @@ export const rotateOtterCredential: Endpoint['handler'] = async (req) => {
 export const saveOtterCredentials: Endpoint['handler'] = async (req) => {
   await humanOrigin(req)
   const id = String(req.routeParams?.id || '')
-  const profile = await req.payload.findByID({
+  const data = await body(req, 32_000)
+  const result = await inTransaction(req, async () => {
+    const profile = await humanOtterProfile(req, id, true)
+    const revision = otterCredentialRevision(profile.encryptedCredentials)
+    if (data.revision !== revision)
+      throw new APIError('Credentials changed in another session. Refresh and try again.', 409)
+
+    const current = decryptOtterCredentials(profile.encryptedCredentials)
+    const credentials = editOtterCredentials(current, data)
+    const encryptedCredentials =
+      Object.keys(credentials).length > 0 ? encryptOtterCredentials(credentials) : null
+    await req.payload.update({
+      collection: 'otter-profiles',
+      id,
+      overrideAccess: true,
+      context: { otterCredentialWrite: true },
+      req,
+      data: {
+        encryptedCredentials,
+        credentialsConfigured: Boolean(encryptedCredentials),
+      },
+    })
+    return otterCredentialState(encryptedCredentials)
+  })
+  return json(result)
+}
+
+const humanOtterProfile = async (req: PayloadRequest, id: string, write: boolean) => {
+  const readableProfile = await req.payload.findByID({
     collection: 'otter-profiles',
     depth: 0,
     id,
     overrideAccess: false,
+    user: req.user || undefined,
     req,
   })
-  await requireHuman(req, profile.site, true)
-  const data = await body(req, 32_000)
-  const credentials = data.clear === true ? undefined : validateOtterCredentials(data.credentials)
-  const encryptedCredentials = credentials ? encryptOtterCredentials(credentials) : null
-  await req.payload.update({
+  await requireHuman(req, readableProfile.site, write)
+  return req.payload.findByID({
     collection: 'otter-profiles',
+    depth: 0,
     id,
     overrideAccess: true,
-    context: { otterCredentialWrite: true },
     req,
-    data: {
-      encryptedCredentials,
-      credentialsConfigured: Boolean(encryptedCredentials),
-    },
   })
-  return json({ credentialsConfigured: Boolean(encryptedCredentials) })
+}
+
+const otterCredentialRevision = (encrypted?: string | null) =>
+  encrypted ? createHash('sha256').update(encrypted).digest('hex') : null
+
+const asCredentialList = (value: unknown) =>
+  Array.isArray(value) ? value : value === undefined ? [] : [value]
+
+const hasCredentialSecret = (value: unknown, fields: string[]) =>
+  Boolean(
+    value &&
+    typeof value === 'object' &&
+    fields.some((field) => {
+      const secret = (value as Record<string, unknown>)[field]
+      return typeof secret === 'string' && secret.length > 0
+    }),
+  )
+
+const otterCredentialState = (encrypted?: string | null) => {
+  const credentials = decryptOtterCredentials(encrypted)
+  const entries: Array<Record<string, string>> = []
+  for (const [index, value] of asCredentialList(credentials.snmp).entries()) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+    const entry = value as Record<string, unknown>
+    entries.push({
+      id: `snmp:${index}`,
+      type: 'snmp',
+      ...(typeof entry.version === 'string' ? { version: entry.version } : {}),
+      ...(typeof entry.username === 'string' ? { username: entry.username } : {}),
+      ...(typeof entry.contextName === 'string' ? { contextName: entry.contextName } : {}),
+      ...(typeof entry.authProtocol === 'string' ? { authProtocol: entry.authProtocol } : {}),
+      ...(typeof entry.privacyProtocol === 'string'
+        ? { privacyProtocol: entry.privacyProtocol }
+        : {}),
+    })
+  }
+  for (const [index, value] of asCredentialList(credentials.opcuaCredentials).entries()) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+    const username = (value as Record<string, unknown>).username
+    entries.push({
+      id: `opcua:${index}`,
+      type: 'opcua',
+      ...(typeof username === 'string' ? { username } : {}),
+    })
+  }
+  if ('opcuaUsername' in credentials || 'opcuaPassword' in credentials)
+    entries.push({
+      id: 'opcuaFallback',
+      type: 'opcua-fallback',
+      ...(typeof credentials.opcuaUsername === 'string'
+        ? { username: credentials.opcuaUsername }
+        : {}),
+    })
+  return {
+    credentialsConfigured: entries.length > 0,
+    revision: otterCredentialRevision(encrypted),
+    entries,
+  }
+}
+
+const editOtterCredentials = (current: Record<string, unknown>, data: Record<string, unknown>) => {
+  if (data.action === 'clear') return {}
+
+  const credentials = structuredClone(current)
+  if (data.action === 'add') {
+    const added = validateOtterCredentials(data.credentials)
+    if (!Object.keys(added).length)
+      throw new APIError('Add at least one SNMP or OPC UA credential.', 400)
+    for (const key of ['snmp', 'opcuaCredentials'] as const) {
+      const items = [...asCredentialList(credentials[key]), ...asCredentialList(added[key])]
+      if (items.length) credentials[key] = items
+    }
+    if ('opcuaUsername' in added || 'opcuaPassword' in added) {
+      if ('opcuaUsername' in credentials || 'opcuaPassword' in credentials)
+        throw new APIError('The OPC UA fallback already exists. Replace it instead.', 409)
+      for (const key of ['opcuaUsername', 'opcuaPassword'] as const)
+        if (key in added) credentials[key] = added[key]
+    }
+  } else if (data.action === 'remove' || data.action === 'replace') {
+    if (typeof data.id !== 'string') throw new APIError('Select a credential entry.', 400)
+    const fallback = data.id === 'opcuaFallback'
+    const match = /^(snmp|opcua):(\d+)$/.exec(data.id)
+    if (!fallback && !match) throw new APIError('The credential entry is invalid.', 400)
+
+    if (fallback) {
+      if (!('opcuaUsername' in credentials || 'opcuaPassword' in credentials))
+        throw new APIError('The credential entry no longer exists.', 409)
+      const hadSecret = hasCredentialSecret({ password: credentials.opcuaPassword }, ['password'])
+      delete credentials.opcuaUsername
+      delete credentials.opcuaPassword
+      if (data.action === 'replace') {
+        const replacement = validateOtterCredentials(data.credentials)
+        if (!('opcuaUsername' in replacement || 'opcuaPassword' in replacement))
+          throw new APIError('Enter the replacement OPC UA credential.', 400)
+        if (
+          hadSecret &&
+          !hasCredentialSecret({ password: replacement.opcuaPassword }, ['password'])
+        )
+          throw new APIError('Enter a new password to replace this credential.', 400)
+        for (const key of ['opcuaUsername', 'opcuaPassword'] as const)
+          if (key in replacement) credentials[key] = replacement[key]
+      }
+    } else {
+      const key = match![1] === 'snmp' ? 'snmp' : 'opcuaCredentials'
+      const index = Number(match![2])
+      const existing = asCredentialList(credentials[key])
+      if (!Number.isSafeInteger(index) || index >= existing.length)
+        throw new APIError('The credential entry no longer exists.', 409)
+      if (data.action === 'remove') existing.splice(index, 1)
+      else {
+        const replacement = validateOtterCredentials(
+          key === 'snmp' ? { snmp: [data.credentials] } : { opcuaCredentials: [data.credentials] },
+        )
+        const next = asCredentialList(replacement[key])[0]
+        const secretFields =
+          key === 'snmp' ? ['community', 'authPassword', 'privacyPassword'] : ['password']
+        if (
+          hasCredentialSecret(existing[index], secretFields) &&
+          !hasCredentialSecret(next, secretFields)
+        )
+          throw new APIError('Enter a new secret to replace this credential.', 400)
+        existing[index] = next
+      }
+      if (existing.length) credentials[key] = existing
+      else delete credentials[key]
+    }
+  } else {
+    throw new APIError('Choose whether to add, replace, remove, or clear credentials.', 400)
+  }
+
+  return validateOtterCredentials(credentials)
+}
+
+export const getOtterCredentials: Endpoint['handler'] = async (req) => {
+  const profile = await humanOtterProfile(req, String(req.routeParams?.id || ''), false)
+  return json(otterCredentialState(profile.encryptedCredentials))
 }
 
 export const runOtterNow: Endpoint['handler'] = async (req) => {
@@ -1635,6 +1792,7 @@ export const otterEndpoints: Endpoint[] = [
   { path: '/otter/v1/enroll', method: 'post', handler: enrollOtter },
   { path: '/otter/v1/poll', method: 'post', handler: pollOtter },
   { path: '/otter/v1/credentials/rotate', method: 'post', handler: rotateOtterCredential },
+  { path: '/otter/v1/profiles/:id/credentials', method: 'get', handler: getOtterCredentials },
   { path: '/otter/v1/profiles/:id/credentials', method: 'post', handler: saveOtterCredentials },
   { path: '/otter/v1/runs', method: 'post', handler: runOtterNow },
   { path: '/otter/v1/runs/:id/cancel', method: 'post', handler: cancelOtterRun },

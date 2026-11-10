@@ -26,6 +26,20 @@
     padding: var(--base) 0;
   }
 
+  &__stored {
+    align-items: center;
+    border-bottom: 1px solid var(--theme-elevation-200);
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--base);
+    justify-content: space-between;
+    padding: var(--base) 0;
+
+    p {
+      margin-top: calc(var(--base) / 4);
+    }
+  }
+
   &__field {
     display: grid;
     gap: calc(var(--base) / 4);

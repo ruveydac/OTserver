@@ -63,7 +63,8 @@ services:
   mongo:
     image: mongo:8
     restart: unless-stopped
-    command: ['--replSet', 'rs0', '--bind_ip_all']
+    command:
+      ['--replSet', 'rs0', '--bind_ip_all', '--setParameter', 'transactionLifetimeLimitSeconds=180']
     healthcheck:
       test:
         [

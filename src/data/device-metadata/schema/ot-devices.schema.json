@@ -34,6 +34,11 @@
           "$ref": "#/$defs/deviceData",
           "description": "Product facts to attach to matching assets. Availability of a release or patch does not establish that it is installed on an asset."
         },
+        "discovery_date": {
+          "type": "string",
+          "format": "date",
+          "description": "Date this entry's discovery data was last refreshed, in YYYY-MM-DD form."
+        },
         "rules": {
           "$ref": "#/$defs/ruleGroup",
           "description": "Recognition criteria evaluated against observed asset fields after resolving the manufacturer and restricting candidates by manufacturer_id. Generated rules contain only identity qualifiers; manufacturer-name rules belong in the manufacturer registry. These rules do not evaluate update eligibility."

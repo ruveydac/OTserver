@@ -72,7 +72,16 @@ services:
     restart: unless-stopped
     ports:
       - '127.0.0.1:27017:27017'
-    command: ['--storageEngine=wiredTiger', '--replSet', 'rs0', '--bind_ip_all']
+    # Transaction Lifetime Limit helps when there are big imports
+    command:
+      [
+        '--storageEngine=wiredTiger',
+        '--replSet',
+        'rs0',
+        '--bind_ip_all',
+        '--setParameter',
+        'transactionLifetimeLimitSeconds=180',
+      ]
     healthcheck:
       test:
         [

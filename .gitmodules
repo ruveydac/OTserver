@@ -1,3 +1,6 @@
 [submodule "otserver-otter"]
 	path = otserver-otter
 	url = https://github.com/ruveydac/otserver-otter.git
+[submodule "otserver-metadata"]
+	path = otserver-metadata
+	url = https://github.com/ruveydac/OTserver-metadata.git
