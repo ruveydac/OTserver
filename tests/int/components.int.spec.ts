@@ -777,54 +777,137 @@ describe('Otter profile credentials field', () => {
     })
   }
 
-  it('saves write-only credentials and clears them without reloading the document', async () => {
+  it('lists stored credentials without secrets and clears them without reloading the document', async () => {
     mocks.documentID = 'profile-1'
     mocks.fieldValue = true
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ credentialsConfigured: true }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ credentialsConfigured: false }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          credentialsConfigured: true,
+          revision: 'revision-1',
+          entries: [{ id: 'snmp:0', type: 'snmp', version: '2c' }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          credentialsConfigured: true,
+          revision: 'revision-2',
+          entries: [
+            { id: 'snmp:0', type: 'snmp', version: '2c' },
+            { id: 'snmp:1', type: 'snmp', version: '2c' },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ credentialsConfigured: false, revision: null, entries: [] }),
+      })
     vi.stubGlobal('fetch', fetchMock)
     await render(createElement(OtterCredentialsField))
     expect(container.textContent).toContain('encrypted at rest')
+    expect(container.textContent).toContain('SNMP 2c')
+    expect(container.textContent).not.toContain('public')
+    await click('Add credentials')
     await click('Add SNMP credential')
     await setInput('Community', 'secret')
-    await click('Encrypt and save credentials')
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      '/api/otter/v1/profiles/profile-1/credentials',
-      expect.objectContaining({ method: 'POST' }),
-    )
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
-      credentials: { snmp: [{ version: '2c', community: 'secret' }] },
-    })
-    expect(container.textContent).toContain('Credentials encrypted and saved')
-
-    await click('Clear stored credentials')
+    await click('Add credentials')
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       '/api/otter/v1/profiles/profile-1/credentials',
-      expect.objectContaining({ body: JSON.stringify({ clear: true }) }),
+      expect.objectContaining({ method: 'POST' }),
     )
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      action: 'add',
+      revision: 'revision-1',
+      credentials: { snmp: [{ version: '2c', community: 'secret' }] },
+    })
+    expect(container.textContent).toContain('Credentials added')
+
+    await click('Clear all credentials')
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      '/api/otter/v1/profiles/profile-1/credentials',
+      expect.objectContaining({
+        body: JSON.stringify({ action: 'clear', revision: 'revision-2' }),
+      }),
+    )
+    expect(container.textContent).toContain('No credentials are stored')
+  })
+
+  it('replaces and removes one credential while keeping the secret write-only', async () => {
+    mocks.documentID = 'profile-1'
+    mocks.fieldValue = true
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          credentialsConfigured: true,
+          revision: 'revision-1',
+          entries: [{ id: 'opcua:0', type: 'opcua', username: 'operator' }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          credentialsConfigured: true,
+          revision: 'revision-2',
+          entries: [{ id: 'opcua:0', type: 'opcua', username: 'operator' }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ credentialsConfigured: false, revision: null, entries: [] }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+    await render(createElement(OtterCredentialsField))
+
+    expect(container.textContent).toContain('Username: operator')
+    expect(container.textContent).not.toContain('old-secret')
+    await click('Replace OPC UA')
+    expect(container.querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe('')
+    await setInput('Password', 'fresh-secret')
+    await click('Replace credential')
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      action: 'replace',
+      revision: 'revision-1',
+      id: 'opcua:0',
+      credentials: { username: 'operator', password: 'fresh-secret' },
+    })
+    expect(container.textContent).not.toContain('fresh-secret')
+
+    await click('Remove OPC UA')
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({
+      action: 'remove',
+      revision: 'revision-2',
+      id: 'opcua:0',
+    })
     expect(container.textContent).toContain('No credentials are stored')
   })
 
   it('requires a saved profile for credentials and hides controls in read-only mode', async () => {
     mocks.documentID = 'profile-1'
     mocks.fieldValue = false
-    vi.stubGlobal('fetch', vi.fn())
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ credentialsConfigured: false, revision: null, entries: [] }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
     await render(createElement(OtterCredentialsField))
-    await click('Encrypt and save credentials')
+    await click('Add credentials')
+    await click('Add credentials')
     expect(container.textContent).toContain('Add at least one')
-    expect(fetch).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
 
     await click('Add OPC UA credential')
     await setInput('Username', 'operator')
     mocks.documentID = undefined
     await render(createElement(OtterCredentialsField))
-    expect(container.textContent).toContain('SNMP v2c community public')
-    await click('Encrypt and save credentials')
-    expect(container.textContent).toContain('Save the configuration before adding credentials')
+    expect(container.textContent).toContain('SNMP v2c credential')
+    expect(container.querySelector('button')).toBeNull()
 
     await act(async () => root.unmount())
     root = createRoot(container)
@@ -836,17 +919,22 @@ describe('Otter profile credentials field', () => {
   it('shows credential API failures without returning stored values', async () => {
     mocks.documentID = 'profile-1'
     mocks.fieldValue = false
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ credentialsConfigured: false, revision: 'revision-1', entries: [] }),
+      })
+      .mockResolvedValueOnce({
         ok: false,
         json: async () => ({ errors: [{ message: 'Otter Config permission is required.' }] }),
-      }),
-    )
+      })
+    vi.stubGlobal('fetch', fetchMock)
     await render(createElement(OtterCredentialsField))
+    await click('Add credentials')
     await click('Add OPC UA credential')
     await setInput('Username', 'operator')
-    await click('Encrypt and save credentials')
+    await click('Add credentials')
     expect(container.textContent).toContain('Otter Config permission is required')
   })
 })
@@ -1168,10 +1256,16 @@ describe('remaining Otter component states', () => {
   it('keeps remaining SNMP and OPC UA credential rows after removing the first row', async () => {
     mocks.documentID = 'profile-1'
     mocks.fieldValue = false
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ credentialsConfigured: true }),
-    })
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ credentialsConfigured: true, revision: 'revision-1', entries: [] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ credentialsConfigured: true, revision: 'revision-2', entries: [] }),
+      })
     vi.stubGlobal('fetch', fetchMock)
     await render(createElement(OtterCredentialsField))
 
@@ -1194,6 +1288,7 @@ describe('remaining Otter component states', () => {
         input.dispatchEvent(new Event('input', { bubbles: true }))
       })
     }
+    await click('Add credentials')
     const setSelect = async (select: HTMLSelectElement, value: string) => {
       await act(async () => {
         Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(
@@ -1206,9 +1301,8 @@ describe('remaining Otter component states', () => {
 
     await click('Add SNMP credential')
     await click('Add SNMP credential')
-    const snmpEntries = container.querySelectorAll<HTMLElement>(
-      '.otter-credentials__section:first-of-type .otter-credentials__entry',
-    )
+    const sections = container.querySelectorAll('.otter-credentials__section')
+    const snmpEntries = sections[1]!.querySelectorAll<HTMLElement>('.otter-credentials__entry')
     const snmpSelects = container.querySelectorAll<HTMLSelectElement>(
       '.otter-credentials__section select',
     )
@@ -1245,7 +1339,7 @@ describe('remaining Otter component states', () => {
 
     await click('Add OPC UA credential')
     await click('Add OPC UA credential')
-    const opcuaSection = container.querySelectorAll('.otter-credentials__section')[1]!
+    const opcuaSection = sections[2]!
     const opcuaEntries = opcuaSection.querySelectorAll<HTMLElement>('.otter-credentials__entry')
     await setEntryInput(opcuaEntries[0]!, 'Username', 'discard-opcua-user')
     await setEntryInput(opcuaEntries[0]!, 'Password', 'discard-opcua-password')
@@ -1254,9 +1348,11 @@ describe('remaining Otter component states', () => {
 
     await act(async () => snmpEntries[0]!.querySelector('button')!.click())
     await act(async () => opcuaEntries[0]!.querySelector('button')!.click())
-    await click('Encrypt and save credentials')
+    await click('Add credentials')
 
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      action: 'add',
+      revision: 'revision-1',
       credentials: {
         snmp: [
           {
@@ -1273,7 +1369,7 @@ describe('remaining Otter component states', () => {
         opcuaCredentials: [{ username: 'operator', password: 'opcua-secret' }],
       },
     })
-    expect(container.textContent).toContain('Credentials encrypted and saved')
+    expect(container.textContent).toContain('Credentials added')
   })
 
   it('handles enrollment permission, loading, and response error paths', async () => {

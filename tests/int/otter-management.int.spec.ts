@@ -17,6 +17,7 @@ import {
   enrollOtter,
   expireOtterLeases,
   finishOtterRun,
+  getOtterCredentials,
   getOtterScanner,
   listOtterReleases,
   heartbeatOtterRun,
@@ -67,8 +68,9 @@ const routeRequest = async (
   token: string,
   body?: unknown,
   origin = '',
+  method = 'POST',
 ) => {
-  const req = await request(path, { body, token, origin })
+  const req = await request(path, { body, token, origin, method })
   ;(req as PayloadRequest & { routeParams?: Record<string, string> }).routeParams = { id }
   return req
 }
@@ -1049,16 +1051,114 @@ describe('Otter management controller', () => {
           ),
         ),
       ).rejects.toMatchObject({ status: 404 })
+      const initialCredentialsResponse = await getOtterCredentials(
+        await routeRequest(
+          `/otter/v1/profiles/${profile.id}/credentials`,
+          profile.id,
+          `JWT ${login.token}`,
+          undefined,
+          '',
+          'GET',
+        ),
+      )
+      const initialCredentials = (await initialCredentialsResponse.json()) as {
+        credentialsConfigured: boolean
+        revision: string
+        entries: Array<{ id: string; type: string; version?: string }>
+      }
+      expect(initialCredentials.entries).toEqual([{ id: 'snmp:0', type: 'snmp', version: '2c' }])
+      expect(initialCredentialsResponse.headers.get('cache-control')).toBe('no-store')
+      await expect(
+        getOtterCredentials(
+          await routeRequest(
+            `/otter/v1/profiles/${profile.id}/credentials`,
+            profile.id,
+            `JWT ${readerLogin.token}`,
+            undefined,
+            '',
+            'GET',
+          ),
+        ),
+      ).rejects.toMatchObject({ status: 403 })
       const credentialResponse = await saveOtterCredentials(
         await routeRequest(
           `/otter/v1/profiles/${profile.id}/credentials`,
           profile.id,
           `JWT ${login.token}`,
-          { credentials: { snmp: [{ version: '2c', community: 'managed-secret' }] } },
+          {
+            action: 'add',
+            revision: initialCredentials.revision,
+            credentials: {
+              snmp: [{ version: '2c', community: 'managed-secret', username: 'snmp-operator' }],
+              opcuaCredentials: [{ username: 'operator', password: 'opcua-secret' }],
+            },
+          },
           'https://otserver.example',
         ),
       )
       expect(credentialResponse.status).toBe(200)
+      const addedCredentials = (await credentialResponse.json()) as {
+        revision: string
+        entries: Array<{ id: string; username?: string }>
+      }
+      expect(addedCredentials.entries).toEqual([
+        { id: 'snmp:0', type: 'snmp', version: '2c' },
+        { id: 'snmp:1', type: 'snmp', version: '2c', username: 'snmp-operator' },
+        { id: 'opcua:0', type: 'opcua', username: 'operator' },
+      ])
+      expect(JSON.stringify(addedCredentials)).not.toContain('managed-secret')
+      expect(JSON.stringify(addedCredentials)).not.toContain('opcua-secret')
+      await expect(
+        saveOtterCredentials(
+          await routeRequest(
+            `/otter/v1/profiles/${profile.id}/credentials`,
+            profile.id,
+            `JWT ${login.token}`,
+            {
+              action: 'replace',
+              revision: addedCredentials.revision,
+              id: 'snmp:1',
+              credentials: { version: '2c', username: 'snmp-operator' },
+            },
+            'https://otserver.example',
+          ),
+        ),
+      ).rejects.toMatchObject({ status: 400 })
+      const replaceCredentialResponse = await saveOtterCredentials(
+        await routeRequest(
+          `/otter/v1/profiles/${profile.id}/credentials`,
+          profile.id,
+          `JWT ${login.token}`,
+          {
+            action: 'replace',
+            revision: addedCredentials.revision,
+            id: 'opcua:0',
+            credentials: { username: 'operator-2', password: 'opcua-new' },
+          },
+          'https://otserver.example',
+        ),
+      )
+      expect(replaceCredentialResponse.status).toBe(200)
+      const replacedCredentials = (await replaceCredentialResponse.json()) as {
+        revision: string
+        entries: Array<{ id: string; username?: string }>
+      }
+      expect(replacedCredentials.entries.at(-1)).toMatchObject({
+        id: 'opcua:0',
+        username: 'operator-2',
+      })
+      expect(JSON.stringify(replacedCredentials)).not.toContain('opcua-new')
+      await expect(
+        saveOtterCredentials(
+          await routeRequest(
+            `/otter/v1/profiles/${profile.id}/credentials`,
+            profile.id,
+            `JWT ${login.token}`,
+            { action: 'remove', revision: initialCredentials.revision, id: 'snmp:0' },
+            'https://otserver.example',
+          ),
+        ),
+      ).rejects.toMatchObject({ status: 409 })
       const readableProfile = await payload.findByID({
         collection: 'otter-profiles',
         id: profile.id,
@@ -1148,7 +1248,36 @@ describe('Otter management controller', () => {
         site: site.id,
         targets: ['192.0.2.10'],
       })
-      expect(assignment.run.credentials.snmp[0].community).toBe('managed-secret')
+      expect(assignment.run.credentials.snmp).toEqual(
+        expect.arrayContaining([expect.objectContaining({ community: 'managed-secret' })]),
+      )
+      const removeCredentialResponse = await saveOtterCredentials(
+        await routeRequest(
+          `/otter/v1/profiles/${profile.id}/credentials`,
+          profile.id,
+          `JWT ${login.token}`,
+          { action: 'remove', revision: replacedCredentials.revision, id: 'snmp:1' },
+          'https://otserver.example',
+        ),
+      )
+      const afterRemoveCredentials = (await removeCredentialResponse.json()) as {
+        credentialsConfigured: boolean
+        entries: Array<{ id: string; username?: string }>
+        revision: string
+      }
+      expect(afterRemoveCredentials.entries).toEqual([
+        { id: 'snmp:0', type: 'snmp', version: '2c' },
+        { id: 'opcua:0', type: 'opcua', username: 'operator-2' },
+      ])
+      const remainingProfile = await payload.findByID({
+        collection: 'otter-profiles',
+        id: profile.id,
+        depth: 0,
+      })
+      expect(decryptOtterCredentials(remainingProfile.encryptedCredentials)).toEqual({
+        snmp: [{ version: '2c', community: 'public' }],
+        opcuaCredentials: [{ username: 'operator-2', password: 'opcua-new' }],
+      })
       expect(
         await payload.findByID({ collection: 'otter-scanners', id: scannerID!, depth: 0 }),
       ).toMatchObject({
@@ -1903,7 +2032,7 @@ describe('Otter management controller', () => {
           `/otter/v1/profiles/${profile.id}/credentials`,
           profile.id,
           `JWT ${login.token}`,
-          { clear: true },
+          { action: 'clear', revision: afterRemoveCredentials.revision },
           'https://otserver.example',
         ),
       )
