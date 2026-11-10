@@ -888,6 +888,212 @@ describe('Otter profile credentials field', () => {
     expect(container.textContent).toContain('No credentials are stored')
   })
 
+  it('retries failed reads and validates SNMP and fallback replacements', async () => {
+    mocks.documentID = 'profile-1'
+    mocks.fieldValue = true
+    let completeInitialLoad!: (response: { ok: boolean; json: () => Promise<unknown> }) => void
+    const initialLoad = new Promise<{ ok: boolean; json: () => Promise<unknown> }>((resolve) => {
+      completeInitialLoad = resolve
+    })
+    const entries = [
+      {
+        id: 'snmp:0',
+        type: 'snmp',
+        version: '3',
+        username: 'snmp-user',
+        contextName: 'line-a',
+        authProtocol: 'sha256',
+        privacyProtocol: 'aes128',
+      },
+      { id: 'opcuaFallback', type: 'opcua-fallback' },
+    ]
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(initialLoad)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ credentialsConfigured: true, revision: 'revision-1', entries }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({
+          errors: [{ message: 'Enter a new secret to replace this credential.' }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ credentialsConfigured: true, revision: 'revision-2', entries }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          credentialsConfigured: true,
+          revision: 'revision-3',
+          entries: [
+            ...entries.slice(0, 1),
+            { id: 'opcuaFallback', type: 'opcua-fallback', username: 'fallback-user' },
+          ],
+        }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await render(createElement(OtterCredentialsField))
+    expect(container.textContent).toContain('Loading credentials')
+    await act(async () =>
+      completeInitialLoad({
+        ok: false,
+        json: async () => ({ errors: [{ message: 'Credential service unavailable.' }] }),
+      }),
+    )
+    expect(container.textContent).toContain('Credential service unavailable.')
+    await click('Retry loading credentials')
+    expect(container.textContent).toContain('Authentication: SHA256')
+    expect(container.textContent).toContain('Privacy: AES128')
+
+    await click('Replace SNMP 3')
+    expect(container.querySelector('select')?.value).toBe('3')
+    expect(container.querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe('')
+    await click('Replace credential')
+    expect(container.textContent).toContain('Enter a new secret to replace this credential.')
+    await setInput('Community', 'new-community')
+    await click('Replace credential')
+    expect(JSON.parse(String(fetchMock.mock.calls[3]?.[1]?.body))).toEqual({
+      action: 'replace',
+      revision: 'revision-1',
+      id: 'snmp:0',
+      credentials: {
+        version: '3',
+        community: 'new-community',
+        username: 'snmp-user',
+        contextName: 'line-a',
+        authProtocol: 'sha256',
+        privacyProtocol: 'aes128',
+      },
+    })
+
+    await click('Replace OPC UA fallback')
+    await click('Replace credential')
+    expect(container.textContent).toContain('Enter the replacement credential')
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+    await setInput('Fallback username', 'fallback-user')
+    await setInput('Fallback password', 'new-fallback-secret')
+    await click('Replace credential')
+    expect(JSON.parse(String(fetchMock.mock.calls[4]?.[1]?.body))).toEqual({
+      action: 'replace',
+      revision: 'revision-2',
+      id: 'opcuaFallback',
+      credentials: { opcuaUsername: 'fallback-user', opcuaPassword: 'new-fallback-secret' },
+    })
+    expect(container.textContent).not.toContain('new-fallback-secret')
+  })
+
+  it('refreshes stored entries after a revision conflict', async () => {
+    mocks.documentID = 'profile-1'
+    mocks.fieldValue = false
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ credentialsConfigured: false, revision: 'revision-1', entries: [] }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({
+          errors: [{ message: 'Credentials changed in another session. Refresh and try again.' }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          credentialsConfigured: true,
+          revision: 'revision-2',
+          entries: [{ id: 'opcua:0', type: 'opcua', username: 'latest-user' }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          credentialsConfigured: true,
+          revision: 'revision-3',
+          entries: [{ id: 'opcua:0', type: 'opcua', username: 'latest-user' }],
+        }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await render(createElement(OtterCredentialsField))
+    await click('Add credentials')
+    await click('Add OPC UA credential')
+    await setInput('Username', 'stale-user')
+    await click('Add credentials')
+    expect(container.textContent).toContain('Credentials changed in another session')
+    expect(container.textContent).toContain('Username: latest-user')
+
+    await click('Cancel')
+    await click('Replace OPC UA')
+    await setInput('Password', 'replacement-secret')
+    await click('Replace credential')
+    expect(JSON.parse(String(fetchMock.mock.calls[3]?.[1]?.body))).toEqual({
+      action: 'replace',
+      revision: 'revision-2',
+      id: 'opcua:0',
+      credentials: { username: 'latest-user', password: 'replacement-secret' },
+    })
+  })
+
+  it('keeps the revision conflict visible when its refresh fails', async () => {
+    mocks.documentID = 'profile-1'
+    mocks.fieldValue = false
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ credentialsConfigured: false, revision: 'revision-1', entries: [] }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({
+          errors: [{ message: 'Credentials changed in another session. Refresh and try again.' }],
+        }),
+      })
+      .mockRejectedValueOnce(new Error('Network unavailable'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await render(createElement(OtterCredentialsField))
+    await click('Add credentials')
+    await click('Add OPC UA credential')
+    await setInput('Username', 'operator')
+    await click('Add credentials')
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(container.textContent).toContain('Credentials changed in another session')
+  })
+
+  it('blocks edits until the current profile credentials have loaded', async () => {
+    mocks.documentID = 'profile-1'
+    mocks.fieldValue = false
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ credentialsConfigured: false, revision: 'revision-1', entries: [] }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ errors: [{ message: 'Profile credentials could not be loaded.' }] }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await render(createElement(OtterCredentialsField))
+    await click('Add credentials')
+    await click('Add OPC UA credential')
+    await setInput('Username', 'operator')
+
+    mocks.documentID = 'profile-2'
+    await render(createElement(OtterCredentialsField))
+    await click('Add credentials')
+    expect(container.textContent).toContain('Load the stored credentials before changing them.')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('requires a saved profile for credentials and hides controls in read-only mode', async () => {
     mocks.documentID = 'profile-1'
     mocks.fieldValue = false
