@@ -1677,13 +1677,27 @@ describe('Otter management controller', () => {
       })
       const liveScanner = await payload.findByID({ collection: 'otter-scanners', id: scannerID })
       expect(Date.parse(liveScanner.lastSeenAt!)).toBeGreaterThan(Date.parse(staleLastSeen))
+      await payload.update({
+        collection: 'otter-scanners',
+        id: scannerID,
+        data: { lastSeenAt: null },
+      })
+      const heartbeatWithoutLastSeen = await heartbeatOtterRun(
+        await routeRequest('/otter/v1/runs/heartbeat', runID, `Otter ${enrollment.credential}`, {}),
+      )
+      expect(await heartbeatWithoutLastSeen.json()).toMatchObject({ cancelRequested: false })
+      const scannerAfterMissingLastSeen = await payload.findByID({
+        collection: 'otter-scanners',
+        id: scannerID,
+      })
+      expect(scannerAfterMissingLastSeen.lastSeenAt).toEqual(expect.any(String))
       const heartbeatWithoutProgress = await heartbeatOtterRun(
         await routeRequest('/otter/v1/runs/heartbeat', runID, `Otter ${enrollment.credential}`, {}),
       )
       expect(await heartbeatWithoutProgress.json()).toMatchObject({ cancelRequested: false })
       expect(
         (await payload.findByID({ collection: 'otter-scanners', id: scannerID })).lastSeenAt,
-      ).toBe(liveScanner.lastSeenAt)
+      ).toBe(scannerAfterMissingLastSeen.lastSeenAt)
       await expect(
         finishOtterRun(
           await routeRequest('/otter/v1/runs/finish', runID, `Otter ${enrollment.credential}`, {
