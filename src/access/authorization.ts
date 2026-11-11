@@ -60,6 +60,14 @@ export const getSiteAndDescendantIDs = async (
 export const getAuthorization = async (req: PayloadRequest): Promise<Authorization> => {
   if (!req.user) return noAuthorization
 
+  if (typeof req.context.otterScannerID === 'string') {
+    const siteID = req.context.otterScannerSiteID
+    // Import scope is temporary; never cache it as a human role or expand it to descendants.
+    return req.context.assetImport === true && typeof siteID === 'string' && siteID
+      ? { ...noAuthorization, readableSiteIDs: [siteID], writableSiteIDs: [siteID] }
+      : noAuthorization
+  }
+
   const cached = req.context.siteAuthorization as Promise<Authorization> | undefined
   if (cached) return cached
 

@@ -10,6 +10,7 @@ import {
   canWriteSiteDocuments,
   enforceWritableSite,
   filterWritableSites,
+  getAuthorization,
 } from '../../src/access/authorization'
 import { getAuditChanges } from '../../src/collections/AuditLogs'
 import { createOtterScanner, pollOtter } from '../../src/otter/controller'
@@ -464,6 +465,35 @@ describe('Otter security and scheduling boundaries', () => {
         req: { context: req.context, user: req.user } as never,
       } as never),
     ).rejects.toMatchObject({ status: 403 })
+  })
+
+  it('grants shared identity authorization only while processing an exact-site scanner import', async () => {
+    const req = {
+      user: { id: 'otter:scanner-1', role: null },
+      context: {
+        otterScannerID: 'scanner-1',
+        otterScannerSiteID: 'site-1',
+      } as Record<string, unknown>,
+    }
+    const denied = await getAuthorization(req as never)
+    expect(denied).toEqual({
+      canConfigureOtter: false,
+      isAdmin: false,
+      readableSiteIDs: [],
+      writableSiteIDs: [],
+    })
+    req.context.siteAuthorization = Promise.resolve(denied)
+    req.context.assetImport = true
+    expect(await getAuthorization(req as never)).toEqual({
+      ...denied,
+      readableSiteIDs: ['site-1'],
+      writableSiteIDs: ['site-1'],
+    })
+    req.context.assetImport = false
+    expect(await getAuthorization(req as never)).toEqual(denied)
+    req.context.assetImport = true
+    delete req.context.otterScannerSiteID
+    expect(await getAuthorization(req as never)).toEqual(denied)
   })
 
   it('requires Otter Config and a writable assigned site for human management', async () => {

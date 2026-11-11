@@ -190,6 +190,8 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
   profile, schedule, run, and managed import data stay bound to one exact site. Scanner credentials
   are machine principals restricted to `/api/otter/v1` and their own `/api/asset-imports` records;
   never give them generic Payload or descendant-site access.
+  Shared authorization recognizes their exact-site read/write scope only inside the server-owned
+  `assetImport` context, including identity reconciliation of existing assets; never cache that scope.
 - Otter enrollment tokens are single-use, short-lived digests; machine credentials are hashed,
   expiring, and revocable. SNMP/OPC UA credentials are encrypted with
   `OTSERVER_OTTER_ENCRYPTION_KEY` and must never be returned to ordinary profile reads or logged.
@@ -214,6 +216,7 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
 - Otter Runs expose terminal failure reasons in `message`. Lease expiry records the missed-heartbeat
   reason, and older clients reporting failure without a message get an explicit missing-details
   fallback. Scanner-generated reasons must remain credential-safe and survive finish retries.
+  Accepted run heartbeats refresh scanner `lastSeenAt` at most once per minute, as idle polls do.
 - Otter controller URLs require HTTPS except for HTTP on `localhost`, `127.0.0.1`, or `[::1]`,
   regardless of `NODE_ENV`. Browser management accepts loopback aliases only on the same scheme and
   port as an allowed origin; retain origin checks for external requests.

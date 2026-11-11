@@ -1324,6 +1324,16 @@ export const heartbeatOtterRun: Endpoint['handler'] = async (req) => {
         },
       })
     }
+    const lastSeen = Date.parse(scanner.lastSeenAt || '')
+    if (!Number.isFinite(lastSeen) || now.getTime() - lastSeen >= 60_000)
+      await req.payload.update({
+        collection: 'otter-scanners',
+        context: { otterScannerUpdate: true },
+        id: scanner.id,
+        overrideAccess: true,
+        req,
+        data: { lastSeenAt: now.toISOString() },
+      })
     return { cancelRequested: run.status === 'cancel-requested', leaseExpiresAt }
   })
   return json(result)

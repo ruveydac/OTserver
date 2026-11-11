@@ -207,6 +207,9 @@ describe.skipIf(!process.env.OTTER_CLIENT_BIN)('Rust controller interoperability
           /Scanner credential is expired or not accepted/,
         )
         expect(await readFile(join(stateDirectory, 'agent-state.json'), 'utf8')).toBe(previousState)
+        const enrollmentLog = await readFile(join(stateDirectory, 'controller.log'), 'utf8')
+        expect(enrollmentLog).toContain('POST /api/otter/v1/enroll: HTTP 401')
+        expect(enrollmentLog).not.toContain('i'.repeat(43))
         await Promise.race([
           startClient(format === 'bare' ? `127.0.0.1:${address.port}` : url, true, true),
           expect
@@ -270,6 +273,7 @@ describe.skipIf(!process.env.OTTER_CLIENT_BIN)('Rust controller interoperability
           await readFile(join(directory, 'state', `${run.id}.otserver.json`), 'utf8'),
         )
         expect(exported).toMatchObject({ format: 'otserver-scan', schemaVersion: 2, devices: [] })
+        expect(await readFile(join(stateDirectory, 'controller.log'), 'utf8')).toBe(enrollmentLog)
         await new Promise<void>((done) => {
           client!.once('close', () => done())
           client!.kill('SIGKILL')
@@ -334,6 +338,14 @@ describe.skipIf(!process.env.OTTER_CLIENT_BIN)('Rust controller interoperability
         expect(requests.filter(({ path }) => path === '/api/asset-imports')).toHaveLength(1)
         expect(output).not.toContain(scanner.enrollmentToken)
         expect(output).not.toContain(saved.fileCredential!.credential)
+        const log = await readFile(join(stateDirectory, 'controller.log'), 'utf8')
+        expect(log).toContain(enrollmentLog)
+        expect(log).toContain(
+          `ERROR Run ${failedRun.id} failed: The selected network interface is not available`,
+        )
+        expect(log).not.toContain(scanner.enrollmentToken)
+        expect(log).not.toContain(saved.fileCredential!.credential)
+        expect(log).not.toContain(' INFO ')
       } finally {
         if (client && client.exitCode === null && client.signalCode === null) {
           const stopped = new Promise<void>((done) => client!.once('close', () => done()))

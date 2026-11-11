@@ -1,4 +1,10 @@
-import { createPayloadRequest, getPayload, type Payload, type PayloadRequest } from 'payload'
+import {
+  createPayloadRequest,
+  getPayload,
+  handleEndpoints,
+  type Payload,
+  type PayloadRequest,
+} from 'payload'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -7,7 +13,7 @@ import config from '@/payload.config'
 import { siteTypeID } from '../siteType'
 import { ensureAdminRole } from '../../src/collections/UserRoles'
 import { executeQueuedImport } from '../../src/application/queuedImports'
-import { decryptOtterCredentials } from '../../src/otter/security'
+import { decryptOtterCredentials, newToken, tokenDigest } from '../../src/otter/security'
 import { relationshipID } from '../../src/access/authorization'
 import { isRunLeaseExpired } from '../../src/otter/runLease'
 import {
@@ -76,6 +82,122 @@ const routeRequest = async (
 }
 
 describe('Otter management controller', () => {
+  it('imports existing hardware with a fresh machine credential without granting descendant-site access', async () => {
+    const site = await payload.create({
+      collection: 'sites',
+      data: { name: `Machine import ${randomUUID()}`, type: await siteTypeID(payload) },
+    })
+    const child = await payload.create({
+      collection: 'sites',
+      data: { name: `Child ${randomUUID()}`, type: await siteTypeID(payload), parent: site.id },
+    })
+    const token = newToken()
+    const scanner = await payload.create({
+      collection: 'otter-scanners',
+      data: {
+        name: 'Machine import regression',
+        site: site.id,
+        enrollmentTokenHash: tokenDigest(token),
+        enrollmentExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+    })
+    const oldQueuedImports = process.env.OTSERVER_QUEUED_IMPORTS
+    try {
+      const enrollment = await enrollOtter(await request('/otter/v1/enroll', { body: { token } }))
+      const { credential } = (await enrollment.json()) as { credential: string }
+      const scan = JSON.parse(
+        await readFile(
+          'tests/otserver_otter_files/OTserver-Otter-known-vulnerability.json',
+          'utf8',
+        ),
+      )
+      const upload = async (metadata: Record<string, unknown> = {}) => {
+        scan.scan.id = randomUUID()
+        const form = new FormData()
+        form.set('_payload', JSON.stringify({ source: 'otserver-otter', ...metadata }))
+        form.set(
+          'file',
+          new Blob([JSON.stringify(scan)], { type: 'application/json' }),
+          'scan.json',
+        )
+        return handleEndpoints({
+          config: payload.config,
+          path: '/api/asset-imports',
+          request: new Request('https://otserver.example/api/asset-imports', {
+            method: 'POST',
+            headers: { Authorization: `Otter ${credential}` },
+            body: form,
+          }),
+        })
+      }
+      const first = await upload()
+      expect(first.status).toBe(201)
+      expect(await first.json()).toMatchObject({ doc: { status: 'completed', createdAssets: 1 } })
+      scan.devices[0].observations[0].fields.firmwareVersion = 'V2.9.0'
+      const second = await upload()
+      expect(second.status).toBe(201)
+      expect(await second.json()).toMatchObject({ doc: { status: 'completed', updatedAssets: 1 } })
+
+      process.env.OTSERVER_QUEUED_IMPORTS = 'on'
+      scan.devices[0].observations[0].fields.firmwareVersion = 'V3.0.0'
+      const queued = await upload({ executionMode: 'queued' })
+      expect(queued.status).toBe(201)
+      const { doc } = (await queued.json()) as { doc: { id: string } }
+      const queuedDoc = await payload.findByID({ collection: 'asset-imports', id: doc.id })
+      await executeQueuedImport(payload, doc.id, queuedDoc.jobID!, 0)
+      expect(await payload.findByID({ collection: 'asset-imports', id: doc.id })).toMatchObject({
+        status: 'completed',
+        updatedAssets: 1,
+      })
+      const assets = await payload.find({
+        collection: 'assets',
+        where: { site: { equals: site.id } },
+      })
+      expect(assets.docs).toHaveLength(1)
+      expect(assets.docs[0].firmwareVersion).toBe('V3.0.0')
+      const audits = await payload.find({
+        collection: 'audit-logs',
+        where: {
+          and: [{ asset: { equals: assets.docs[0].id } }, { actorType: { equals: 'otter' } }],
+        },
+      })
+      expect(audits.totalDocs).toBeGreaterThan(0)
+      expect((await upload({ site: child.id })).status).toBe(403)
+      const direct = await handleEndpoints({
+        config: payload.config,
+        path: `/api/assets/${assets.docs[0].id}`,
+        request: new Request(`https://otserver.example/api/assets/${assets.docs[0].id}`, {
+          method: 'PATCH',
+          headers: { Authorization: `Otter ${credential}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'Not an import' }),
+        }),
+      })
+      expect(direct.status).toBe(403)
+      expect(
+        (
+          await pollOtter(
+            await request('/otter/v1/poll', {
+              token: `Otter ${credential}`,
+              body: {},
+            }),
+          )
+        ).status,
+      ).toBe(200)
+    } finally {
+      if (oldQueuedImports === undefined) delete process.env.OTSERVER_QUEUED_IMPORTS
+      else process.env.OTSERVER_QUEUED_IMPORTS = oldQueuedImports
+      for (const collection of ['asset-imports', 'asset-observations', 'assets'] as const)
+        await payload.delete({
+          collection,
+          where: { site: { equals: site.id } },
+          overrideAccess: true,
+        })
+      await payload.delete({ collection: 'otter-scanners', id: scanner.id, overrideAccess: true })
+      await payload.delete({ collection: 'sites', id: child.id, overrideAccess: true })
+      await payload.delete({ collection: 'sites', id: site.id, overrideAccess: true })
+    }
+  })
+
   it('enrolls once, delivers encrypted profile credentials, and completes a managed run', async () => {
     const oldURL = process.env.OTSERVER_PUBLIC_URL
     const oldKey = process.env.OTSERVER_OTTER_ENCRYPTION_KEY
@@ -1526,6 +1648,12 @@ describe('Otter management controller', () => {
         ),
       ).rejects.toMatchObject({ status: 400 })
       const beforeHeartbeat = Date.now()
+      const staleLastSeen = new Date(Date.now() - 300_000).toISOString()
+      await payload.update({
+        collection: 'otter-scanners',
+        id: scannerID,
+        data: { lastSeenAt: staleLastSeen },
+      })
       const heartbeat = await heartbeatOtterRun(
         await routeRequest('/otter/v1/runs/heartbeat', runID, `Otter ${enrollment.credential}`, {
           progress: 50,
@@ -1547,10 +1675,29 @@ describe('Otter management controller', () => {
       ).toMatchObject({
         leaseExpiresAt: heartbeatResult.leaseExpiresAt,
       })
+      const liveScanner = await payload.findByID({ collection: 'otter-scanners', id: scannerID })
+      expect(Date.parse(liveScanner.lastSeenAt!)).toBeGreaterThan(Date.parse(staleLastSeen))
+      await payload.update({
+        collection: 'otter-scanners',
+        id: scannerID,
+        data: { lastSeenAt: null },
+      })
+      const heartbeatWithoutLastSeen = await heartbeatOtterRun(
+        await routeRequest('/otter/v1/runs/heartbeat', runID, `Otter ${enrollment.credential}`, {}),
+      )
+      expect(await heartbeatWithoutLastSeen.json()).toMatchObject({ cancelRequested: false })
+      const scannerAfterMissingLastSeen = await payload.findByID({
+        collection: 'otter-scanners',
+        id: scannerID,
+      })
+      expect(scannerAfterMissingLastSeen.lastSeenAt).toEqual(expect.any(String))
       const heartbeatWithoutProgress = await heartbeatOtterRun(
         await routeRequest('/otter/v1/runs/heartbeat', runID, `Otter ${enrollment.credential}`, {}),
       )
       expect(await heartbeatWithoutProgress.json()).toMatchObject({ cancelRequested: false })
+      expect(
+        (await payload.findByID({ collection: 'otter-scanners', id: scannerID })).lastSeenAt,
+      ).toBe(scannerAfterMissingLastSeen.lastSeenAt)
       await expect(
         finishOtterRun(
           await routeRequest('/otter/v1/runs/finish', runID, `Otter ${enrollment.credential}`, {
