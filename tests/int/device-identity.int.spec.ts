@@ -22,6 +22,13 @@ import DeviceIdentity from '@/components/DeviceIdentity'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }))
+vi.mock('@payloadcms/ui', async () => {
+  const { createElement } = await import('react')
+  return {
+    Button: ({ children }: { children: React.ReactNode }) =>
+      createElement('button', null, children),
+  }
+})
 
 const mac = () => `02:${randomBytes(5).toString('hex').match(/../g)!.join(':')}`.toUpperCase()
 const serial = () => randomBytes(4).toString('hex').toUpperCase()
