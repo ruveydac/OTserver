@@ -391,6 +391,18 @@ and finish with `cancelled` when cancellation is acknowledged. Finish accepts `c
 ID must be an upload by this scanner associated with this active run. Scan completion and import
 processing are separate outcomes: a queued import can still be pending when the scan run finishes.
 
+Run heartbeats also refresh the scanner's `lastSeenAt` at most once per minute, so long-running scans
+and uploads remain visible as connected even while idle polling is suspended. HTTP 403 means the
+requested operation was denied; it does not establish that the machine credential expired. Otter
+stops on that response and reports the permission denial separately from HTTP 401 authentication
+failure. Check management logs for the failing operation before re-enrolling.
+
+When Otter starts with `--state-dir PATH`, its private `PATH/controller.log` appends UTC warning/error
+entries across restarts. Failed HTTP operations include the method, API path, status (when received),
+and troubleshooting guidance. Scan progress and successful requests are excluded; probe warnings
+use credential-safe categories rather than raw error text. Stop Otter before archiving/removing the
+log; retention is operator-managed.
+
 Failed runs include a credential-safe `message` explaining setup/discovery failures or an interrupted
 scan. Otter persists this reason before finishing so retries and restarts retain it. Arbitrary protocol
 errors and credential values are not included. The native **Otter Runs** list and document show the
