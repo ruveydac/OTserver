@@ -25,7 +25,7 @@ OTserver helps you keep track of industrial devices, where they are installed, a
 change over time. Add assets manually or import discovery results from
 [OTserver Otter](https://github.com/ruveydac/otserver-otter), Siemens PRONETA, or Nmap.
 
-![OTserver asset management dashboard](public/otserver-dashboard.png)
+![OTserver asset management dashboard](public/asset-details.webp)
 
 ## What you can do
 
