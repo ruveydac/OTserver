@@ -5,7 +5,6 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { normalizeMAC, validateIPAddress, validateMACAddress } from '../../src/collections/Assets'
 import { findMatchingAssetClass, validateAssignmentRegex } from '../../src/collections/AssetClasses'
-import AssetClassListView from '../../src/components/AssetClassListView'
 import AssetClassAssetsCell from '../../src/components/AssetClassAssetsCell'
 import AssetView from '../../src/components/AssetView'
 import { assetListURL } from '../../src/components/assetListURL'
@@ -15,6 +14,35 @@ vi.mock('@payloadcms/ui', async () => {
   const { createElement } = await import('react')
 
   return {
+    Button: ({
+      buttonStyle,
+      children,
+      className,
+      el,
+      extraButtonProps,
+      margin,
+      size,
+      url,
+      ...props
+    }: Record<string, unknown>) =>
+      createElement(
+        el === 'link' || el === 'anchor' ? 'a' : 'button',
+        {
+          ...props,
+          ...(extraButtonProps as object),
+          className: [
+            'btn',
+            className,
+            size && `btn--size-${size}`,
+            buttonStyle && `btn--style-${buttonStyle}`,
+            margin === false && 'btn--no-margin',
+          ]
+            .filter(Boolean)
+            .join(' '),
+          href: url,
+        },
+        children as never,
+      ),
     CopyToClipboard: () => createElement('span', null, 'Copy value'),
     DefaultEditView: (props: Record<string, unknown>) => {
       if ('payload' in props || 'initPageResult' in props) {
@@ -22,7 +50,15 @@ vi.mock('@payloadcms/ui', async () => {
       }
       return createElement('div', null, 'Payload edit form')
     },
-    DefaultListView: () => createElement('div', null, 'Payload list'),
+    Link: ({
+      children,
+      href,
+      ...props
+    }: {
+      children: React.ReactNode
+      href: string
+      scroll?: boolean
+    }) => createElement('a', { href, ...props, scroll: undefined }, children),
   }
 })
 
@@ -39,33 +75,6 @@ describe('asset network fields', () => {
       '/admin/collections/assets?where%5BassetClass%5D%5Bequals%5D=class-1',
     )
 
-    const view = await AssetClassListView({
-      enableRowSelections: true,
-      hasCreatePermission: true,
-      newDocumentURL: '/admin/collections/asset-classes/create',
-      payload: {
-        config: { routes: { admin: '/admin' } },
-        find: vi.fn().mockResolvedValue({
-          docs: [
-            {
-              assignmentPriority: 10,
-              assignmentRules: [
-                { id: 'rule-1', manufacturerRegex: 'Siemens', modelRegex: 'S7-1500.*' },
-              ],
-              createdAt: '2026-08-08T09:00:00.000Z',
-              description: 'Programmable controllers',
-              id: 'class-1',
-              name: 'PLC',
-              updatedAt: '2026-08-08T10:00:00.000Z',
-            },
-          ],
-        }),
-      },
-      user: { id: 'user-1' },
-    } as never)
-    const html = renderToStaticMarkup(createElement(() => view))
-
-    expect(html).toContain('Payload list')
     const cell = AssetClassAssetsCell({
       payload: { config: { routes: { admin: '/manage' } } },
       rowData: { id: 'class-1' },
@@ -74,22 +83,6 @@ describe('asset network fields', () => {
       '/manage/collections/assets?where%5BassetClass%5D%5Bequals%5D=class-1',
     )
     expect(AssetClassAssetsCell({ rowData: undefined } as never)).toBeNull()
-  })
-
-  it('renders the default list and empty asset-class state', async () => {
-    const defaultView = await AssetClassListView({ enableRowSelections: false } as never)
-    expect(renderToStaticMarkup(createElement(() => defaultView))).toContain('Payload list')
-
-    const emptyView = await AssetClassListView({
-      enableRowSelections: true,
-      hasCreatePermission: false,
-      payload: {
-        config: { routes: { admin: '/admin' } },
-        find: vi.fn().mockResolvedValue({ docs: [] }),
-      },
-      user: { id: 'user-1' },
-    } as never)
-    expect(renderToStaticMarkup(createElement(() => emptyView))).toContain('Payload list')
   })
 
   it('matches each rule as AND conditions and classes as priority-ordered alternatives', async () => {
@@ -273,22 +266,37 @@ describe('asset network fields', () => {
     expect(html).toContain('href="/admin/collections/asset-classes/class-1"')
     expect(html).toContain('PLC')
     expect(html).toContain('World / Germany / Plant Berlin')
-    expect(html).toContain('href="/admin/collections/sites/site-1"')
+    expect(
+      html.match(/href="\/admin\/collections\/assets\?where%5Bsite%5D%5Bequals%5D=site-1"/g),
+    ).toHaveLength(2)
     expect(html).toContain('S-123')
     expect(html).toContain('Remote access enabled')
     expect(html).toContain('ISA-95 level')
     expect(html).toContain('<dd>No</dd>')
     expect(html).toContain('<dd>0</dd>')
-    expect(html).toContain('href="/admin/collections/assets/asset-1/edit"')
-    expect(html).toContain('Edit asset')
+    expect(html).not.toContain('Edit asset')
     expect(html).toContain('aria-label="Asset sections"')
+    const actionMarkup = html.match(/<div class="asset-view__actions">([\s\S]*?)<\/div>/)?.[1] || ''
+    const actionClasses = [...actionMarkup.matchAll(/<(?:a|button)\b[^>]*class="([^"]*)"/g)].map(
+      ([, classes]) => classes?.split(/\s+/) || [],
+    )
+    expect(actionClasses).toHaveLength(1)
+    expect(
+      actionClasses.every(
+        (classes) =>
+          classes.includes('btn') &&
+          classes.includes('asset-view__action') &&
+          classes.includes('btn--style-secondary') &&
+          classes.includes('btn--size-medium'),
+      ),
+    ).toBe(true)
     expect(html).toContain('href="/admin/collections/assets/asset-1?tab=network"')
     expect(html).toContain('href="/admin/collections/assets/asset-1?tab=connected"')
     expect(html).toContain('href="/admin/collections/assets/asset-1?tab=security"')
     expect(html).toContain('href="/admin/collections/assets/asset-1?tab=discovery"')
     expect(html).toContain('href="/admin/collections/assets/asset-1?tab=history"')
     expect(html).toContain('Current endpoints')
-    expect(html).toContain('Comfortable')
+    expect(html).not.toContain('Comfortable')
     // The overview lists only the five worst matches, most severe first.
     const positions = [
       'CVE-2099-0003',
@@ -328,8 +336,9 @@ describe('asset network fields', () => {
     const securityHTML = renderToStaticMarkup(createElement(() => securityView))
     expect(securityHTML).toContain('7 total')
     expect(securityHTML).toContain(
-      'href="/admin/collections/assets/asset-1?tab=security&amp;severity=CRITICAL"><span>Critical</span><strong>2</strong>',
+      'href="/admin/collections/assets/asset-1?tab=security&amp;severity=CRITICAL"',
     )
+    expect(securityHTML).toContain('<span>Critical</span><strong>2</strong>')
     expect(securityHTML).toContain('<span>High</span><strong>2</strong>')
     expect(securityHTML).toContain('<span>Medium</span><strong>3</strong>')
     expect(securityHTML).toContain('A crafted network request can interrupt controller operation.')

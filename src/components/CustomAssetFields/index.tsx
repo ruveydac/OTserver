@@ -1,7 +1,15 @@
 'use client'
 
-import { Banner, FieldError, useConfig, useField } from '@payloadcms/ui'
-import { useEffect, useState } from 'react'
+import {
+  Banner,
+  CheckboxInput,
+  FieldError,
+  TextareaInput,
+  TextInput,
+  useConfig,
+  useField,
+} from '@payloadcms/ui'
+import { useEffect, useState, type ChangeEvent } from 'react'
 import type { JSONFieldClientComponent } from 'payload'
 import type { AssetField } from '@/payload-types'
 
@@ -82,53 +90,57 @@ const CustomAssetFields: JSONFieldClientComponent = ({ field, path, readOnly }) 
               key={id}
             >
               {definition.type === 'checkbox' ? (
-                <label className="custom-asset-fields__checkbox" htmlFor={inputID}>
-                  <input
-                    aria-describedby={definition.description ? `${inputID}-description` : undefined}
-                    checked={fieldValue === true}
-                    id={inputID}
-                    onChange={(event) => update(id, event.target.checked)}
-                    type="checkbox"
-                  />
-                  <span>{definition.label}</span>
-                </label>
+                <CheckboxInput
+                  checked={fieldValue === true}
+                  id={inputID}
+                  label={definition.label}
+                  onToggle={(event) => update(id, event.target.checked)}
+                  readOnly={readOnly}
+                />
+              ) : definition.type === 'textarea' ? (
+                <TextareaInput
+                  description={definition.description || undefined}
+                  label={definition.label}
+                  onChange={(event) => update(id, event.target.value)}
+                  path={`${path}.${id}`}
+                  readOnly={readOnly}
+                  value={typeof fieldValue === 'string' ? fieldValue : ''}
+                />
+              ) : definition.type === 'text' ? (
+                <TextInput
+                  description={definition.description || undefined}
+                  label={definition.label}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    update(id, event.target.value)
+                  }
+                  path={`${path}.${id}`}
+                  readOnly={readOnly}
+                  value={typeof fieldValue === 'string' ? fieldValue : ''}
+                />
               ) : (
                 <>
                   <label htmlFor={inputID}>{definition.label}</label>
-                  {definition.type === 'textarea' ? (
-                    <textarea
-                      aria-describedby={
-                        definition.description ? `${inputID}-description` : undefined
-                      }
-                      id={inputID}
-                      onChange={(event) => update(id, event.target.value)}
-                      value={typeof fieldValue === 'string' ? fieldValue : ''}
-                    />
-                  ) : (
-                    <input
-                      aria-describedby={
-                        definition.description ? `${inputID}-description` : undefined
-                      }
-                      id={inputID}
-                      onChange={(event) =>
-                        update(
-                          id,
-                          definition.type === 'number' && event.target.value
-                            ? Number(event.target.value)
-                            : event.target.value,
-                        )
-                      }
-                      type={definition.type}
-                      value={
-                        typeof fieldValue === 'number' || typeof fieldValue === 'string'
-                          ? fieldValue
-                          : ''
-                      }
-                    />
-                  )}
+                  <input
+                    aria-describedby={definition.description ? `${inputID}-description` : undefined}
+                    id={inputID}
+                    onChange={(event) =>
+                      update(
+                        id,
+                        definition.type === 'number' && event.target.value
+                          ? Number(event.target.value)
+                          : event.target.value,
+                      )
+                    }
+                    type={definition.type}
+                    value={
+                      typeof fieldValue === 'number' || typeof fieldValue === 'string'
+                        ? fieldValue
+                        : ''
+                    }
+                  />
                 </>
               )}
-              {definition.description ? (
+              {definition.description && !['text', 'textarea'].includes(definition.type) ? (
                 <small id={`${inputID}-description`}>{definition.description}</small>
               ) : null}
             </div>

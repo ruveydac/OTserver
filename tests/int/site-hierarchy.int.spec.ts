@@ -23,6 +23,9 @@ import type { Asset, Site, User } from '../../src/payload-types'
 vi.mock('@payloadcms/ui', () => ({
   Button: ({ children, type }: { children: React.ReactNode; type: 'submit' }) =>
     createElement('button', { type }, children),
+  Gutter: ({ children }: { children: React.ReactNode }) => createElement('div', null, children),
+  Link: ({ children, href }: { children: React.ReactNode; href: string }) =>
+    createElement('a', { href }, children),
 }))
 vi.mock('@payloadcms/next/templates', () => ({
   DefaultTemplate: ({ children }: { children: React.ReactNode }) =>

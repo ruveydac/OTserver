@@ -1,9 +1,7 @@
 .topology-view {
   display: flex;
   flex-direction: column;
-  height: calc(100dvh - var(--app-header-height, 64px));
-  min-height: 40rem;
-  padding: 0 var(--gutter-h);
+  min-height: min(40rem, 100dvh);
 
   &__header {
     align-items: center;
@@ -189,15 +187,15 @@
   }
 
   &--online {
-    border-color: var(--theme-success-500, #4caf50);
+    border-color: var(--theme-success-500);
   }
 
   &--offline {
-    border-color: var(--theme-error-500, #f44336);
+    border-color: var(--theme-error-500);
   }
 
   &--maintenance {
-    border-color: var(--theme-warning-500, #ff9800);
+    border-color: var(--theme-warning-500);
   }
 
   &--network {

@@ -153,6 +153,47 @@ const addTextField = (
     mergeFields[field] = value
 }
 
+const siemensOrderNumber = /^\d[A-Z0-9]{3} [A-Z0-9]+(?:-[A-Z0-9]+)+$/
+
+/** Siemens device descriptions: "Siemens, <family>, <model>, <order number>, HW: …, FW: …". */
+const siemensDescriptionFields = (value: unknown) => {
+  if (typeof value !== 'string') return
+  const parts = value.split(',').map((part) => part.trim())
+  if (!/^siemens(?: ag)?$/i.test(parts[0] || '') || parts.length < 3) return
+  const orderIndex = parts.findIndex((part) => siemensOrderNumber.test(part))
+  const fields: Record<string, string> = {
+    description: value,
+    productFamily: parts[1],
+    vendor: parts[0],
+  }
+  const model = parts[orderIndex > 2 ? orderIndex - 1 : 2]
+  if (model) fields.model = model
+  if (orderIndex >= 0) fields.orderNumber = parts[orderIndex]
+  for (const part of parts) {
+    const match = /^(HW|FW|SW):\s*(.+)$/i.exec(part)
+    if (!match) continue
+    const revision = match[2].replace(/^Version\s+/i, '').trim()
+    if (!revision) continue
+    fields[
+      match[1].toUpperCase() === 'HW'
+        ? 'hardwareVersion'
+        : match[1].toUpperCase() === 'SW'
+          ? 'softwareVersion'
+          : 'firmwareVersion'
+    ] = revision
+  }
+  return fields
+}
+
+const applySiemensDescription = (
+  fields: Record<string, unknown>,
+  mergeFields: Record<string, unknown>,
+  value: unknown,
+) => {
+  for (const [field, item] of Object.entries(siemensDescriptionFields(value) || {}))
+    addTextField(fields, mergeFields, field, item)
+}
+
 export const parseOTserverOtter = (input: string): ImportResult => {
   if (Buffer.byteLength(input, 'utf8') > MAX_OTTER_IMPORT_FILE_SIZE)
     throw new Error('Otter JSON exceeds the 500 MB import limit.')
@@ -332,9 +373,12 @@ export const parseOTserverOtter = (input: string): ImportResult => {
                 Number(item.api) === 0 &&
                 Number(item.slot) === 0 &&
                 Number(item.subslot) === 1 &&
-                text(item.index).toUpperCase() === '0xAFF0',
+                text(item.index).toUpperCase() === '0XAFF0',
             )
           const parsed = record(primary?.parsed)
+          const modules = array(raw.pnioRecords).flatMap((item) =>
+            array(record(record(item).parsed).im5Data).map(record),
+          )
           addTextField(
             fields,
             mergeFields,
@@ -349,7 +393,22 @@ export const parseOTserverOtter = (input: string): ImportResult => {
             originalFields.softwareRevision,
             parsed.softwareRevision,
           )
+          addTextField(
+            fields,
+            mergeFields,
+            'orderNumber',
+            parsed.orderId,
+            ...modules.map((module) => module.imOrderId),
+          )
+          addTextField(
+            fields,
+            mergeFields,
+            'hardwareVersion',
+            parsed.hardwareRevision,
+            ...modules.map((module) => module.imHardwareRevision),
+          )
         }
+        applySiemensDescription(fields, mergeFields, fields.description)
         return {
           fields,
           mergeFields,
@@ -433,6 +492,33 @@ export const parseOTserverOtter = (input: string): ImportResult => {
       source: ['lldp', 'profinet-dcp', 'snmp'].includes(link.source) ? link.source : 'unknown',
     }
   })
+
+  const assetsByMAC = new Map(assets.map((asset) => [asset.macAddress, asset]))
+  for (const link of links) {
+    const asset = assetsByMAC.get(text(link.remote.macAddress))
+    const description = text(record(link.raw).remoteSystemDescription)
+    const fields = siemensDescriptionFields(description)
+    if (
+      !asset ||
+      !fields ||
+      asset.observations?.some((item) => text(item.fields.description) === description)
+    )
+      continue
+    Object.assign(asset, fields)
+    asset.observations = [
+      ...(asset.observations || []),
+      {
+        fields,
+        mergeFields: fields,
+        observedAt: link.observedAt,
+        quality: sources[link.source] || 'low',
+        raw: { remoteSystemDescription: description },
+        source: link.source,
+        warnings: [],
+      },
+    ]
+  }
+
   return {
     assets,
     links,

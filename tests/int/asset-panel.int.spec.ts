@@ -18,6 +18,9 @@ vi.mock('@payloadcms/ui', async () => {
   const { createElement } = await import('react')
   return {
     DefaultListView: () => createElement('div', null, 'Payload list'),
+    Gutter: ({ children }: { children: React.ReactNode }) => createElement('div', null, children),
+    Link: ({ children, href }: { children: React.ReactNode; href: string }) =>
+      createElement('a', { href }, children),
     Button: ({ children, url }: { children: React.ReactNode; url?: string }) =>
       createElement('a', { href: url }, children),
   }

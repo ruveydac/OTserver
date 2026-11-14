@@ -418,7 +418,7 @@ describe('device metadata', () => {
           product_family: index === 0 ? 'Family fallback' : undefined,
           source_url: index === 0 ? '/relative/source' : undefined,
           protocols: index === 0 ? ['OPC UA', 502, false] : undefined,
-          evidence_json: index === 0 ? { safe: true } : undefined,
+          evidence_json: index === 0 ? { catalog_evidence_only: true } : undefined,
         },
       })),
     }
@@ -446,7 +446,17 @@ describe('device metadata', () => {
     expect(rendered).toContain('candidate-1')
     expect(rendered).toContain('Unavailable')
     expect(rendered).toContain('OPC UA, 502, false')
+    expect(rendered).not.toContain('<dt>Evidence Json</dt>')
     expect(rendered).toContain('safe&quot;: true')
+    expect(rendered).toContain('catalog_evidence_only')
+    const protocolsPosition = rendered.indexOf('<dt>Protocols</dt>')
+    expect(protocolsPosition).toBeGreaterThanOrEqual(0)
+    const evidencePosition = rendered.indexOf(
+      '<summary>Match and source evidence</summary>',
+      protocolsPosition,
+    )
+    expect(evidencePosition).toBeGreaterThan(protocolsPosition)
+    expect(rendered.indexOf('catalog_evidence_only')).toBeGreaterThan(evidencePosition)
     expect(rendered).toContain('<a href="https://example.test/reference"')
     expect(rendered).not.toContain('href="javascript:')
     expect(rendered).not.toContain('href="https://user:pass@')

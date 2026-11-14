@@ -1,5 +1,6 @@
 'use client'
 
+import { Button } from '@payloadcms/ui'
 import { startTransition, useEffect, useState } from 'react'
 
 type Density = 'comfortable' | 'compact'
@@ -23,14 +24,17 @@ export default function DensityToggle() {
   const nextDensity: Density = density === 'compact' ? 'comfortable' : 'compact'
 
   return (
-    <button
+    <Button
       aria-label={`Switch to ${nextDensity} density`}
       aria-pressed={density === 'compact'}
-      className="asset-view__density"
+      buttonStyle="secondary"
+      className="asset-view__action"
+      margin={false}
       onClick={() => setDensity(nextDensity)}
+      size="medium"
       type="button"
     >
       {density === 'compact' ? 'Compact' : 'Comfortable'}
-    </button>
+    </Button>
   )
 }

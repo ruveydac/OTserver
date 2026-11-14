@@ -19,7 +19,11 @@ vi.mock('@payloadcms/ui', async () => {
     ConfirmationModal: ({ body }: { body: unknown }) => createElement('div', null, body as never),
     CopyToClipboard: ({ defaultMessage }: { defaultMessage: string }) =>
       createElement('span', null, defaultMessage),
-    DefaultListView: () => createElement('div', null, 'Default list'),
+    DefaultListView: ({ hasCreatePermission }: { hasCreatePermission?: boolean }) =>
+      createElement('div', null, 'Default list', hasCreatePermission ? ' Create site' : ''),
+    Gutter: ({ children }: { children: React.ReactNode }) => createElement('div', null, children),
+    Link: ({ children, href }: { children: React.ReactNode; href: string }) =>
+      createElement('a', { href }, children),
     useDocumentInfo: () => ({}),
     useField: () => ({ setValue: ui.setValue, value: 'nmap' }),
     useModal: () => ({ openModal: ui.openModal }),
@@ -1026,7 +1030,7 @@ describe('admin presentation', () => {
     expect(html).toContain('Plant')
   })
 
-  it('renders empty dashboard and both site-list modes', async () => {
+  it('renders empty dashboard and only the site hierarchy without create permission', async () => {
     const payload = {
       auth: vi.fn().mockResolvedValue({ user: null }),
       config: { routes: { admin: '/admin' } },
@@ -1036,19 +1040,17 @@ describe('admin presentation', () => {
     expect(renderToStaticMarkup(await BeforeDashboard({ payload: payload as never }))).toContain(
       'No assets yet',
     )
-    expect(
-      renderToStaticMarkup(await SiteTreeView({ enableRowSelections: false } as never)),
-    ).toContain('Default list')
-    expect(
-      renderToStaticMarkup(
-        await SiteTreeView({
-          enableRowSelections: true,
-          hasCreatePermission: false,
-          newDocumentURL: '/admin/collections/sites/create',
-          payload,
-        } as never),
-      ),
-    ).toContain('No sites yet')
+    const html = renderToStaticMarkup(
+      await SiteTreeView({
+        enableRowSelections: false,
+        hasCreatePermission: false,
+        newDocumentURL: '/admin/collections/sites/create',
+        payload,
+      } as never),
+    )
+    expect(html).toContain('No sites yet')
+    expect(html).not.toContain('Default list')
+    expect(html).not.toContain('Create site')
   })
 
   it('renders a site hierarchy and the small admin components', async () => {
@@ -1092,6 +1094,8 @@ describe('admin presentation', () => {
     } as never)
     const html = renderToStaticMarkup(view)
     expect(html).toContain('Create site')
+    expect(html).toContain('/admin/collections/sites/create')
+    expect(html).not.toContain('Default list')
     expect(html).toContain('Plant / Line 2')
     expect(html).toContain('View assets')
     expect(html).toContain('Purdue overview')

@@ -65,13 +65,15 @@ export default function ManualAssetTags({
     <>
       <Button
         buttonStyle="secondary"
-        className="asset-view__secondary-action"
+        className="asset-view__action"
+        margin={false}
         onClick={() => {
           setSelected(manualTagIDs)
           setError('')
           setActiveGroup(groups[0]?.id || 'ungrouped')
           openModal(modal)
         }}
+        size="medium"
         type="button"
       >
         Manage manual tags
