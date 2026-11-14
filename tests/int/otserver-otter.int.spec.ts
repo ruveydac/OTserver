@@ -467,6 +467,120 @@ describe('OTserver Otter importer', () => {
     })
   })
 
+  it('enriches Siemens assets from device descriptions and LLDP neighbor details', () => {
+    const localMAC = randomMAC()
+    const switchMAC = randomMAC()
+    const hmiMAC = randomMAC()
+    const file = mutableExport(localMAC, switchMAC)
+    file.devices = [
+      {
+        interfaces: [],
+        ipAddresses: ['192.0.2.10'],
+        macAddress: localMAC,
+        macAddresses: [localMAC],
+        observations: [
+          {
+            fields: {
+              description:
+                'Siemens, SIMATIC NET, SCALANCE X208, 6GK5 208-0BA10-2AA3, HW: 6, FW: V4.05',
+            },
+            observedAt: '2026-08-10T10:00:00Z',
+            raw: {},
+            source: 'snmp',
+            warnings: [],
+          },
+        ],
+        ports: [],
+      },
+      {
+        interfaces: [],
+        ipAddresses: ['192.0.2.11'],
+        macAddress: switchMAC,
+        macAddresses: [switchMAC],
+        observations: [
+          {
+            fields: { model: 'SCALANCE S-600', protocols: ['profinet'], vendor: 'SIEMENS AG' },
+            observedAt: '2026-08-10T10:00:01Z',
+            raw: {},
+            source: 'profinet-dcp',
+            warnings: [],
+          },
+        ],
+        ports: [],
+      },
+      {
+        interfaces: [],
+        ipAddresses: ['192.0.2.12'],
+        macAddress: hmiMAC,
+        macAddresses: [hmiMAC],
+        observations: [
+          {
+            fields: { model: 'TP1200 Comfort', protocols: ['profinet'], vendor: 'SIEMENS AG' },
+            observedAt: '2026-08-10T10:00:02Z',
+            raw: {},
+            source: 'profinet-dcp',
+            warnings: [],
+          },
+        ],
+        ports: [],
+      },
+    ]
+    file.links = [
+      {
+        local: { macAddress: localMAC },
+        observedAt: '2026-08-10T10:00:30Z',
+        raw: {
+          remoteSystemDescription:
+            'Siemens, SIMATIC NET, SCALANCE SC636-2C, 6GK5 636-2GS00-2AC2, HW: Version 1, FW: Version V03.01.01, SVPTD397464',
+        },
+        remote: { macAddress: switchMAC },
+        source: 'lldp',
+      },
+      {
+        local: { macAddress: localMAC },
+        observedAt: '2026-08-10T10:00:31Z',
+        raw: {
+          remoteSystemDescription:
+            'Siemens, SIMATIC HMI, TP1200 Comfort, 6AV2 124-0MC01-0AX0, HW: 0, SW: V 17 0 0',
+        },
+        remote: { macAddress: hmiMAC },
+        source: 'lldp',
+      },
+    ]
+
+    const assets = parseOTserverOtter(JSON.stringify(file)).assets
+    expect(assets.find(({ macAddress }) => macAddress === localMAC)).toMatchObject({
+      firmwareVersion: 'V4.05',
+      hardwareVersion: '6',
+      model: 'SCALANCE X208',
+      orderNumber: '6GK5 208-0BA10-2AA3',
+      productFamily: 'SIMATIC NET',
+      vendor: 'Siemens',
+    })
+    expect(assets.find(({ macAddress }) => macAddress === switchMAC)).toMatchObject({
+      firmwareVersion: 'V03.01.01',
+      hardwareVersion: '1',
+      model: 'SCALANCE SC636-2C',
+      orderNumber: '6GK5 636-2GS00-2AC2',
+      productFamily: 'SIMATIC NET',
+      vendor: 'Siemens',
+      observations: expect.arrayContaining([
+        expect.objectContaining({
+          mergeFields: expect.objectContaining({ orderNumber: '6GK5 636-2GS00-2AC2' }),
+          quality: 'high',
+          source: 'lldp',
+        }),
+      ]),
+    })
+    expect(assets.find(({ macAddress }) => macAddress === hmiMAC)).toMatchObject({
+      hardwareVersion: '0',
+      model: 'TP1200 Comfort',
+      orderNumber: '6AV2 124-0MC01-0AX0',
+      productFamily: 'SIMATIC HMI',
+      softwareVersion: 'V 17 0 0',
+    })
+  })
+
   it('retains PNIO evidence without promoting component serials to device identity', () => {
     const localMAC = randomMAC()
     const file = mutableExport(localMAC, randomMAC())
@@ -529,6 +643,8 @@ describe('OTserver Otter importer', () => {
     const [asset] = parseOTserverOtter(JSON.stringify(file)).assets
     expect(asset).toMatchObject({
       firmwareVersion: 'V1.2.3',
+      hardwareVersion: '3',
+      orderNumber: 'ORD-1',
       vendor: 'Chengdu Zongheng Intelligence Control Technology Co., Ltd.',
     })
     expect(asset.identity).toBeUndefined()

@@ -1115,7 +1115,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
             {canReviewVulnerabilities ? (
               <Button
                 buttonStyle="secondary"
-                className="asset-view__action"
+                className="asset-view__action asset-view__edit"
                 el="link"
                 margin={false}
                 size="medium"

@@ -26,9 +26,9 @@ export default function DensityToggle() {
   return (
     <Button
       aria-label={`Switch to ${nextDensity} density`}
+      aria-pressed={density === 'compact'}
       buttonStyle="secondary"
       className="asset-view__action"
-      extraButtonProps={{ 'aria-pressed': density === 'compact' }}
       margin={false}
       onClick={() => setDensity(nextDensity)}
       size="medium"
