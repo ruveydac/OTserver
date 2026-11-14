@@ -6,6 +6,10 @@
   gap: 0.55rem;
 }
 
+.site-tree-view {
+  padding-bottom: var(--base);
+}
+
 .site-tree-view__branch {
   color: var(--theme-elevation-400);
   flex: 0 0 0.8rem;

@@ -35,8 +35,8 @@
       font-weight: 600;
     }
 
-    input:not([type='checkbox']),
-    textarea {
+    input[type='number'],
+    input[type='date'] {
       background: var(--theme-input-bg);
       border: 1px solid var(--theme-elevation-250);
       border-radius: var(--style-radius-s);
@@ -45,20 +45,9 @@
       padding: 0.7rem;
     }
 
-    textarea {
-      min-height: 6rem;
-      resize: vertical;
-    }
-
     small {
       color: var(--theme-elevation-600);
     }
-  }
-
-  &__checkbox {
-    align-items: center;
-    display: flex;
-    gap: 0.5rem;
   }
 
   @media (max-width: 700px) {

@@ -1,5 +1,6 @@
 import config from '@/payload.config'
 import { randomUUID } from 'node:crypto'
+import { readdirSync, readFileSync } from 'node:fs'
 import { createLocalReq, getPayload, type RequiredDataFromCollectionSlug } from 'payload'
 import { describe, expect, it, vi } from 'vitest'
 import { catalog } from '../fixtures/device-metadata'
@@ -24,6 +25,20 @@ const uuid = () => {
 }
 
 describe('manufacturer and device JSON imports', () => {
+  it('validates the current OTserver Metadata submodule export', () => {
+    const dataDirectory = new URL('../../otserver-metadata/data/', import.meta.url)
+    const files = readdirSync(dataDirectory)
+      .filter((name) => name.startsWith('ot-') && name.endsWith('.json'))
+      .map((name) => file(JSON.parse(readFileSync(new URL(name, dataDirectory), 'utf8')), name))
+
+    const result = mergeMetadataFiles(
+      { manufacturers: [], devices: [], groups: catalog.groups },
+      files,
+    )
+    expect(result.counts.manufacturers.added).toBeGreaterThan(0)
+    expect(result.counts.devices.added).toBeGreaterThan(0)
+  })
+
   it('upserts complete records by ID, preserving absent records and ignoring JSON key order', () => {
     const updated = {
       ...structuredClone(device),

@@ -1,6 +1,14 @@
 'use client'
 
-import { Banner, Button, useConfig, useDocumentInfo, useField } from '@payloadcms/ui'
+import {
+  Banner,
+  Button,
+  ConfirmationModal,
+  useConfig,
+  useDocumentInfo,
+  useField,
+  useModal,
+} from '@payloadcms/ui'
 import { useEffect, useState } from 'react'
 import type { UIFieldClientComponent } from 'payload'
 import './index.scss'
@@ -60,6 +68,7 @@ const OtterCredentialsField: UIFieldClientComponent = ({ readOnly }) => {
     },
   } = useConfig()
   const { id } = useDocumentInfo()
+  const { openModal } = useModal()
   const { value: configured } = useField<boolean>({ path: 'credentialsConfigured' })
   const [savedConfigured, setSavedConfigured] = useState<boolean>()
   const [loadedID, setLoadedID] = useState<string>()
@@ -320,11 +329,18 @@ const OtterCredentialsField: UIFieldClientComponent = ({ readOnly }) => {
                     <Button
                       buttonStyle="error"
                       disabled={busy || loading || editorOpen}
-                      onClick={() => void save('remove', entry)}
+                      onClick={() => openModal(`otter-remove-credential-${entry.id}`)}
                       type="button"
                     >
                       Remove {label}
                     </Button>
+                    <ConfirmationModal
+                      modalSlug={`otter-remove-credential-${entry.id}`}
+                      heading={`Remove ${label}?`}
+                      body="This stored credential cannot be recovered after removal."
+                      confirmLabel="Remove credential"
+                      onConfirm={() => void save('remove', entry)}
+                    />
                   </div>
                 ) : null}
               </article>
@@ -334,11 +350,20 @@ const OtterCredentialsField: UIFieldClientComponent = ({ readOnly }) => {
             <Button
               buttonStyle="error"
               disabled={busy || loading || editorOpen}
-              onClick={() => void save('clear')}
+              onClick={() => openModal('otter-clear-credentials')}
               type="button"
             >
               Clear all credentials
             </Button>
+          ) : null}
+          {!readOnly && visibleEntries.length ? (
+            <ConfirmationModal
+              modalSlug="otter-clear-credentials"
+              heading="Clear all credentials?"
+              body="All stored SNMP and OPC UA credentials will be removed and cannot be recovered."
+              confirmLabel="Clear all credentials now"
+              onConfirm={() => void save('clear')}
+            />
           ) : null}
         </section>
       ) : null}

@@ -72,7 +72,7 @@ const isWideValue = (key: string, value: unknown) =>
 const dataDetails = (data: Record<string, unknown>) => (
   <dl className="asset-view__details">
     {Object.entries(data)
-      .filter(([, value]) => value !== undefined && value !== null)
+      .filter(([key, value]) => key !== 'evidence_json' && value !== undefined && value !== null)
       .map(([key, value]) => (
         <div
           className={
@@ -165,7 +165,10 @@ export default function CatalogReference({
             </div>
           </dl>
           {dataDetails(manufacturer.data)}
-          {evidenceDetails('Manufacturer match evidence', match?.manufacturerEvidence)}
+          {evidenceDetails('Manufacturer match evidence', {
+            match: match?.manufacturerEvidence,
+            source: manufacturer.data.evidence_json,
+          })}
         </section>
       ))}
       {products.slice(0, 20).map((product) => {

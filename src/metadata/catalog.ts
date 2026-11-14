@@ -217,8 +217,30 @@ export const createCatalogMatcher = (source: Catalog, revision: string) => {
         manufacturer.match({ manufacturer: product.data.manufacturer }) !== undefined,
         'Product manufacturer name disagrees with its reference',
       )
+    const identity = observedMetadata({
+      vendor: manufacturer.data.name,
+      model: product.data.model,
+      productFamily: product.data.product_family,
+      partNumber: product.data.part_number,
+      orderNumber: product.data.order_number,
+      hardwareVersion: product.data.hardware_revision,
+      firmwareVersion: product.data.version_kind === 'firmware' ? product.data.version : undefined,
+      softwareVersion: product.data.version_kind === 'software' ? product.data.version : undefined,
+      versionComponent: product.data.version_component,
+    })
+    identity.version = product.data.version
+    identity.version_kind = product.data.version_kind
+    const names = [
+      product.data.model,
+      product.data.product_family,
+      product.data.part_number,
+      product.data.order_number,
+    ].filter((value): value is string => typeof value === 'string')
     assert(
-      match({ ...product.data, manufacturer: manufacturer.data.name }) !== undefined,
+      names.some(
+        (name) =>
+          match({ ...identity, model: name, model_name: name, device_name: name }) !== undefined,
+      ),
       'Product rules reject their own identity',
     )
     assert(

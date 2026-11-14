@@ -22,6 +22,13 @@ import DeviceIdentity from '@/components/DeviceIdentity'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }))
+vi.mock('@payloadcms/ui', async () => {
+  const { createElement } = await import('react')
+  return {
+    Button: ({ children }: { children: React.ReactNode }) =>
+      createElement('button', null, children),
+  }
+})
 
 const mac = () => `02:${randomBytes(5).toString('hex').match(/../g)!.join(':')}`.toUpperCase()
 const serial = () => randomBytes(4).toString('hex').toUpperCase()
@@ -1760,6 +1767,8 @@ describe('device identity', () => {
     expect(networkPanel).toContain('Network identity')
     expect(networkPanel).not.toContain('Hardware identifiers')
     expect(hardwarePanel).toContain('Hardware identifiers')
+    expect(hardwarePanel).toContain('<dt>Hardware UUID</dt>')
+    expect(hardwarePanel).toContain('asset-view__details')
     expect(hardwarePanel).not.toContain('Current endpoints')
     const actions = hardwareView.props.children.at(-1).props.children.at(-1)
     expect(actions.props.endpoints).toEqual(

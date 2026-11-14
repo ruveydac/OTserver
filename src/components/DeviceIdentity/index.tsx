@@ -131,11 +131,26 @@ export default async function DeviceIdentity({
         <h2>{view === 'network' ? 'Network identity' : 'Physical identity'}</h2>
         <span>{view === 'network' ? 'Scoped bindings' : 'Hardware relationships'}</span>
       </div>
-      <p>
-        <code>{asset.uuid || 'Legacy record — migration required'}</code> ·{' '}
-        {asset.physicalKind || 'unknown'} · {asset.lifecycle || 'active'} ·{' '}
-        {asset.baselined ? 'Baselined' : 'Unbaselined'}
-      </p>
+      <dl className="asset-view__details">
+        <div className="asset-view__detail asset-view__detail--wide">
+          <dt>Hardware UUID</dt>
+          <dd>
+            <code>{asset.uuid || 'Legacy record — migration required'}</code>
+          </dd>
+        </div>
+        <div className="asset-view__detail">
+          <dt>Physical kind</dt>
+          <dd>{asset.physicalKind || 'unknown'}</dd>
+        </div>
+        <div className="asset-view__detail">
+          <dt>Lifecycle</dt>
+          <dd>{asset.lifecycle || 'active'}</dd>
+        </div>
+        <div className="asset-view__detail">
+          <dt>Maintenance baseline</dt>
+          <dd>{asset.baselined ? 'Baselined' : 'Unbaselined'}</dd>
+        </div>
+      </dl>
       {asset.mergedInto ? (
         <p>
           Merged into {recordLink('assets', idOf(asset.mergedInto), idOf(asset.mergedInto))}.

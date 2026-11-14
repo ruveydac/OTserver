@@ -16,7 +16,7 @@
 }
 
 .table-view {
-  padding: 0 var(--gutter-h) var(--spacing-view-bottom);
+  padding-bottom: var(--spacing-view-bottom);
 
   &__header {
     align-items: flex-end;

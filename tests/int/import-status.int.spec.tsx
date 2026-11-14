@@ -14,6 +14,7 @@ vi.mock('@payloadcms/ui', async () => {
   return {
     Button: ({ children, ...props }: Record<string, unknown>) =>
       createElement('button', props, children as never),
+    useConfig: () => ({ config: { routes: { api: '/api' } } }),
     useDocumentInfo: () => ({ id: mocks.documentID }),
     useField: ({ path }: { path: string }) => ({ value: mocks.fields[path] }),
   }

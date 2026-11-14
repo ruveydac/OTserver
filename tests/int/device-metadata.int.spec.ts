@@ -95,6 +95,29 @@ describe('device metadata', () => {
     expect(parseOTserverOtter(JSON.stringify(scan)).assets[0].productFamily).toBeUndefined()
   })
 
+  it('validates software-version product identities', () => {
+    const value = structuredClone(catalog)
+    const product = value.devices.find(({ id }) => id === '01a17c83-695b-7f83-8cf0-ebf1b58d4c68')!
+    product.data = { ...product.data, version_kind: 'software' }
+    product.rules = {
+      all: [
+        { field: 'model', operator: 'equals', value: 'S7-1500' },
+        { field: 'version_kind', operator: 'equals', value: 'software' },
+        { field: 'software_version', operator: 'equals', value: 'V3.1' },
+      ],
+    }
+    expect(
+      createCatalogMatcher(
+        value,
+        'test',
+      )({
+        vendor: 'Siemens',
+        model: 'S7-1500',
+        softwareVersion: 'V3.1',
+      }).status,
+    ).toBe('matched')
+  })
+
   it('uses scoped aliases, records evidence, and never matches hostnames or missing qualifiers', () => {
     const matched = matchDeviceMetadata(facts)
     expect(matched).toMatchObject({
@@ -418,7 +441,7 @@ describe('device metadata', () => {
           product_family: index === 0 ? 'Family fallback' : undefined,
           source_url: index === 0 ? '/relative/source' : undefined,
           protocols: index === 0 ? ['OPC UA', 502, false] : undefined,
-          evidence_json: index === 0 ? { safe: true } : undefined,
+          evidence_json: index === 0 ? { catalog_evidence_only: true } : undefined,
         },
       })),
     }
@@ -446,7 +469,17 @@ describe('device metadata', () => {
     expect(rendered).toContain('candidate-1')
     expect(rendered).toContain('Unavailable')
     expect(rendered).toContain('OPC UA, 502, false')
+    expect(rendered).not.toContain('<dt>Evidence Json</dt>')
     expect(rendered).toContain('safe&quot;: true')
+    expect(rendered).toContain('catalog_evidence_only')
+    const protocolsPosition = rendered.indexOf('<dt>Protocols</dt>')
+    expect(protocolsPosition).toBeGreaterThanOrEqual(0)
+    const evidencePosition = rendered.indexOf(
+      '<summary>Match and source evidence</summary>',
+      protocolsPosition,
+    )
+    expect(evidencePosition).toBeGreaterThan(protocolsPosition)
+    expect(rendered.indexOf('catalog_evidence_only')).toBeGreaterThan(evidencePosition)
     expect(rendered).toContain('<a href="https://example.test/reference"')
     expect(rendered).not.toContain('href="javascript:')
     expect(rendered).not.toContain('href="https://user:pass@')

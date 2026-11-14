@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
+import { Button } from '@payloadcms/ui'
 
 export default function IdentityActions({
   assetID,
@@ -139,9 +140,9 @@ export default function IdentityActions({
           Reason
           <textarea name="reason" required maxLength={2000} />
         </label>
-        <button disabled={busy} type="submit">
+        <Button disabled={busy} type="submit">
           {busy ? 'Applying…' : 'Apply identity action'}
-        </button>
+        </Button>
         {error ? <p role="alert">{error}</p> : null}
       </form>
     </details>

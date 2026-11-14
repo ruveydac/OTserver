@@ -1,12 +1,12 @@
-import Link from 'next/link'
+import { Button, Link } from '@payloadcms/ui'
 import type { DocumentViewServerProps } from 'payload'
 import type { ReactNode } from 'react'
 
 import CopyButton from '@/components/AssetView/CopyButton'
 import ManualAssetTags, { type ManualTagOption } from '@/components/AssetView/ManualAssetTags'
 import CatalogReference from '@/components/AssetView/CatalogReference'
+import { assetListURL } from '@/components/assetListURL'
 import { activeCatalog } from '@/metadata/runtime'
-import DensityToggle from '@/components/AssetView/DensityToggle'
 import AssetVulnerabilityReviewActions from '@/components/AssetVulnerabilityReviewActions'
 import { VULNERABILITY_PAGE_SIZE } from '@/components/AssetVulnerabilitiesView'
 import { formatDateTime, protocolLabels, statusLabels } from '@/components/labels'
@@ -362,6 +362,8 @@ const AssetView = async (props: DocumentViewServerProps) => {
   const populatedSite = typeof asset.site === 'object' ? asset.site : undefined
   const populatedAssetClass = typeof asset.assetClass === 'object' ? asset.assetClass : undefined
   const customFields = record(asset.customFields)
+  const reportedVersion = asset.firmwareVersion || asset.softwareVersion
+  const reportedVersionField = asset.firmwareVersion ? 'firmwareVersion' : 'softwareVersion'
   const {
     definitions,
     auditLogs,
@@ -524,7 +526,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
           {
             label: 'Site',
             value: site ? (
-              <Link href={`${adminRoute}/collections/sites/${site.id}`}>{siteName}</Link>
+              <Link href={assetListURL(adminRoute, 'site', site.id)}>{siteName}</Link>
             ) : (
               relationID(asset.site)
             ),
@@ -587,6 +589,15 @@ const AssetView = async (props: DocumentViewServerProps) => {
             label: 'Firmware version',
             value: fieldValue(asset, 'firmwareVersion', asset.firmwareVersion),
           },
+          {
+            label: 'Software version',
+            value: fieldValue(asset, 'softwareVersion', asset.softwareVersion),
+          },
+          {
+            label: 'Product family',
+            value: fieldValue(asset, 'productFamily', asset.productFamily),
+          },
+          { label: 'Order number', value: fieldValue(asset, 'orderNumber', asset.orderNumber) },
         ]}
         title="Device snapshot"
       />
@@ -708,8 +719,8 @@ const AssetView = async (props: DocumentViewServerProps) => {
             value: fieldValue(asset, 'hardwareVersion', asset.hardwareVersion),
           },
           {
-            label: 'Firmware version',
-            value: fieldValue(asset, 'firmwareVersion', asset.firmwareVersion),
+            label: 'Firmware / software version',
+            value: fieldValue(asset, reportedVersionField, reportedVersion),
           },
           {
             label: 'Operating system',
@@ -936,7 +947,11 @@ const AssetView = async (props: DocumentViewServerProps) => {
           },
           {
             label: 'Version data',
-            value: [asset.firmwareVersion, asset.hardwareVersion].filter(Boolean).join(' · '),
+            value: [
+              ...new Set([asset.firmwareVersion, asset.softwareVersion, asset.hardwareVersion]),
+            ]
+              .filter(Boolean)
+              .join(' · '),
           },
           {
             label: 'Scope',
@@ -1076,7 +1091,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
         <Link href={`${adminRoute}/collections/assets`}>Assets</Link>
         <span>›</span>
         {site ? (
-          <Link href={`${adminRoute}/collections/sites/${site.id}`}>{siteName}</Link>
+          <Link href={assetListURL(adminRoute, 'site', site.id)}>{siteName}</Link>
         ) : (
           <span>Unassigned site</span>
         )}
@@ -1095,13 +1110,16 @@ const AssetView = async (props: DocumentViewServerProps) => {
             </p>
           </div>
           <div className="asset-view__actions">
-            <Link
-              className="asset-view__secondary-action"
-              href={`${apiRoute}/assets/export-csv?where[id][equals]=${encodeURIComponent(asset.id)}`}
+            <Button
+              buttonStyle="secondary"
+              className="asset-view__action"
+              el="anchor"
+              margin={false}
+              size="medium"
+              url={`${apiRoute}/assets/export-csv?where[id][equals]=${encodeURIComponent(asset.id)}`}
             >
               Export diagnostic CSV
-            </Link>
-            <DensityToggle />
+            </Button>
             {canReviewVulnerabilities ? (
               <ManualAssetTags
                 assetID={String(asset.id)}
@@ -1109,9 +1127,18 @@ const AssetView = async (props: DocumentViewServerProps) => {
                 manualTagIDs={manualTagIDs}
               />
             ) : null}
-            <Link className="asset-view__edit" href={`${assetURL}/edit`}>
-              Edit asset
-            </Link>
+            {canReviewVulnerabilities ? (
+              <Button
+                buttonStyle="secondary"
+                className="asset-view__action asset-view__edit"
+                el="link"
+                margin={false}
+                size="medium"
+                url={`${assetURL}/edit`}
+              >
+                Edit asset
+              </Button>
+            ) : null}
           </div>
         </div>
         <div className="asset-view__badges" aria-label="Asset tags">
@@ -1138,12 +1165,15 @@ const AssetView = async (props: DocumentViewServerProps) => {
           <small>Recorded observation time</small>
         </Link>
         <Link className="asset-view__metric" href={tabURL('hardware')}>
-          <span>Firmware</span>
-          <strong>{asset.firmwareVersion || 'Not recorded'}</strong>
+          <span>Firmware / software</span>
+          <strong>{reportedVersion || 'Not recorded'}</strong>
           <small>
-            {asset.hardwareVersion
-              ? `Hardware ${asset.hardwareVersion}`
-              : 'No update status available'}
+            {[
+              asset.softwareVersion && !asset.firmwareVersion ? 'Reported software version' : null,
+              asset.hardwareVersion ? `Hardware ${asset.hardwareVersion}` : null,
+            ]
+              .filter(Boolean)
+              .join(' · ') || 'No update status available'}
           </small>
         </Link>
         <Link className="asset-view__metric" href={tabURL('network')}>

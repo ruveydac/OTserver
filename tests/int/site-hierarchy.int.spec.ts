@@ -6,6 +6,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import {
   defaultSiteTypes,
+  enforceSiteType,
   initializeSiteTypes,
   isa95Elements,
   siteTypeField,
@@ -23,6 +24,9 @@ import type { Asset, Site, User } from '../../src/payload-types'
 vi.mock('@payloadcms/ui', () => ({
   Button: ({ children, type }: { children: React.ReactNode; type: 'submit' }) =>
     createElement('button', { type }, children),
+  Gutter: ({ children }: { children: React.ReactNode }) => createElement('div', null, children),
+  Link: ({ children, href }: { children: React.ReactNode; href: string }) =>
+    createElement('a', { href }, children),
 }))
 vi.mock('@payloadcms/next/templates', () => ({
   DefaultTemplate: ({ children }: { children: React.ReactNode }) =>
@@ -608,5 +612,45 @@ describe('site catalogue, hierarchy, and Purdue classification', () => {
     )
     expect(inaccessible).toContain('Select an accessible site')
     expect(inaccessible).not.toContain(other.name)
+  })
+
+  it('renders site fallbacks without paths and an empty accessible hierarchy', async () => {
+    const find = vi.fn().mockResolvedValue({
+      docs: [{ id: 'site-1', name: 'Plant One' }],
+    })
+    const props = {
+      payload: {
+        config: { routes: { admin: '/admin' } },
+        count: vi.fn().mockResolvedValue({ totalDocs: 0 }),
+        find,
+      },
+      initPageResult: {
+        req: { user: null },
+        visibleEntities: { collections: [], globals: [] },
+      },
+      searchParams: { site: 'site-1' },
+    }
+    const html = renderToStaticMarkup(await PurdueView(props as never))
+    expect(html).toContain('Plant One')
+    expect(html).toContain('0 unique assets')
+    find.mockResolvedValueOnce({ docs: [] })
+    const empty = renderToStaticMarkup(await PurdueView({ ...props, searchParams: {} } as never))
+    expect(empty).toContain('No accessible sites yet')
+  })
+
+  it('rejects invalid site type locks', async () => {
+    const req = {
+      transactionID: 'site-type-lock',
+      payload: {
+        db: {
+          connection: payload.db.connection,
+          sessions: { 'site-type-lock': {} },
+        },
+        findByID: vi.fn().mockResolvedValue({ active: true }),
+      },
+    }
+    await expect(
+      enforceSiteType({ data: { type: 'not-an-object-id' }, req } as never),
+    ).rejects.toThrow('Select an existing site type.')
   })
 })

@@ -537,9 +537,7 @@ export const AssetClasses: CollectionConfig = {
     update: adminOnly,
   },
   admin: {
-    components: {
-      views: { list: { Component: '@/components/AssetClassListView' } },
-    },
+    components: {},
     defaultColumns: [
       'name',
       'description',

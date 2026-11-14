@@ -4,6 +4,12 @@ import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import IdentityActions from '@/components/DeviceIdentity/Actions'
 
+vi.mock('@payloadcms/ui', () => ({
+  Button: ({ children, ...props }: React.ComponentProps<'button'>) => (
+    <button {...props}>{children}</button>
+  ),
+}))
+
 const { refresh } = vi.hoisted(() => ({ refresh: vi.fn() }))
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }))
 ;(
