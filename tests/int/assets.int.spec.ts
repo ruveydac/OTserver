@@ -14,10 +14,33 @@ vi.mock('@payloadcms/ui', async () => {
   const { createElement } = await import('react')
 
   return {
-    Button: ({ children, el, url, ...props }: Record<string, unknown>) =>
+    Button: ({
+      buttonStyle,
+      children,
+      className,
+      el,
+      extraButtonProps,
+      margin,
+      size,
+      url,
+      ...props
+    }: Record<string, unknown>) =>
       createElement(
         el === 'link' || el === 'anchor' ? 'a' : 'button',
-        { ...props, href: url, margin: undefined, buttonStyle: undefined },
+        {
+          ...props,
+          ...(extraButtonProps as object),
+          className: [
+            'btn',
+            className,
+            size && `btn--size-${size}`,
+            buttonStyle && `btn--style-${buttonStyle}`,
+            margin === false && 'btn--no-margin',
+          ]
+            .filter(Boolean)
+            .join(' '),
+          href: url,
+        },
         children as never,
       ),
     CopyToClipboard: () => createElement('span', null, 'Copy value'),
@@ -243,7 +266,9 @@ describe('asset network fields', () => {
     expect(html).toContain('href="/admin/collections/asset-classes/class-1"')
     expect(html).toContain('PLC')
     expect(html).toContain('World / Germany / Plant Berlin')
-    expect(html).toContain('href="/admin/collections/sites/site-1"')
+    expect(
+      html.match(/href="\/admin\/collections\/assets\?where%5Bsite%5D%5Bequals%5D=site-1"/g),
+    ).toHaveLength(2)
     expect(html).toContain('S-123')
     expect(html).toContain('Remote access enabled')
     expect(html).toContain('ISA-95 level')
@@ -251,13 +276,27 @@ describe('asset network fields', () => {
     expect(html).toContain('<dd>0</dd>')
     expect(html).not.toContain('Edit asset')
     expect(html).toContain('aria-label="Asset sections"')
+    const actionMarkup = html.match(/<div class="asset-view__actions">([\s\S]*?)<\/div>/)?.[1] || ''
+    const actionClasses = [...actionMarkup.matchAll(/<(?:a|button)\b[^>]*class="([^"]*)"/g)].map(
+      ([, classes]) => classes?.split(/\s+/) || [],
+    )
+    expect(actionClasses).toHaveLength(1)
+    expect(
+      actionClasses.every(
+        (classes) =>
+          classes.includes('btn') &&
+          classes.includes('asset-view__action') &&
+          classes.includes('btn--style-secondary') &&
+          classes.includes('btn--size-medium'),
+      ),
+    ).toBe(true)
     expect(html).toContain('href="/admin/collections/assets/asset-1?tab=network"')
     expect(html).toContain('href="/admin/collections/assets/asset-1?tab=connected"')
     expect(html).toContain('href="/admin/collections/assets/asset-1?tab=security"')
     expect(html).toContain('href="/admin/collections/assets/asset-1?tab=discovery"')
     expect(html).toContain('href="/admin/collections/assets/asset-1?tab=history"')
     expect(html).toContain('Current endpoints')
-    expect(html).toContain('Comfortable')
+    expect(html).not.toContain('Comfortable')
     // The overview lists only the five worst matches, most severe first.
     const positions = [
       'CVE-2099-0003',

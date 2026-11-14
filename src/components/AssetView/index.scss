@@ -98,20 +98,9 @@
     gap: 0.5rem;
   }
 
-  &__density {
-    align-items: center;
-    border: 1px solid var(--theme-elevation-300);
-    border-radius: var(--style-radius-s);
-    background: var(--theme-elevation-0);
-    color: var(--theme-text);
-    cursor: pointer;
-    display: inline-flex;
-    font-size: 0.78rem;
-    font-weight: 600;
-    justify-content: center;
+  &__action {
     min-height: 44px;
-    padding: 0.55rem 0.75rem;
-    text-decoration: none;
+    text-align: center;
   }
 
   &__badges {
@@ -795,9 +784,7 @@
       flex-direction: column;
     }
 
-    &__edit,
-    &__secondary-action,
-    &__density {
+    &__edit {
       text-align: center;
     }
   }

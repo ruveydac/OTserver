@@ -1,7 +1,20 @@
 .device-identity {
+  h3 {
+    color: var(--theme-elevation-800);
+    font-size: 0.67rem;
+    font-weight: 650;
+    margin: 1rem 0 0.35rem;
+    text-transform: uppercase;
+  }
+
+  > p {
+    margin: 0.75rem 0;
+  }
+
   ul {
     padding-left: 1.25rem;
   }
+
   li {
     margin-bottom: 0.5rem;
     overflow-wrap: anywhere;

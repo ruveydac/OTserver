@@ -5,8 +5,8 @@ import type { ReactNode } from 'react'
 import CopyButton from '@/components/AssetView/CopyButton'
 import ManualAssetTags, { type ManualTagOption } from '@/components/AssetView/ManualAssetTags'
 import CatalogReference from '@/components/AssetView/CatalogReference'
+import { assetListURL } from '@/components/assetListURL'
 import { activeCatalog } from '@/metadata/runtime'
-import DensityToggle from '@/components/AssetView/DensityToggle'
 import AssetVulnerabilityReviewActions from '@/components/AssetVulnerabilityReviewActions'
 import { VULNERABILITY_PAGE_SIZE } from '@/components/AssetVulnerabilitiesView'
 import { formatDateTime, protocolLabels, statusLabels } from '@/components/labels'
@@ -524,7 +524,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
           {
             label: 'Site',
             value: site ? (
-              <Link href={`${adminRoute}/collections/sites/${site.id}`}>{siteName}</Link>
+              <Link href={assetListURL(adminRoute, 'site', site.id)}>{siteName}</Link>
             ) : (
               relationID(asset.site)
             ),
@@ -1076,7 +1076,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
         <Link href={`${adminRoute}/collections/assets`}>Assets</Link>
         <span>›</span>
         {site ? (
-          <Link href={`${adminRoute}/collections/sites/${site.id}`}>{siteName}</Link>
+          <Link href={assetListURL(adminRoute, 'site', site.id)}>{siteName}</Link>
         ) : (
           <span>Unassigned site</span>
         )}
@@ -1097,13 +1097,14 @@ const AssetView = async (props: DocumentViewServerProps) => {
           <div className="asset-view__actions">
             <Button
               buttonStyle="secondary"
+              className="asset-view__action"
               el="anchor"
               margin={false}
+              size="medium"
               url={`${apiRoute}/assets/export-csv?where[id][equals]=${encodeURIComponent(asset.id)}`}
             >
               Export diagnostic CSV
             </Button>
-            <DensityToggle />
             {canReviewVulnerabilities ? (
               <ManualAssetTags
                 assetID={String(asset.id)}
@@ -1113,9 +1114,11 @@ const AssetView = async (props: DocumentViewServerProps) => {
             ) : null}
             {canReviewVulnerabilities ? (
               <Button
-                className="asset-view__edit"
+                buttonStyle="secondary"
+                className="asset-view__action"
                 el="link"
                 margin={false}
+                size="medium"
                 url={`${assetURL}/edit`}
               >
                 Edit asset

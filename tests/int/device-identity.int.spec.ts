@@ -1767,6 +1767,8 @@ describe('device identity', () => {
     expect(networkPanel).toContain('Network identity')
     expect(networkPanel).not.toContain('Hardware identifiers')
     expect(hardwarePanel).toContain('Hardware identifiers')
+    expect(hardwarePanel).toContain('<dt>Hardware UUID</dt>')
+    expect(hardwarePanel).toContain('asset-view__details')
     expect(hardwarePanel).not.toContain('Current endpoints')
     const actions = hardwareView.props.children.at(-1).props.children.at(-1)
     expect(actions.props.endpoints).toEqual(
