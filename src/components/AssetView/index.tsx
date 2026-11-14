@@ -362,6 +362,8 @@ const AssetView = async (props: DocumentViewServerProps) => {
   const populatedSite = typeof asset.site === 'object' ? asset.site : undefined
   const populatedAssetClass = typeof asset.assetClass === 'object' ? asset.assetClass : undefined
   const customFields = record(asset.customFields)
+  const reportedVersion = asset.firmwareVersion || asset.softwareVersion
+  const reportedVersionField = asset.firmwareVersion ? 'firmwareVersion' : 'softwareVersion'
   const {
     definitions,
     auditLogs,
@@ -587,6 +589,15 @@ const AssetView = async (props: DocumentViewServerProps) => {
             label: 'Firmware version',
             value: fieldValue(asset, 'firmwareVersion', asset.firmwareVersion),
           },
+          {
+            label: 'Software version',
+            value: fieldValue(asset, 'softwareVersion', asset.softwareVersion),
+          },
+          {
+            label: 'Product family',
+            value: fieldValue(asset, 'productFamily', asset.productFamily),
+          },
+          { label: 'Order number', value: fieldValue(asset, 'orderNumber', asset.orderNumber) },
         ]}
         title="Device snapshot"
       />
@@ -708,8 +719,8 @@ const AssetView = async (props: DocumentViewServerProps) => {
             value: fieldValue(asset, 'hardwareVersion', asset.hardwareVersion),
           },
           {
-            label: 'Firmware version',
-            value: fieldValue(asset, 'firmwareVersion', asset.firmwareVersion),
+            label: 'Firmware / software version',
+            value: fieldValue(asset, reportedVersionField, reportedVersion),
           },
           {
             label: 'Operating system',
@@ -936,7 +947,11 @@ const AssetView = async (props: DocumentViewServerProps) => {
           },
           {
             label: 'Version data',
-            value: [asset.firmwareVersion, asset.hardwareVersion].filter(Boolean).join(' · '),
+            value: [
+              ...new Set([asset.firmwareVersion, asset.softwareVersion, asset.hardwareVersion]),
+            ]
+              .filter(Boolean)
+              .join(' · '),
           },
           {
             label: 'Scope',
@@ -1150,12 +1165,15 @@ const AssetView = async (props: DocumentViewServerProps) => {
           <small>Recorded observation time</small>
         </Link>
         <Link className="asset-view__metric" href={tabURL('hardware')}>
-          <span>Firmware</span>
-          <strong>{asset.firmwareVersion || 'Not recorded'}</strong>
+          <span>Firmware / software</span>
+          <strong>{reportedVersion || 'Not recorded'}</strong>
           <small>
-            {asset.hardwareVersion
-              ? `Hardware ${asset.hardwareVersion}`
-              : 'No update status available'}
+            {[
+              asset.softwareVersion && !asset.firmwareVersion ? 'Reported software version' : null,
+              asset.hardwareVersion ? `Hardware ${asset.hardwareVersion}` : null,
+            ]
+              .filter(Boolean)
+              .join(' · ') || 'No update status available'}
           </small>
         </Link>
         <Link className="asset-view__metric" href={tabURL('network')}>

@@ -567,7 +567,7 @@ describe('OTserver Otter importer', () => {
       observations: expect.arrayContaining([
         expect.objectContaining({
           mergeFields: expect.objectContaining({ orderNumber: '6GK5 636-2GS00-2AC2' }),
-          quality: 'high',
+          quality: 'medium',
           source: 'lldp',
         }),
       ]),
@@ -579,6 +579,200 @@ describe('OTserver Otter importer', () => {
       productFamily: 'SIMATIC HMI',
       softwareVersion: 'V 17 0 0',
     })
+  })
+
+  it('parses every device description example from the sample Otter scan', () => {
+    const localMAC = randomMAC()
+    const x208MAC = randomMAC()
+    const sc636MAC = randomMAC()
+    const s7MAC = randomMAC()
+    const hmiMAC = randomMAC()
+    const ruckusMAC = randomMAC()
+    const unknownMAC = randomMAC()
+    const file = mutableExport(localMAC, x208MAC)
+    file.devices = [
+      {
+        interfaces: [],
+        ipAddresses: ['192.0.2.20'],
+        macAddress: x208MAC,
+        macAddresses: [x208MAC],
+        observations: [
+          {
+            fields: {
+              description:
+                'Siemens, SIMATIC NET, SCALANCE X208, 6GK5 208-0BA10-2AA3, HW: 6, FW: V4.05',
+            },
+            observedAt: '2026-11-12T23:01:57Z',
+            raw: {},
+            source: 'snmp',
+            warnings: [],
+          },
+        ],
+        ports: [],
+      },
+      {
+        interfaces: [],
+        ipAddresses: ['192.0.2.21'],
+        macAddress: sc636MAC,
+        macAddresses: [sc636MAC],
+        observations: [
+          {
+            fields: { model: 'SCALANCE SC636-2C', protocols: ['profinet'], vendor: 'SIEMENS AG' },
+            observedAt: '2026-11-12T23:01:57Z',
+            raw: {},
+            source: 'profinet-dcp',
+            warnings: [],
+          },
+        ],
+        ports: [],
+      },
+      {
+        interfaces: [],
+        ipAddresses: ['192.0.2.22'],
+        macAddress: s7MAC,
+        macAddresses: [s7MAC],
+        observations: [
+          {
+            fields: { model: 'CPU 1513F-1 PN', protocols: ['profinet'], vendor: 'SIEMENS AG' },
+            observedAt: '2026-11-12T23:01:57Z',
+            raw: {},
+            source: 'profinet-dcp',
+            warnings: [],
+          },
+        ],
+        ports: [],
+      },
+      {
+        interfaces: [],
+        ipAddresses: ['192.0.2.23'],
+        macAddress: hmiMAC,
+        macAddresses: [hmiMAC],
+        observations: [
+          {
+            fields: { model: 'TP1200 Comfort', protocols: ['profinet'], vendor: 'SIEMENS AG' },
+            observedAt: '2026-11-12T23:01:57Z',
+            raw: {},
+            source: 'profinet-dcp',
+            warnings: [],
+          },
+        ],
+        ports: [],
+      },
+      {
+        interfaces: [],
+        ipAddresses: ['192.0.2.24'],
+        macAddress: ruckusMAC,
+        macAddresses: [ruckusMAC],
+        observations: [
+          {
+            fields: {
+              description:
+                'Ruckus Wireless, Inc. ICX7150-24-POE, IronWare Version 08.0.95sT213 Compiled on Apr 24 2025 at 03:17:49 labeled as SPR08095s',
+              name: 'AT-SAD-H07.2-250',
+              protocols: ['lldp'],
+            },
+            observedAt: '2026-11-12T23:00:04Z',
+            raw: {},
+            source: 'lldp',
+            warnings: [],
+          },
+        ],
+        ports: [],
+      },
+      {
+        interfaces: [],
+        ipAddresses: ['192.0.2.25'],
+        macAddress: unknownMAC,
+        macAddresses: [unknownMAC],
+        observations: [
+          {
+            fields: { description: 'Plain device description' },
+            observedAt: '2026-11-12T23:00:05Z',
+            raw: {},
+            source: 'lldp',
+            warnings: [],
+          },
+        ],
+        ports: [],
+      },
+    ]
+    file.links = [
+      {
+        local: { macAddress: x208MAC },
+        observedAt: '2026-11-12T23:01:57Z',
+        raw: {
+          remoteSystemDescription:
+            'Siemens, SIMATIC NET, SCALANCE SC636-2C, 6GK5 636-2GS00-2AC2, HW: Version 1, FW: Version V03.01.01, SVPTD397464',
+        },
+        remote: { macAddress: sc636MAC },
+        source: 'lldp',
+      },
+      {
+        local: { macAddress: x208MAC },
+        observedAt: '2026-11-12T23:01:57Z',
+        raw: {
+          remoteSystemDescription:
+            'Siemens, SIMATIC S7, CPU 1513F-1 PN, 6ES7 513-1FM03-0AB0, HW: Version 5, FW: Version V4.1.2, S C-U4A06W022026',
+        },
+        remote: { macAddress: s7MAC },
+        source: 'lldp',
+      },
+      {
+        local: { macAddress: x208MAC },
+        observedAt: '2026-11-12T23:01:57Z',
+        raw: {
+          remoteSystemDescription:
+            'Siemens, SIMATIC HMI, TP1200 Comfort, 6AV2 124-0MC01-0AX0, HW: 0, SW: V 17 0 0',
+        },
+        remote: { macAddress: hmiMAC },
+        source: 'lldp',
+      },
+    ]
+
+    const assets = parseOTserverOtter(JSON.stringify(file)).assets
+    expect(assets.find(({ macAddress }) => macAddress === x208MAC)).toMatchObject({
+      firmwareVersion: 'V4.05',
+      hardwareVersion: '6',
+      model: 'SCALANCE X208',
+      orderNumber: '6GK5 208-0BA10-2AA3',
+      productFamily: 'SIMATIC NET',
+      vendor: 'Siemens',
+    })
+    expect(assets.find(({ macAddress }) => macAddress === sc636MAC)).toMatchObject({
+      firmwareVersion: 'V03.01.01',
+      hardwareVersion: '1',
+      model: 'SCALANCE SC636-2C',
+      orderNumber: '6GK5 636-2GS00-2AC2',
+      productFamily: 'SIMATIC NET',
+      vendor: 'Siemens',
+    })
+    expect(assets.find(({ macAddress }) => macAddress === s7MAC)).toMatchObject({
+      firmwareVersion: 'V4.1.2',
+      hardwareVersion: '5',
+      model: 'CPU 1513F-1 PN',
+      orderNumber: '6ES7 513-1FM03-0AB0',
+      productFamily: 'SIMATIC S7',
+      vendor: 'Siemens',
+    })
+    expect(assets.find(({ macAddress }) => macAddress === hmiMAC)).toMatchObject({
+      hardwareVersion: '0',
+      model: 'TP1200 Comfort',
+      orderNumber: '6AV2 124-0MC01-0AX0',
+      productFamily: 'SIMATIC HMI',
+      softwareVersion: 'V 17 0 0',
+    })
+    expect(assets.find(({ macAddress }) => macAddress === ruckusMAC)).toMatchObject({
+      description:
+        'Ruckus Wireless, Inc. ICX7150-24-POE, IronWare Version 08.0.95sT213 Compiled on Apr 24 2025 at 03:17:49 labeled as SPR08095s',
+      firmwareVersion: '08.0.95sT213',
+      model: 'ICX7150-24-POE',
+      vendor: 'Ruckus Wireless, Inc.',
+    })
+    const unknown = assets.find(({ macAddress }) => macAddress === unknownMAC)
+    expect(unknown).toMatchObject({ description: 'Plain device description' })
+    expect(unknown?.firmwareVersion).toBeUndefined()
+    expect(unknown?.model).toBeUndefined()
+    expect(unknown?.vendor).toBeUndefined()
   })
 
   it('retains PNIO evidence without promoting component serials to device identity', () => {

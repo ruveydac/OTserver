@@ -39,13 +39,15 @@ const randomMAC = () =>
 
 describe('asset panel read interface', () => {
   it('bounds panel page sizes and scopes legacy history without a UUID', async () => {
-    const calls: { collection: string; limit?: number; where?: unknown }[] = []
+    const calls: { collection: string; depth?: number; limit?: number; where?: unknown }[] = []
     const payload = {
       count: vi.fn(async () => ({ totalDocs: 0 })),
-      find: vi.fn(async (args: { collection: string; limit?: number; where?: unknown }) => {
-        calls.push(args)
-        return { docs: [], hasNextPage: false }
-      }),
+      find: vi.fn(
+        async (args: { collection: string; depth?: number; limit?: number; where?: unknown }) => {
+          calls.push(args)
+          return { docs: [], hasNextPage: false }
+        },
+      ),
       findByID: vi.fn(async ({ collection }: { collection: string }) =>
         collection === 'sites'
           ? { id: 'site-1', name: 'Test site', path: 'Test site' }
@@ -71,6 +73,9 @@ describe('asset panel read interface', () => {
       expect(calls.filter(({ collection }) => collection === 'audit-logs')[0]).toMatchObject({
         limit: expectedLimit,
         where: { asset: { equals: asset.id } },
+      })
+      expect(calls.find(({ collection }) => collection === 'topology-links')).toMatchObject({
+        depth: 1,
       })
     }
   })

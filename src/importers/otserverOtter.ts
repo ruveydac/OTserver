@@ -25,7 +25,7 @@ const sources: Record<string, DataQuality> = {
   http: 'low',
   https: 'low',
   iec61850: 'medium',
-  lldp: 'high',
+  lldp: 'medium',
   netbios: 'medium',
   'niagara-fox': 'medium',
   'omron-fins': 'medium',
@@ -185,12 +185,36 @@ const siemensDescriptionFields = (value: unknown) => {
   return fields
 }
 
-const applySiemensDescription = (
+/** Ruckus switch descriptions: "Ruckus Wireless, Inc. <model>, IronWare Version <version> ...". */
+const ruckusDescriptionFields = (value: unknown) => {
+  if (typeof value !== 'string') return
+  const match = /^(Ruckus Wireless(?:,?\s+Inc\.?)?)\s+([^,]+),\s+IronWare Version\s+(\S+)/i.exec(
+    value,
+  )
+  if (!match) return
+  return {
+    description: value,
+    firmwareVersion: match[3],
+    model: match[2].trim(),
+    vendor: match[1],
+  }
+}
+
+const descriptionParsers = [siemensDescriptionFields, ruckusDescriptionFields]
+
+const descriptionFields = (value: unknown) => {
+  for (const parser of descriptionParsers) {
+    const fields = parser(value)
+    if (fields) return fields
+  }
+}
+
+const applyDescriptionFields = (
   fields: Record<string, unknown>,
   mergeFields: Record<string, unknown>,
   value: unknown,
 ) => {
-  for (const [field, item] of Object.entries(siemensDescriptionFields(value) || {}))
+  for (const [field, item] of Object.entries(descriptionFields(value) || {}))
     addTextField(fields, mergeFields, field, item)
 }
 
@@ -408,7 +432,7 @@ export const parseOTserverOtter = (input: string): ImportResult => {
             ...modules.map((module) => module.imHardwareRevision),
           )
         }
-        applySiemensDescription(fields, mergeFields, fields.description)
+        applyDescriptionFields(fields, mergeFields, fields.description)
         return {
           fields,
           mergeFields,
@@ -497,7 +521,7 @@ export const parseOTserverOtter = (input: string): ImportResult => {
   for (const link of links) {
     const asset = assetsByMAC.get(text(link.remote.macAddress))
     const description = text(record(link.raw).remoteSystemDescription)
-    const fields = siemensDescriptionFields(description)
+    const fields = descriptionFields(description)
     if (
       !asset ||
       !fields ||

@@ -177,6 +177,9 @@ describe('asset network fields', () => {
         customFields: { 'field-enabled': false, 'field-level': 0 },
         description: 'Main line controller',
         firmwareVersion: '2.5',
+        orderNumber: '6ES7 515-2AM02-0AB0',
+        productFamily: 'SIMATIC S7',
+        softwareVersion: 'V 17 0 0',
         id: 'asset-1',
         ipAddress: '192.0.2.10',
         macAddress: '02:00:00:00:00:10',
@@ -270,6 +273,10 @@ describe('asset network fields', () => {
       html.match(/href="\/admin\/collections\/assets\?where%5Bsite%5D%5Bequals%5D=site-1"/g),
     ).toHaveLength(2)
     expect(html).toContain('S-123')
+    expect(html).toContain('SIMATIC S7')
+    expect(html).toContain('6ES7 515-2AM02-0AB0')
+    expect(html).toContain('<dt>Firmware version</dt><dd>2.5</dd>')
+    expect(html).toContain('<dt>Software version</dt><dd>V 17 0 0</dd>')
     expect(html).toContain('Remote access enabled')
     expect(html).toContain('ISA-95 level')
     expect(html).toContain('<dd>No</dd>')
@@ -371,6 +378,7 @@ describe('asset network fields', () => {
         name: 'Unidentified device',
         osAccuracy: null,
         site: 'site-raw',
+        softwareVersion: 'V 17 0 0',
         status: 'unknown',
         updatedAt: '2026-08-08T11:00:00.000Z',
       },
@@ -420,6 +428,8 @@ describe('asset network fields', () => {
     const html = renderToStaticMarkup(createElement(() => view))
 
     expect(html).toContain('No description provided')
+    expect(html).toContain('V 17 0 0')
+    expect(html).toContain('Reported software version')
     expect(html).toContain('World / Plant Berlin / Cell 1')
     expect(html).toContain('Other equipment')
     expect(html).toContain('No topology links recorded yet')

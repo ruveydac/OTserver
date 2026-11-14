@@ -99,7 +99,7 @@ export const loadAssetPanel = async ({
     }),
     payload.find({
       collection: 'topology-links',
-      depth: 0,
+      depth: 1,
       limit,
       overrideAccess: false,
       page: topologyPage,
