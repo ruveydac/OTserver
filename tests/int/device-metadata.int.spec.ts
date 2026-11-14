@@ -95,6 +95,29 @@ describe('device metadata', () => {
     expect(parseOTserverOtter(JSON.stringify(scan)).assets[0].productFamily).toBeUndefined()
   })
 
+  it('validates software-version product identities', () => {
+    const value = structuredClone(catalog)
+    const product = value.devices.find(({ id }) => id === '01a17c83-695b-7f83-8cf0-ebf1b58d4c68')!
+    product.data = { ...product.data, version_kind: 'software' }
+    product.rules = {
+      all: [
+        { field: 'model', operator: 'equals', value: 'S7-1500' },
+        { field: 'version_kind', operator: 'equals', value: 'software' },
+        { field: 'software_version', operator: 'equals', value: 'V3.1' },
+      ],
+    }
+    expect(
+      createCatalogMatcher(
+        value,
+        'test',
+      )({
+        vendor: 'Siemens',
+        model: 'S7-1500',
+        softwareVersion: 'V3.1',
+      }).status,
+    ).toBe('matched')
+  })
+
   it('uses scoped aliases, records evidence, and never matches hostnames or missing qualifiers', () => {
     const matched = matchDeviceMetadata(facts)
     expect(matched).toMatchObject({

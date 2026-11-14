@@ -173,7 +173,6 @@ const siemensDescriptionFields = (value: unknown) => {
     const match = /^(HW|FW|SW):\s*(.+)$/i.exec(part)
     if (!match) continue
     const revision = match[2].replace(/^Version\s+/i, '').trim()
-    if (!revision) continue
     fields[
       match[1].toUpperCase() === 'HW'
         ? 'hardwareVersion'
@@ -530,12 +529,12 @@ export const parseOTserverOtter = (input: string): ImportResult => {
       continue
     Object.assign(asset, fields)
     asset.observations = [
-      ...(asset.observations || []),
+      ...(asset.observations as ImportedObservation[]),
       {
         fields,
         mergeFields: fields,
         observedAt: link.observedAt,
-        quality: sources[link.source] || 'low',
+        quality: sources[link.source],
         raw: { remoteSystemDescription: description },
         source: link.source,
         warnings: [],

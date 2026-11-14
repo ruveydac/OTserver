@@ -177,6 +177,7 @@ describe('asset network fields', () => {
         customFields: { 'field-enabled': false, 'field-level': 0 },
         description: 'Main line controller',
         firmwareVersion: '2.5',
+        hardwareVersion: 'HW-1',
         orderNumber: '6ES7 515-2AM02-0AB0',
         productFamily: 'SIMATIC S7',
         softwareVersion: 'V 17 0 0',
@@ -277,6 +278,7 @@ describe('asset network fields', () => {
     expect(html).toContain('6ES7 515-2AM02-0AB0')
     expect(html).toContain('<dt>Firmware version</dt><dd>2.5</dd>')
     expect(html).toContain('<dt>Software version</dt><dd>V 17 0 0</dd>')
+    expect(html).toContain('Hardware HW-1')
     expect(html).toContain('Remote access enabled')
     expect(html).toContain('ISA-95 level')
     expect(html).toContain('<dd>No</dd>')

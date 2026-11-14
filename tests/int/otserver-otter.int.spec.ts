@@ -581,6 +581,53 @@ describe('OTserver Otter importer', () => {
     })
   })
 
+  it('parses Siemens descriptions without order numbers', () => {
+    const localMAC = randomMAC()
+    const switchMAC = randomMAC()
+    const file = mutableExport(localMAC, switchMAC)
+    file.devices = [
+      {
+        interfaces: [],
+        ipAddresses: ['192.0.2.10'],
+        macAddress: switchMAC,
+        macAddresses: [switchMAC],
+        observations: [
+          {
+            fields: {},
+            observedAt: '2026-08-10T10:00:00Z',
+            raw: {},
+            source: 'lldp',
+            warnings: [],
+          },
+        ],
+        ports: [],
+      },
+    ]
+    file.links = [
+      {
+        local: { macAddress: localMAC },
+        observedAt: '2026-08-10T10:00:30Z',
+        raw: {
+          remoteSystemDescription: 'Siemens, SIMATIC NET, SCALANCE X208, HW: 6, FW: V4.05',
+        },
+        remote: { macAddress: switchMAC },
+        source: 'lldp',
+      },
+    ]
+
+    const asset = parseOTserverOtter(JSON.stringify(file)).assets.find(
+      ({ macAddress }) => macAddress === switchMAC,
+    )
+    expect(asset).toMatchObject({
+      firmwareVersion: 'V4.05',
+      hardwareVersion: '6',
+      model: 'SCALANCE X208',
+      productFamily: 'SIMATIC NET',
+      vendor: 'Siemens',
+    })
+    expect(asset?.orderNumber).toBeUndefined()
+  })
+
   it('parses every device description example from the sample Otter scan', () => {
     const localMAC = randomMAC()
     const x208MAC = randomMAC()

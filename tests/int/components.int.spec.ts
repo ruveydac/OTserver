@@ -291,7 +291,7 @@ describe('custom asset fields', () => {
     expect(mocks.setValue).not.toHaveBeenCalled()
   })
   it('loads every input type and sends normalized edits', async () => {
-    mocks.fieldValue = { checkbox: true, number: 3, text: 'old', textarea: 'notes' }
+    mocks.fieldValue = { checkbox: true, number: 3, text: 'old', textarea: false }
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -328,6 +328,14 @@ describe('custom asset fields', () => {
       number.dispatchEvent(new Event('input', { bubbles: true }))
     })
     expect(mocks.setValue).toHaveBeenCalledWith(expect.objectContaining({ number: 12 }))
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(number, '')
+      number.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect(mocks.setValue).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ number: expect.anything() }),
+    )
 
     const text = container.querySelector<HTMLInputElement>('#field-customFields__text')!
     await act(async () => {
