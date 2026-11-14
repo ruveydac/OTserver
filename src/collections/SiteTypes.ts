@@ -195,7 +195,7 @@ const lockSiteType = async (id: number | string, req: PayloadRequest) => {
   const session = await mongoSession(req)
   if (!session) throw new APIError('Site-type changes require a database transaction.', 503)
   const ObjectId = req.payload.db.connection.base.Types.ObjectId
-  if (!ObjectId.isValid(id)) throw new APIError('Select an existing site type.', 400)
+  if (!ObjectId.isValid(String(id))) throw new APIError('Select an existing site type.', 400)
   // Serialize new references with retirement/deletion; the collection mutation supplies the audit.
   const result = await req.payload.db.collections['site-types'].collection.updateOne(
     { _id: new ObjectId(String(id)) },
