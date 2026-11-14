@@ -99,8 +99,10 @@
   }
 
   &__action {
+    align-items: center;
+    display: inline-flex;
+    justify-content: center;
     min-height: 44px;
-    text-align: center;
   }
 
   &__badges {
