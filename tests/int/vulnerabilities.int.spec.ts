@@ -53,6 +53,8 @@ import {
   parseRolieFeed,
   mergeCsafDocuments,
   loadCsafSnapshot,
+  MAX_CSAF_DIRECTORY_FEEDS,
+  MAX_CSAF_DOCUMENTS,
   MAX_CSAF_UNAVAILABLE,
   syncVulnerabilityFeeds,
   upsertVulnerabilities,
@@ -415,6 +417,11 @@ describe('feed parsing', () => {
     expect(() => parseCsafDirectoryIndex('//other.example/notice.json', directory)).toThrow(
       'invalid path',
     )
+    expect(() => parseCsafDirectoryIndex('http://[', directory)).toThrow('invalid path')
+    expect(() => parseCsafDirectoryIndex(null, directory)).toThrow('index is invalid')
+    expect(csafDirectoryFileURL('https://feeds.vendor.org/csaf', 'index.txt')).toBe(
+      'https://feeds.vendor.org/csaf/index.txt',
+    )
     expect(validateCsafFeedURL('https://feeds.vendor.org/csaf/feed.json')).toBe(true)
     expect(validateCsafFeedURL('not a URL')).toContain('valid HTTPS URL')
     expect(validateCustomCsafFeeds(Array(MAX_CUSTOM_CSAF_FEEDS + 1).fill(null))).toContain(
@@ -643,6 +650,189 @@ describe('feed parsing', () => {
         throw Object.assign(new Error(`${url} responded with 404.`), { status: 404 })
       }, {}),
     ).rejects.toThrow('do not serve')
+  })
+
+  it('reports malformed CSAF metadata and feeds instead of failing the snapshot', async () => {
+    const badAggregatorURL = 'https://feeds.vendor.org/csaf/bad-aggregator.json'
+    const badProviderURL = 'https://feeds.vendor.org/csaf/bad-provider.json'
+    const providerSourceURL = 'https://feeds.vendor.org/csaf/provider-source.json'
+    const providerMetadataURL = 'https://feeds.vendor.org/csaf/provider-metadata.json'
+    const customFeeds = [
+      { name: 'Bad aggregator', type: 'aggregator' as const, url: badAggregatorURL },
+      { name: 'Bad provider', type: 'provider-metadata' as const, url: badProviderURL },
+      { name: 'Provider source', type: 'aggregator' as const, url: providerSourceURL },
+    ]
+    const emptyFeed = Buffer.from(
+      JSON.stringify({ feed: { updated: '2026-09-10T00:00:00Z', entry: [] } }),
+    )
+    const snapshot = await loadCsafSnapshot(
+      async (url) => {
+        if (url === CSAF_AGGREGATOR_URL) return Buffer.from('{}')
+        if (url === ISIDATEN_CSAF_AGGREGATOR_URL)
+          throw Object.assign(new Error('Missing offline aggregator.'), {
+            code: MISSING_OFFLINE_FILE,
+          })
+        if (url === badAggregatorURL)
+          return Buffer.from(JSON.stringify({ aggregator_version: '1.0' }))
+        if (url === badProviderURL) return Buffer.from(JSON.stringify({ metadata_version: '1.0' }))
+        if (url === providerSourceURL)
+          return Buffer.from(
+            JSON.stringify({
+              aggregator_version: '2.0',
+              csaf_providers: [{ mirrors: [providerMetadataURL] }],
+            }),
+          )
+        if (url === providerMetadataURL)
+          return Buffer.from(JSON.stringify({ metadata_version: '1.0' }))
+        if (url === CISA_CSAF_FEED_URLS[0]) return Buffer.from('{}')
+        if (url === CISA_CSAF_FEED_URLS[1]) return emptyFeed
+        throw new Error(`Unexpected feed URL: ${url}`)
+      },
+      {},
+      customFeeds,
+    )
+    expect(snapshot.invalid).toEqual(
+      expect.arrayContaining([
+        CSAF_AGGREGATOR_URL,
+        badAggregatorURL,
+        badProviderURL,
+        providerMetadataURL,
+        CISA_CSAF_FEED_URLS[0],
+      ]),
+    )
+    expect(snapshot.missing).toContain(ISIDATEN_CSAF_AGGREGATOR_URL)
+    expect(snapshot.documents).toEqual([])
+  })
+
+  it('bounds CSAF directory feeds and reports unreadable directory files', async () => {
+    const providerURL = 'https://feeds.vendor.org/csaf/directories.json'
+    const customFeeds = [
+      { name: 'Directories', type: 'provider-metadata' as const, url: providerURL },
+    ]
+    const emptyAggregator = Buffer.from(JSON.stringify(emptyCsafAggregator()))
+    const emptyFeed = Buffer.from(
+      JSON.stringify({ feed: { updated: '2026-09-10T00:00:00Z', entry: [] } }),
+    )
+    const provider = (distributions: { directory_url: string }[]) =>
+      Buffer.from(JSON.stringify({ metadata_version: '2.0', distributions }))
+
+    await expect(
+      loadCsafSnapshot(
+        async (url) => {
+          if (url === CSAF_AGGREGATOR_URL || url === ISIDATEN_CSAF_AGGREGATOR_URL)
+            return emptyAggregator
+          if (url === providerURL)
+            return provider(
+              Array.from({ length: MAX_CSAF_DIRECTORY_FEEDS + 1 }, (_, index) => ({
+                directory_url: `https://directory.vendor.org/d${index}/`,
+              })),
+            )
+          throw new Error(`Unexpected feed URL: ${url}`)
+        },
+        {},
+        customFeeds,
+      ),
+    ).rejects.toThrow('directory feed limit')
+
+    const missingDirectory = 'https://directory.vendor.org/missing/'
+    const invalidDirectory = 'https://directory.vendor.org/invalid/'
+    const snapshot = await loadCsafSnapshot(
+      async (url) => {
+        if (url === CSAF_AGGREGATOR_URL || url === ISIDATEN_CSAF_AGGREGATOR_URL)
+          return emptyAggregator
+        if (url === providerURL)
+          return provider([
+            { directory_url: missingDirectory },
+            { directory_url: invalidDirectory },
+          ])
+        if (url === csafDirectoryFileURL(missingDirectory, 'index.txt'))
+          throw Object.assign(new Error('Missing directory index.'), {
+            code: MISSING_OFFLINE_FILE,
+          })
+        if (url === csafDirectoryFileURL(invalidDirectory, 'index.txt'))
+          throw new Error('Broken directory index.')
+        if (CISA_CSAF_FEED_URLS.includes(url as never)) return emptyFeed
+        throw new Error(`Unexpected feed URL: ${url}`)
+      },
+      {},
+      customFeeds,
+    )
+    expect(snapshot.missing).toContain(missingDirectory)
+    expect(snapshot.invalid).toContain(invalidDirectory)
+  })
+
+  it('stops CSAF document discovery at the catalog limit', async () => {
+    const directoryURL = 'https://directory.vendor.org/csaf/'
+    const providerURL = 'https://feeds.vendor.org/csaf/directories.json'
+    const customFeeds = [
+      { name: 'Directories', type: 'provider-metadata' as const, url: providerURL },
+    ]
+    const updated = '2026-09-10T00:00:00Z'
+    const emptyAggregator = Buffer.from(JSON.stringify(emptyCsafAggregator()))
+    const provider = Buffer.from(
+      JSON.stringify({
+        metadata_version: '2.0',
+        distributions: [{ directory_url: directoryURL }],
+      }),
+    )
+    const emptyFeed = Buffer.from(JSON.stringify({ feed: { updated, entry: [] } }))
+    const entries = Array.from({ length: MAX_CSAF_DOCUMENTS }, (_, index) => ({
+      content: {
+        src: `https://aggregator.certvde.com/.well-known/csaf-aggregator/example/white/2026/example-${index}.json`,
+      },
+      updated,
+    }))
+    const fullFeed = Buffer.from(JSON.stringify({ feed: { updated, entry: entries } }))
+
+    const skippedDirectory = await loadCsafSnapshot(
+      async (url) => {
+        if (url === CSAF_AGGREGATOR_URL || url === ISIDATEN_CSAF_AGGREGATOR_URL)
+          return emptyAggregator
+        if (url === providerURL) return provider
+        if (url === CISA_CSAF_FEED_URLS[0]) return fullFeed
+        if (url === CISA_CSAF_FEED_URLS[1]) return emptyFeed
+        throw new Error(`Unexpected feed URL: ${url}`)
+      },
+      {
+        [CISA_CSAF_FEED_URLS[0]]: updated,
+        [CISA_CSAF_FEED_URLS[1]]: updated,
+      },
+      customFeeds,
+    )
+    expect(skippedDirectory.changed).toBe(false)
+    expect(skippedDirectory.invalid).toContain(directoryURL)
+
+    const index = Buffer.from(
+      Array.from(
+        { length: MAX_CSAF_DOCUMENTS + 1 },
+        (_, position) => `2026/example-${position}.json`,
+      ).join('\n'),
+    )
+    const changes = Buffer.from('2026/example-0.json,2026-09-12T06:30:00Z\n')
+    const directoryState = createHash('sha256')
+      .update(index)
+      .update('\0')
+      .update(changes)
+      .digest('hex')
+    const boundedDirectory = await loadCsafSnapshot(
+      async (url) => {
+        if (url === CSAF_AGGREGATOR_URL || url === ISIDATEN_CSAF_AGGREGATOR_URL)
+          return emptyAggregator
+        if (url === providerURL) return provider
+        if (url === csafDirectoryFileURL(directoryURL, 'index.txt')) return index
+        if (url === csafDirectoryFileURL(directoryURL, 'changes.csv')) return changes
+        if (CISA_CSAF_FEED_URLS.includes(url as never)) return emptyFeed
+        throw new Error(`Unexpected feed URL: ${url}`)
+      },
+      {
+        [CISA_CSAF_FEED_URLS[0]]: updated,
+        [CISA_CSAF_FEED_URLS[1]]: updated,
+        [`directory:${directoryURL}`]: directoryState,
+      },
+      customFeeds,
+    )
+    expect(boundedDirectory.changed).toBe(false)
+    expect(boundedDirectory.invalid).toContain(directoryURL)
   })
 
   it('maps every CSAF product-tree shape onto affected version constraints', () => {

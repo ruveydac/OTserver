@@ -146,6 +146,9 @@ describe('Payload job configuration', () => {
     await expect(run(args)).rejects.toBe(transient)
     mocks.feeds.mockRejectedValueOnce(Object.assign(new Error('Invalid feed'), { status: 400 }))
     await expect(run(args)).rejects.toBeInstanceOf(JobCancelledError)
+    const cancelled = new JobCancelledError('Stopped by the administrator.')
+    mocks.feeds.mockRejectedValueOnce(cancelled)
+    await expect(run(args)).rejects.toBe(cancelled)
   })
 
   it('runs automatic feed sync only on the maintenance worker', async () => {
@@ -167,6 +170,9 @@ describe('Payload job configuration', () => {
       Object.assign(new Error('Invalid settings'), { status: 400 }),
     )
     await expect(run(args)).rejects.toBeInstanceOf(JobCancelledError)
+    const cancelled = new JobCancelledError('Stopped by the administrator.')
+    mocks.scheduledFeedSync.mockRejectedValueOnce(cancelled)
+    await expect(run(args)).rejects.toBe(cancelled)
   })
   it('keeps raw queue operations private without adding disabled hooks', async () => {
     expect(await jobs.access!.run!({} as never)).toBe(false)
