@@ -1,6 +1,7 @@
 import {
   APIError,
   createLocalReq,
+  JobCancelledError,
   type Payload,
   type PayloadHandler,
   type PayloadRequest,
@@ -9,7 +10,7 @@ import { getAuthorization } from '../access/authorization'
 import { writeAudit } from '../collections/AuditLogs'
 import { inTransaction } from '../integrations/payload/transactions'
 import { principalRequest } from '../integrations/payload/requests'
-import { inspectOffline, offlineFiles, validateOfflineContents } from './offline'
+import { inspectOffline, offlineFiles, type OfflineSelection } from './offline'
 import { lockFeedOperations, syncVulnerabilityFeeds } from './feeds'
 import { feedSources, normalizeCustomCsafFeeds, type FeedSource } from './sources'
 import { readVulnerabilityFeedSettings } from '../application/settings'
@@ -18,14 +19,18 @@ const requireAdmin = async (req: PayloadRequest) => {
   if (!(await getAuthorization(req)).isAdmin)
     throw new APIError('Administrator access required.', 403)
 }
+const noUsableFiles = (selection: OfflineSelection) =>
+  selection.invalid[0]
+    ? `No usable feed file: ${selection.invalid[0].file}: ${selection.invalid[0].reason}`
+    : 'No usable feed file was found in this selection.'
 const requireOnline = () => {
   if (process.env.OTSERVER_VULNERABILITY_FEEDS === 'off')
     throw new APIError('Online feed downloads are disabled. Upload downloaded feeds instead.', 409)
 }
 const batchFromRequest = async (req: PayloadRequest) => {
-  let data: { batchID?: unknown; skipMissing?: unknown }
+  let data: { batchID?: unknown }
   try {
-    data = (await req.json!()) as { batchID?: unknown; skipMissing?: unknown }
+    data = (await req.json!()) as { batchID?: unknown }
   } catch {
     throw new APIError('Send a JSON upload selection.', 400)
   }
@@ -34,7 +39,7 @@ const batchFromRequest = async (req: PayloadRequest) => {
     !/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(data.batchID)
   )
     throw new APIError('Invalid upload selection ID.', 400)
-  return { batchID: data.batchID, skipMissing: data.skipMissing === true }
+  return { batchID: data.batchID }
 }
 
 export const feedControl: PayloadHandler = async (req) => {
@@ -90,7 +95,6 @@ export const checkOffline: PayloadHandler = async (req) => {
 const queueFeedUpdate = async (
   req: PayloadRequest,
   offline?: Awaited<ReturnType<typeof inspectOffline>>,
-  skipMissing = false,
 ) => {
   const source = offline?.selection.source
   // Both enqueue paths contend on the same catalog document. Worker fencing serializes execution.
@@ -144,7 +148,6 @@ const queueFeedUpdate = async (
                 source,
                 uploadIDs: offline.uploadIDs,
                 customCsafFeeds: offline.customCsafFeeds,
-                ...(skipMissing ? { skipMissing: true } : {}),
               }
             : {}),
         },
@@ -163,6 +166,7 @@ const queueFeedUpdate = async (
           error: null,
           jobID: String(job.id),
           lastImportMethod: offline ? ('offline' as const) : ('online' as const),
+          progress: null,
         }
         if (existing.docs[0])
           await req.payload.update({
@@ -211,9 +215,60 @@ export const refreshFeeds: PayloadHandler = async (req) => {
   return Response.json({ jobID: String(job.id) }, { status: 202 })
 }
 
+const FEED_TASKS = ['vulnerability-feed-sync-v1', 'vulnerability-feed-auto-sync-v1']
+
+export const stopFeeds: PayloadHandler = async (req) => {
+  await requireAdmin(req)
+  const jobs = await req.payload.find({
+    collection: 'payload-jobs',
+    depth: 0,
+    limit: 20,
+    overrideAccess: true,
+    req,
+    where: {
+      and: [
+        { taskSlug: { in: FEED_TASKS } },
+        { completedAt: { exists: false } },
+        { hasError: { not_equals: true } },
+      ],
+    },
+  })
+  for (const job of jobs.docs)
+    await req.payload.jobs.cancelByID({ id: job.id, overrideAccess: true, req })
+  const feeds = await req.payload.find({
+    collection: 'vulnerability-feeds',
+    depth: 0,
+    limit: 10,
+    overrideAccess: false,
+    req,
+    where: { status: { in: ['queued', 'running'] } },
+  })
+  for (const feed of feeds.docs)
+    await req.payload.update({
+      collection: 'vulnerability-feeds',
+      id: feed.id,
+      data: { status: 'cancelled', error: 'Stopped by the administrator.' },
+      overrideAccess: true,
+      req,
+    })
+  if (jobs.docs.length || feeds.docs.length)
+    await writeAudit({
+      action: 'custom',
+      req,
+      targetCollection: 'vulnerabilities',
+      after: {
+        id: 'vulnerability-catalog',
+        name: 'Vulnerability feed update stopped',
+        jobs: jobs.docs.map((job) => String(job.id)),
+        sources: feeds.docs.map((feed) => feed.source),
+      },
+    })
+  return Response.json({ jobs: jobs.docs.length, sources: feeds.docs.length })
+}
+
 export const importOffline: PayloadHandler = async (req) => {
   await requireAdmin(req)
-  const { batchID, skipMissing } = await batchFromRequest(req)
+  const { batchID } = await batchFromRequest(req)
   let offline: Awaited<ReturnType<typeof inspectOffline>>
   try {
     offline = await inspectOffline(req, batchID)
@@ -223,9 +278,8 @@ export const importOffline: PayloadHandler = async (req) => {
       400,
     )
   }
-  if (offline.selection.missing.length && !(skipMissing && offline.selection.source === 'csaf'))
-    throw new APIError('Upload the missing files before importing.', 400)
-  const job = await queueFeedUpdate(req, offline, skipMissing)
+  if (!offline.selection.usable) throw new APIError(noUsableFiles(offline.selection), 400)
+  const job = await queueFeedUpdate(req, offline)
   return Response.json({ jobID: String(job.id) }, { status: 202 })
 }
 
@@ -240,7 +294,11 @@ export type FeedJobInput = {
   skipMissing?: boolean | null
 }
 
-export const executeFeedUpdate = async (payload: Payload, input: FeedJobInput) => {
+export const executeFeedUpdate = async (
+  payload: Payload,
+  input: FeedJobInput,
+  jobID?: string | number,
+) => {
   let req = await createLocalReq({}, payload)
   try {
     const user = await payload.findByID({
@@ -255,7 +313,12 @@ export const executeFeedUpdate = async (payload: Payload, input: FeedJobInput) =
     await requireAdmin(req)
     if (input.method === 'online') {
       requireOnline()
-      return await syncVulnerabilityFeeds(payload, { force: true, failOnSourceError: true, req })
+      return await syncVulnerabilityFeeds(payload, {
+        force: true,
+        failOnSourceError: true,
+        req,
+        jobID,
+      })
     }
     if (
       !input.batchID ||
@@ -273,7 +336,8 @@ export const executeFeedUpdate = async (payload: Payload, input: FeedJobInput) =
     )
     if (offlineWithSnapshot.selection.source !== input.source)
       throw new APIError('The offline source changed.', 400)
-    await validateOfflineContents(offlineWithSnapshot, { skipMissing: input.skipMissing === true })
+    if (!offlineWithSnapshot.selection.usable)
+      throw new APIError(noUsableFiles(offlineWithSnapshot.selection), 400)
     return await syncVulnerabilityFeeds(payload, {
       force: true,
       failOnSourceError: true,
@@ -283,8 +347,12 @@ export const executeFeedUpdate = async (payload: Payload, input: FeedJobInput) =
       nvdYears: offlineWithSnapshot.selection.years,
       download: offlineWithSnapshot.download,
       customCsafFeeds,
+      missingFiles: offlineWithSnapshot.selection.missing,
+      sourceDigest: offlineWithSnapshot.sourceDigest,
+      jobID,
     })
   } catch (error) {
+    const cancelled = error instanceof JobCancelledError
     const details = error instanceof Error ? error.message : 'Feed update failed.'
     for (const source of input.method === 'offline' && input.source
       ? [input.source]
@@ -295,14 +363,18 @@ export const executeFeedUpdate = async (payload: Payload, input: FeedJobInput) =
         limit: 1,
         where: { source: { equals: source } },
       })
+      // A cancelled sync can overwrite the stop request while it is between checkpoints.
       if (state.docs[0] && ['queued', 'running'].includes(state.docs[0].status))
         await payload.update({
           collection: 'vulnerability-feeds',
           id: state.docs[0].id,
-          data: { status: 'failed', error: details.slice(0, 4000) },
+          data: cancelled
+            ? { status: 'cancelled', error: 'Stopped by the administrator.' }
+            : { status: 'failed', error: details.slice(0, 4000) },
           req,
         })
     }
+    if (cancelled) throw error
     await writeAudit({
       action: 'custom',
       req,

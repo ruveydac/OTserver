@@ -12,7 +12,7 @@ export const MAX_FEED_BYTES = 2 * 1024 * 1024 * 1024
 const DOWNLOAD_TIMEOUT_MS = 15 * 60 * 1000
 
 export type FeedBody = Buffer | AsyncIterable<Uint8Array>
-export type FeedOptions = { gzip?: boolean; sha256?: string }
+export type FeedOptions = { gzip?: boolean; sha256?: string; signal?: AbortSignal }
 export type DownloadFeed = (url: string, options?: FeedOptions) => Promise<FeedBody>
 export const MISSING_OFFLINE_FILE = 'MISSING_OFFLINE_FILE'
 type FeedLogger = Pick<Payload['logger'], 'warn'>
@@ -79,7 +79,7 @@ const loopbackTestURL = (url: URL) =>
   url.protocol === 'http:' &&
   ['127.0.0.1', '[::1]'].includes(url.hostname)
 
-const responseFor = async (url: URL): Promise<IncomingMessage> => {
+const responseFor = async (url: URL, signal?: AbortSignal): Promise<IncomingMessage> => {
   const localTest = loopbackTestURL(url)
   if ((url.protocol !== 'https:' && !localTest) || url.username || url.password || url.hash)
     throw new Error('Vulnerability feeds must use public HTTPS URLs.')
@@ -90,7 +90,9 @@ const responseFor = async (url: URL): Promise<IncomingMessage> => {
           family: isIP(url.hostname.replace(/^\[|\]$/g, '')),
         },
       ]
-    : await dnsLookup(url.hostname, { all: true, verbatim: true })
+    : (await dnsLookup(url.hostname, { all: true, verbatim: true })).sort(
+        (left, right) => (left.family === 4 ? 0 : 1) - (right.family === 4 ? 0 : 1),
+      )
   if (
     !addresses.length ||
     (!localTest && addresses.some(({ address }) => !isPublicFeedAddress(address)))
@@ -100,8 +102,11 @@ const responseFor = async (url: URL): Promise<IncomingMessage> => {
   let lastError: unknown
   for (const address of addresses) {
     const pinnedLookup: LookupFunction = (_hostname, options, callback) => {
-      if (typeof options === 'object' && options.all) callback(null, [address])
-      else callback(null, address.address, address.family)
+      // The callback must be asynchronous so connect/TLS setup completes before it runs.
+      queueMicrotask(() => {
+        if (typeof options === 'object' && options.all) callback(null, [address])
+        else callback(null, address.address, address.family)
+      })
     }
     try {
       return await new Promise<IncomingMessage>((resolve, reject) => {
@@ -117,7 +122,9 @@ const responseFor = async (url: URL): Promise<IncomingMessage> => {
               'user-agent': 'OTserver vulnerability catalog sync',
             },
             lookup: pinnedLookup,
-            signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+            signal: signal
+              ? AbortSignal.any([AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS), signal])
+              : AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
             ...(url.protocol === 'https:' ? { servername: url.hostname } : {}),
           },
           resolve,
@@ -132,10 +139,10 @@ const responseFor = async (url: URL): Promise<IncomingMessage> => {
   throw lastError
 }
 
-const publicResponse = async (input: string): Promise<IncomingMessage> => {
+const publicResponse = async (input: string, signal?: AbortSignal): Promise<IncomingMessage> => {
   let url = new URL(input)
   for (let redirects = 0; redirects <= 5; redirects++) {
-    const response = await responseFor(url)
+    const response = await responseFor(url, signal)
     const status = response.statusCode || 0
     if (![301, 302, 303, 307, 308].includes(status)) return response
     const location = response.headers.location
@@ -227,7 +234,7 @@ export const downloadFeed = async (
 ): Promise<FeedBody> => {
   let response: IncomingMessage
   try {
-    response = await publicResponse(url)
+    response = await publicResponse(url, options?.signal)
   } catch (error) {
     logRequestFailure(logger, url, error)
     throw error

@@ -24,6 +24,8 @@ import {
   affectedProducts,
   CISA_KEV_URL,
   CSAF_AGGREGATOR_URL,
+  ISIDATEN_CSAF_AGGREGATOR_URL,
+  csafDirectoryFileURL,
   downloadFeed,
   feedText,
   feedUnavailable,
@@ -40,6 +42,8 @@ import {
   parseCisaCatalog,
   parseCpe,
   parseCsafAggregator,
+  parseCsafDirectoryIndex,
+  parseCsafDirectoryMetadata,
   parseCsafDocument,
   parseCsafProviderMetadata,
   parseCsv,
@@ -88,6 +92,7 @@ const csafProviderMetadata = () => fixture('csaf-provider-metadata.json')
 const csafRolie = () => fixture('csaf-rolie.json')
 const csafDocument = () => fixture('csaf-document.json')
 const icsCsv = () => textFixture('ics-advisory-project.csv')
+const emptyCsafAggregator = () => ({ aggregator_version: '2.0', csaf_providers: [] })
 
 const feedDocument = {
   firmwareVersion: 'V2.5',
@@ -389,6 +394,27 @@ describe('feed parsing', () => {
         csaf_providers: [{ mirrors: ['https://feeds.vendor.org/csaf/provider.json'] }],
       }),
     ).toEqual(['https://feeds.vendor.org/csaf/provider.json'])
+    expect(
+      parseCsafAggregator({
+        aggregator_version: '2.0',
+        csaf_providers: [
+          { metadata: { url: 'https://feeds.vendor.org/csaf/provider-metadata.json' } },
+        ],
+      }),
+    ).toEqual(['https://feeds.vendor.org/csaf/provider-metadata.json'])
+    const directory = 'https://feeds.vendor.org/csaf/'
+    const providerMetadata = {
+      metadata_version: '2.0',
+      distributions: [{ directory_url: directory }],
+    }
+    expect(parseCsafDirectoryMetadata(providerMetadata)).toEqual([directory])
+    expect(parseCsafDirectoryIndex('2026/notice.json\n', directory)).toEqual([
+      'https://feeds.vendor.org/csaf/2026/notice.json',
+    ])
+    expect(() => parseCsafDirectoryIndex('../notice.json', directory)).toThrow('invalid path')
+    expect(() => parseCsafDirectoryIndex('//other.example/notice.json', directory)).toThrow(
+      'invalid path',
+    )
     expect(validateCsafFeedURL('https://feeds.vendor.org/csaf/feed.json')).toBe(true)
     expect(validateCsafFeedURL('not a URL')).toContain('valid HTTPS URL')
     expect(validateCustomCsafFeeds(Array(MAX_CUSTOM_CSAF_FEEDS + 1).fill(null))).toContain(
@@ -424,12 +450,23 @@ describe('feed parsing', () => {
     expect(isPublicFeedAddress('224.0.0.1')).toBe(false)
   })
 
-  it('discovers configured CSAF aggregators, provider metadata, and ROLIE feeds', async () => {
+  it('discovers aggregator providers, ROLIE feeds, and directory distributions', async () => {
     const customURL = 'https://feeds.vendor.org/csaf/feed.json'
     const customAggregatorURL = 'https://feeds.vendor.org/csaf/aggregator.json'
     const customProviderURL = 'https://feeds.vendor.org/csaf/provider-metadata.json'
     const customProviderFeedURL = 'https://feeds.vendor.org/csaf/provider-feed.json'
     const customAdvisoryURL = 'https://feeds.vendor.org/csaf/2026/vendor-2026-001.json'
+    const isidatenProviderURL = 'https://directory.vendor.org/csaf/provider-metadata.json'
+    const directoryURL = 'https://directory.vendor.org/csaf/'
+    const directoryAdvisoryURL = `${directoryURL}2026/vendor-directory-001.json`
+    const isidatenAggregator = {
+      aggregator_version: '2.0',
+      csaf_providers: [{ metadata: { url: isidatenProviderURL } }],
+    }
+    const directoryProvider = {
+      metadata_version: '2.0',
+      distributions: [{ directory_url: directoryURL }],
+    }
     const customRolie = JSON.parse(JSON.stringify(await csafRolie())) as {
       feed: { updated: string; entry: { updated: string; content: { src: string } }[] }
     }
@@ -453,8 +490,15 @@ describe('feed parsing', () => {
       async (url) => {
         requested.push(url)
         if (url === CSAF_AGGREGATOR_URL) return Buffer.from(JSON.stringify(await csafAggregator()))
+        if (url === ISIDATEN_CSAF_AGGREGATOR_URL)
+          return Buffer.from(JSON.stringify(isidatenAggregator))
         if (url === customAggregatorURL) return Buffer.from(JSON.stringify(customAggregator))
         if (url === customProviderURL) return Buffer.from(JSON.stringify(customProvider))
+        if (url === isidatenProviderURL) return Buffer.from(JSON.stringify(directoryProvider))
+        if (url === csafDirectoryFileURL(directoryURL, 'index.txt'))
+          return Buffer.from('2026/vendor-directory-001.json\n')
+        if (url === csafDirectoryFileURL(directoryURL, 'changes.csv'))
+          return Buffer.from('2026/vendor-directory-001.json,2026-09-12T06:30:00Z\n')
         if (url.endsWith('/provider-metadata.json'))
           return Buffer.from(JSON.stringify(await csafProviderMetadata()))
         if (
@@ -474,14 +518,62 @@ describe('feed parsing', () => {
     expect(requested).toContain(customAggregatorURL)
     expect(requested).toContain(customProviderFeedURL)
     expect(requested).toContain(customAdvisoryURL)
+    expect(requested).toContain(ISIDATEN_CSAF_AGGREGATOR_URL)
+    expect(requested).toContain(isidatenProviderURL)
+    expect(requested).toContain(csafDirectoryFileURL(directoryURL, 'index.txt'))
+    expect(requested).toContain(csafDirectoryFileURL(directoryURL, 'changes.csv'))
+    expect(requested).toContain(directoryAdvisoryURL)
+    expect(snapshot.state[`directory:${directoryURL}`]).toBeTruthy()
     expect(snapshot.state[customURL]).toBe('2026-09-12T06:30:00Z')
     expect(snapshot.documents).toHaveLength(1)
+  })
+
+  it('hands CSAF advisories to the importer as soon as each batch is downloaded', async () => {
+    const entries = Array.from({ length: 11 }, (_, index) => ({
+      content: {
+        src: `https://aggregator.certvde.com/.well-known/csaf-aggregator/example/white/2026/example-${index}.json`,
+      },
+      updated: '2026-09-11T06:00:00Z',
+    }))
+    const requested: string[] = []
+    const batches: string[][] = []
+    const snapshot = await loadCsafSnapshot(
+      async (url) => {
+        requested.push(url)
+        if (url === CSAF_AGGREGATOR_URL) return Buffer.from(JSON.stringify(await csafAggregator()))
+        if (url === ISIDATEN_CSAF_AGGREGATOR_URL)
+          return Buffer.from(JSON.stringify(emptyCsafAggregator()))
+        if (url.endsWith('/provider-metadata.json'))
+          return Buffer.from(JSON.stringify(await csafProviderMetadata()))
+        if (url.endsWith('/feed.json') || CISA_CSAF_FEED_URLS.includes(url as never))
+          return Buffer.from(
+            JSON.stringify({ feed: { entry: entries, updated: '2026-09-11T06:30:00Z' } }),
+          )
+        if (url.endsWith('.json')) return Buffer.from(JSON.stringify(await csafDocument()))
+        throw new Error(`Unexpected feed URL: ${url}`)
+      },
+      {},
+      [],
+      async (batch) => {
+        batches.push(batch.files.map(({ file }) => file))
+        if (batches.length === 1)
+          expect(
+            requested.filter((url) => url.includes('/example/white/2026/example-')).length,
+          ).toBe(10)
+      },
+    )
+
+    expect(snapshot.changed).toBe(true)
+    expect(snapshot.documents).toBeUndefined()
+    expect(batches.map((files) => files.length)).toEqual([10, 1])
   })
 
   it('skips CSAF documents the publisher lists but does not serve', async () => {
     const unavailable = Object.assign(new Error('responded with 404.'), { status: 404 })
     const routing = (document: (url: string) => Promise<Buffer>) => async (url: string) => {
       if (url === CSAF_AGGREGATOR_URL) return Buffer.from(JSON.stringify(await csafAggregator()))
+      if (url === ISIDATEN_CSAF_AGGREGATOR_URL)
+        return Buffer.from(JSON.stringify(emptyCsafAggregator()))
       if (url.endsWith('/provider-metadata.json'))
         return Buffer.from(JSON.stringify(await csafProviderMetadata()))
       if (url.endsWith('/feed.json') || CISA_CSAF_FEED_URLS.includes(url as never))
@@ -516,15 +608,18 @@ describe('feed parsing', () => {
     expect(flaky.documents).toHaveLength(1)
     expect(flaky.unavailable).toEqual([])
 
-    // A refused connection or any other failure still keeps the previous snapshot intact.
-    await expect(
-      loadCsafSnapshot(
-        routing(async (url) => {
-          throw new Error(`${url} is unavailable`)
-        }),
-        {},
-      ),
-    ).rejects.toThrow('is unavailable')
+    // A refused connection or any other failure is reported and skipped, so readable documents
+    // still import and the caller merges them instead of deleting existing records.
+    const failed = await loadCsafSnapshot(
+      routing(async (url) => {
+        throw new Error(`${url} is unavailable`)
+      }),
+      {},
+    )
+    expect(failed.documents).toEqual([])
+    expect(failed.invalid).toContain(
+      'https://aggregator.certvde.com/.well-known/csaf-aggregator/example/white/2026/example-2026-001.json',
+    )
   })
 
   it('retains the previous CSAF snapshot when publishers stop serving many documents', async () => {
@@ -537,6 +632,8 @@ describe('feed parsing', () => {
     await expect(
       loadCsafSnapshot(async (url) => {
         if (url === CSAF_AGGREGATOR_URL) return Buffer.from(JSON.stringify(await csafAggregator()))
+        if (url === ISIDATEN_CSAF_AGGREGATOR_URL)
+          return Buffer.from(JSON.stringify(emptyCsafAggregator()))
         if (url.endsWith('/provider-metadata.json'))
           return Buffer.from(JSON.stringify(await csafProviderMetadata()))
         if (url.endsWith('/feed.json') || CISA_CSAF_FEED_URLS.includes(url as never))
@@ -1184,6 +1281,8 @@ describe('vulnerability catalog', () => {
   const downloadFixtures = async (url: string) => {
     if (url === CISA_KEV_URL) return Buffer.from(JSON.stringify(await kevCatalog()))
     if (url === CSAF_AGGREGATOR_URL) return Buffer.from(JSON.stringify(await csafAggregator()))
+    if (url === ISIDATEN_CSAF_AGGREGATOR_URL)
+      return Buffer.from(JSON.stringify(emptyCsafAggregator()))
     if (CISA_CSAF_FEED_URLS.includes(url as (typeof CISA_CSAF_FEED_URLS)[number])) {
       return Buffer.from(JSON.stringify(await csafRolie()))
     }
@@ -1335,6 +1434,13 @@ describe('vulnerability catalog', () => {
     expect(feeds.docs[2]).toMatchObject({ documentCount: 5 })
     expect(feeds.docs[2].dateReleased).toBe('2026-09-11T00:00:00.000Z')
     expect(feeds.docs[3].state).toMatchObject({ 2024: { sha256: 'abc123' } })
+    expect(feeds.docs[0].progress).toContain('Imported known_exploited_vulnerabilities.json')
+    expect(feeds.docs[1].progress).toContain('example-2026-001.json')
+    expect(feeds.docs[2].progress).toContain('Imported CISA_ICS_ADV_Master.csv')
+    expect(feeds.docs[3].progress).toContain('Imported nvdcve-2.0-2024')
+    expect(feeds.docs.every(({ progress }) => !progress?.toLowerCase().includes('download'))).toBe(
+      true,
+    )
 
     const merged = await payload.find({
       collection: 'vulnerabilities',
@@ -1511,10 +1617,10 @@ describe('vulnerability catalog', () => {
       },
       force: true,
     })
-    expect(failing.loaded).toBe(0)
+    expect(failing.loaded).toBe(1)
     expect(logged.mock.calls.map(([message]) => String(message))).toEqual([
       'Vulnerability catalog sync started: downloading CISA KEV, CSAF, ICS Advisory Project, and NVD feeds.',
-      'Vulnerability catalog sync finished downloading 0 documents with 3 source failures.',
+      'Vulnerability catalog sync finished downloading 1 documents with 2 source failures.',
     ])
     logged.mockRestore()
 
@@ -1524,9 +1630,9 @@ describe('vulnerability catalog', () => {
       overrideAccess: true,
       sort: 'source',
     })
-    expect(feeds.docs.map(({ status }) => status)).toEqual(['failed', 'failed', 'failed', 'ready'])
+    expect(feeds.docs.map(({ status }) => status)).toEqual(['failed', 'partial', 'failed', 'ready'])
     expect(feeds.docs[0].error).toContain('mirror unreachable')
-    expect(feeds.docs[1].error).toContain('aggregator unreachable')
+    expect(feeds.docs[1].error).toContain('Invalid files skipped')
     expect(feeds.docs[2].error).toContain('advisory project unreachable')
     // The previously stored catalog survives a failed refresh.
     expect(
@@ -2181,7 +2287,13 @@ describe('vulnerability catalog', () => {
       overrideAccess: true,
       sort: 'source',
     })
-    expect(feeds.docs.map(({ status }) => status)).toEqual(['ready', 'failed', 'failed', 'partial'])
+    expect(feeds.docs.map(({ status }) => status)).toEqual([
+      'ready',
+      'partial',
+      'failed',
+      'partial',
+    ])
+    expect(feeds.docs[1].error).toContain('Invalid files skipped')
     expect(feeds.docs[3].error).toContain('responded with 404')
 
     process.env.OTSERVER_VULNERABILITY_FEEDS = 'off'

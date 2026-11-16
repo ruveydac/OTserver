@@ -110,7 +110,7 @@ export const ApplicationSettings: GlobalConfig = {
           validate: validateCustomCsafFeeds,
           admin: {
             description:
-              'Add public HTTPS CSAF aggregators, provider metadata, or ROLIE feeds. Referenced feeds and advisories are discovered automatically.',
+              'Add public HTTPS CSAF aggregators, provider metadata, or ROLIE feeds. Directory indexes and referenced advisories are discovered automatically.',
           },
           fields: [
             { name: 'name', type: 'text', required: true, maxLength: 120 },

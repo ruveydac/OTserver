@@ -140,7 +140,7 @@ describe('Payload job configuration', () => {
       JobCancelledError,
     )
     expect(await run(args)).toEqual({ output: {} })
-    expect(mocks.feeds).toHaveBeenCalledWith(req.payload, args.input)
+    expect(mocks.feeds).toHaveBeenCalledWith(req.payload, args.input, 'feed-job')
     const transient = Object.assign(new Error('Connection reset'), { code: 'ECONNRESET' })
     mocks.feeds.mockRejectedValueOnce(transient)
     await expect(run(args)).rejects.toBe(transient)
@@ -157,7 +157,7 @@ describe('Payload job configuration', () => {
     mocks.worker = { queue: 'maintenance' }
     await expect(run({ ...args, input: { version: 2 } })).rejects.toBeInstanceOf(JobCancelledError)
     expect(await run(args)).toEqual({ output: {} })
-    expect(mocks.scheduledFeedSync).toHaveBeenCalledWith(req.payload)
+    expect(mocks.scheduledFeedSync).toHaveBeenCalledWith(req.payload, 'auto-feed-job')
 
     mocks.scheduledFeedSync.mockRejectedValueOnce(
       Object.assign(new Error('Connection reset'), { code: 'ECONNRESET' }),

@@ -1,7 +1,13 @@
 import type { CollectionConfig } from 'payload'
 
 import { adminOnly, hideFromNonAdmins } from '../access/authorization'
-import { checkOffline, feedControl, importOffline, refreshFeeds } from '../vulnerabilities/actions'
+import {
+  checkOffline,
+  feedControl,
+  importOffline,
+  refreshFeeds,
+  stopFeeds,
+} from '../vulnerabilities/actions'
 
 export const Vulnerabilities: CollectionConfig = {
   slug: 'vulnerabilities',
@@ -75,6 +81,7 @@ export const VulnerabilityFeeds: CollectionConfig = {
   endpoints: [
     { path: '/control', method: 'get', handler: feedControl },
     { path: '/refresh', method: 'post', handler: refreshFeeds },
+    { path: '/stop', method: 'post', handler: stopFeeds },
     { path: '/offline/check', method: 'post', handler: checkOffline },
     { path: '/offline/import', method: 'post', handler: importOffline },
   ],
@@ -103,7 +110,7 @@ export const VulnerabilityFeeds: CollectionConfig = {
       type: 'select',
       defaultValue: 'idle',
       index: true,
-      options: ['idle', 'queued', 'running', 'ready', 'partial', 'failed'],
+      options: ['idle', 'queued', 'running', 'ready', 'partial', 'failed', 'cancelled'],
       required: true,
     },
     { name: 'lastSyncedAt', type: 'date', label: 'Last synchronized' },
@@ -111,6 +118,12 @@ export const VulnerabilityFeeds: CollectionConfig = {
     { name: 'catalogVersion', type: 'text', label: 'Catalog version' },
     { name: 'dateReleased', type: 'date', label: 'Catalog released' },
     { name: 'error', type: 'textarea' },
+    {
+      name: 'progress',
+      type: 'textarea',
+      admin: { readOnly: true },
+      label: 'Import log',
+    },
     { name: 'state', type: 'json', admin: { hidden: true } },
     { name: 'jobID', type: 'text', admin: { readOnly: true } },
     {

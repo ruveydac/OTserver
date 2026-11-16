@@ -276,12 +276,23 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
   transactions, and audit history. Move current reviews on site transfer and merge; reject merge
   collisions for the same CVE. Merged source assets have no open vulnerability findings.
 - Match only recorded metadata. Never add an active vulnerability probe, exploit, or scanner check.
-- CSAF sources are the CERT@VDE aggregator and CISA OT/IT ROLIE feeds. Refresh CSAF as one complete
-  snapshot, preserve the previous snapshot on any provider failure, and never overwrite NVD-owned
-  records with CSAF data. Publishers sometimes index an advisory they never served (CISA's IT feed
-  listed `va-26-274-03.json`); a 404 confirmed by a second request is skipped, logged, and bounded
-  by `MAX_CSAF_UNAVAILABLE`, while any other failure still retains the previous snapshot. Offline,
-  such a gap requires the administrator's explicit `skipMissing` confirmation.
+- CSAF sources are the CERT@VDE aggregator, the isidaten provider directory, and CISA OT/IT ROLIE
+  feeds. Support both ROLIE feeds and provider-metadata directory distributions (`index.txt` and
+  `changes.csv`). Refresh CSAF as one snapshot and never overwrite NVD-owned records with CSAF data.
+  A complete snapshot replaces the catalog and removes delisted CVEs. If any feed, provider file, or
+  advisory is malformed or missing offline, skip it, merge the readable documents, and preserve the
+  existing records that a skipped file may own; report the skipped files in the source status. Only a
+  complete snapshot may delete CSAF records. Import each advisory batch as it downloads instead of
+  waiting for the whole snapshot, and record a per-file line in the source import log when the file's
+  records are written; log imports only, never downloads. Publishers sometimes index an advisory they
+  never served (CISA's IT feed listed `va-26-274-03.json`); a 404 confirmed by a second request is
+  skipped, logged, and bounded by `MAX_CSAF_UNAVAILABLE`. Directory distributions can be enormous
+  (the isidaten aggregator lists hundreds of thousands of VEX documents). Stop adding directory
+  entries at `MAX_CSAF_DOCUMENTS`, report the remaining directories as skipped, and import the
+  bounded snapshot as partial; one oversized directory must never fail every CSAF source.
+- An administrator can stop active feed work from the feed page. Cancellation aborts the current
+  download, stops before the next file or batch, preserves already imported records, and marks the
+  source `cancelled`; it is not a source failure and must not be retried as one.
 - Count a CVE only when fuzzy vendor/product matching succeeds and a reported asset version satisfies
   an affected NVD CPE or CSAF product-tree exact version or range. Missing version evidence does not
   count.
@@ -307,14 +318,20 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
   bypasses freshness, not NVD checksum reuse. `OTSERVER_VULNERABILITY_FEEDS=off` disables server-side
   online updates in both web and worker processes but must leave original-file offline imports usable.
 - Offline selections use immutable `vulnerability-feed-uploads` under the shared `import-files` volume.
-  Jobs snapshot upload IDs and reload the initiating administrator; verify stored digests and preflight
-  all selected contents before catalog writes. Never fetch a missing offline file. NVD imports require
-  matching `.meta` checksums of the uncompressed JSON and preserve unselected years. CSAF replaces only
-  complete snapshots; distinguish repeated filenames by mirrored hostname/path or explicit source URL.
-  Preserve publisher filenames in upload metadata; multipart sanitization changes dots and extensions,
-  so source lookup must never depend on Payload's physical storage filename.
-  Usable CSAF-only catalogs must enable derived counts. Seven-day staging cleanup retains active job
-  files; catalog failures must not make previously loaded data unusable.
+  Jobs snapshot upload IDs and reload the initiating administrator; verify stored digests per file. A
+  missing or invalid file never blocks the rest of the selection: import every valid file, skip the
+  rest, and report them in the source status. Never fetch a missing offline file. NVD imports require
+  matching `.meta` checksums of the uncompressed JSON, apply each valid year independently, and
+  preserve unselected or unusable years. The check reports files already imported so they need not be
+  transferred again: NVD `.meta` SHA-256 against the stored year hash, KEV/ICS upload digest against
+  the stored import digest, and CSAF feed/directory state against the stored snapshot. CSAF replaces
+  the catalog only when nothing was skipped; otherwise it merges and preserves existing records. The
+  vulnerability feed page shows the per-source import log while the worker runs.
+  Distinguish repeated filenames by mirrored hostname/path or explicit source URL. Preserve publisher
+  filenames in upload metadata; multipart sanitization changes dots and extensions, so source lookup
+  must never depend on Payload's physical storage filename. Usable CSAF-only catalogs must enable
+  derived counts. Seven-day staging cleanup retains active job files; catalog failures must not make
+  previously loaded data unusable.
 - The asset detail view shows the five most severe open findings, known-exploited first and then
   highest CVSS, with a paginated view for all findings and their evidence. Confirmation records a
   human review, not an active device test; a confirmed finding remains until explicitly resolved.
@@ -330,10 +347,11 @@ set `OTSERVER_VULNERABILITY_FEEDS=off` in the application and any external maint
 
 Automatic vulnerability feed updates are enabled by default and run every seven days. Administrators
 can disable them or change the interval from 1 to 365 days under **Settings > Application settings**.
-The same page accepts additional public HTTPS CSAF aggregator, provider metadata, and JSON ROLIE
-feeds. Online and offline CSAF snapshots include those sources alongside the built-in feeds. Manual
-updates remain available when automatic updates are disabled; `OTSERVER_VULNERABILITY_FEEDS=off`
-disables all online feed downloads regardless of the saved setting.
+The same page accepts additional public HTTPS CSAF aggregators, provider metadata, and JSON ROLIE
+feeds. Provider metadata can advertise either ROLIE feeds or directory distributions. Online and
+offline CSAF snapshots include those sources alongside the built-in feeds. Manual updates remain
+available when automatic updates are disabled; `OTSERVER_VULNERABILITY_FEEDS=off` disables all
+online feed downloads regardless of the saved setting.
 
 Offline transfer workflow:
 
@@ -341,24 +359,28 @@ Offline transfer workflow:
 2. Download the original publisher files on an internet-connected computer, retaining their filenames.
 3. Transfer them to the isolated computer and use **Choose files** or **Choose folder**. Retain the
    selection ID to resume staged uploads.
-4. Use **Check uploaded files** to review coverage, publisher dates, and missing-file links.
-5. Select **Import uploaded … files** and review the results on the feed page.
+4. Use **Check uploaded files** to review coverage, publisher dates, missing-file links, invalid
+   files, and files already imported from an earlier run.
+5. Select **Import uploaded … files**. Missing and invalid files are skipped and reported; review the
+   results on the feed page.
 
 Required files:
 
 - CISA KEV: `known_exploited_vulnerabilities.json`.
 - NVD: each selected `nvdcve-2.0-YYYY.json.gz` (or `.json`) with its matching `.meta` file.
 - ICS Advisory Project: `CISA_ICS_ADV_Master.csv`.
-- CSAF: the CERT@VDE aggregator, every referenced provider metadata/index/advisory file, both
-  CISA OT/IT indexes with their referenced advisories, and all configured custom CSAF sources.
+- CSAF: the CERT@VDE and isidaten aggregators, every referenced provider metadata, directory
+  `index.txt`/`changes.csv`, and advisory file, both CISA OT/IT indexes with their referenced
+  advisories, and all configured custom CSAF sources.
 
 NVD years can be imported in batches; unselected years and other sources remain intact. Coverage
 stays partial until all annual years from 2002 onward have been loaded. For CSAF, check the initial
-aggregator and CISA indexes, transfer files from the resulting missing-file links, and repeat until
-the snapshot is complete. If a publisher lists an advisory it does not serve, **Import without these
-files** must be confirmed explicitly; only that confirmed gap is left out of the snapshot. Preserve
-`hostname/path/to/file.json` directories for repeated filenames, or use **Upload this file** beside
-the specific missing URL.
+aggregators and CISA indexes, transfer files from the resulting missing-file links, and repeat to
+complete the snapshot. Missing or invalid files never block an import: they are skipped and listed
+in the source status, and previously imported records are retained until a complete snapshot
+replaces them. Preserve `hostname/path/to/file.json` directories for repeated filenames, or use
+**Upload this file** beside the specific missing URL. The check marks files that match the last
+import (NVD checksums, KEV/ICS digests, CSAF feed state) so they do not need to be downloaded again.
 
 Each upload is limited to 500 MiB, each selection to 8 GiB, and decompressed feeds to 2 GiB. Prefer
 compressed NVD files for large years. Staged files expire after seven days, except those needed by

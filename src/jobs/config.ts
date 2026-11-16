@@ -93,12 +93,13 @@ export const jobs: JobsConfig = {
         { name: 'customCsafFeeds', type: 'json' },
         { name: 'skipMissing', type: 'checkbox' },
       ],
-      handler: async ({ input, req }) => {
+      handler: async ({ input, job, req }) => {
         if (input.version !== 1 || currentWorker()?.queue !== 'maintenance')
           throw new JobCancelledError('Unsupported worker input or execution context.')
         try {
-          await executeFeedUpdate(req.payload, input)
+          await executeFeedUpdate(req.payload, input, job.id)
         } catch (error) {
+          if (error instanceof JobCancelledError) throw error
           if (!transientFailure(error)) throw new JobCancelledError(safeFailure(error))
           throw error
         }
@@ -109,12 +110,13 @@ export const jobs: JobsConfig = {
       slug: 'vulnerability-feed-auto-sync-v1',
       retries: { attempts: 2, backoff: { type: 'exponential', delay: 30_000 } },
       inputSchema: [{ name: 'version', type: 'number', required: true }],
-      handler: async ({ input, req }) => {
+      handler: async ({ input, job, req }) => {
         if (input.version !== 1 || currentWorker()?.queue !== 'maintenance')
           throw new JobCancelledError('Unsupported worker input or execution context.')
         try {
-          await executeScheduledVulnerabilityFeedSync(req.payload)
+          await executeScheduledVulnerabilityFeedSync(req.payload, job.id)
         } catch (error) {
+          if (error instanceof JobCancelledError) throw error
           if (!transientFailure(error)) throw new JobCancelledError(safeFailure(error))
           throw error
         }
