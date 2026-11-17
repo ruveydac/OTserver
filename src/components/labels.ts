@@ -7,6 +7,7 @@ export const statusLabels: Record<string, string> = {
 
 export const protocolLabels: Record<string, string> = {
   bacnet: 'BACnet',
+  cdp: 'CDP',
   dnp3: 'DNP3',
   'ethernet-ip': 'EtherNet/IP',
   iec61850: 'IEC 61850',

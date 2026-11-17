@@ -333,6 +333,12 @@ describe('OTserver Otter importer', () => {
           mergeFields: expect.objectContaining({ protocols: ['https'] }),
           raw: expect.objectContaining({ protocol: 'https', port: 443 }),
         }),
+        expect.objectContaining({
+          source: 'cdp',
+          quality: 'medium',
+          mergeFields: expect.objectContaining({ name: 'Remote I/O', protocols: ['cdp'] }),
+          raw: expect.objectContaining({ protocol: 'cdp', version: 2 }),
+        }),
       ]),
     })
     expect(imported.assets.find(({ identity }) => identity?.scope === 'chassis')).toMatchObject({
@@ -344,7 +350,15 @@ describe('OTserver Otter importer', () => {
     expect(imported.assets.some(({ serialNumber }) => serialNumber === 'PNIO-SUBMODULE')).toBe(
       false,
     )
-    expect(imported.links).toHaveLength(1)
+    expect(imported.links).toHaveLength(2)
+    expect(imported.links).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'cdp',
+          remote: { macAddress: '02:10:00:00:00:02', portId: 'GigabitEthernet1/1' },
+        }),
+      ]),
+    )
     expect(imported.unresolved).toHaveLength(1)
     expect(() => parseOTserverOtter(invalidJSON)).toThrow('metadata are required')
   })
@@ -1382,7 +1396,7 @@ describe('OTserver Otter importer', () => {
         depth: 0,
         where: { import: { equals: imported.id } },
       })
-      expect(links.docs).toHaveLength(1)
+      expect(links.docs).toHaveLength(2)
       const observations = await payload.find({
         collection: 'asset-observations',
         depth: 0,

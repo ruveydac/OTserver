@@ -130,6 +130,7 @@ const configKeys = new Set([
   'noOpcua',
   'noSnmp',
   'noLldp',
+  'noCdp',
   'adsSourceNetId',
   'adsTargetNetIds',
   'adsPorts',

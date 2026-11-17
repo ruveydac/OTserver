@@ -596,7 +596,7 @@ export const OtterProfiles: CollectionConfig = {
               label: 'Disable native IP protocols',
               admin: {
                 description:
-                  'Disables S7, EtherNet/IP, BACnet, FINS, Fox, DNP3, IEC 61850, NetBIOS, SMB, RPC, and OPC UA. ARP, PROFINET, SNMP, and LLDP are controlled separately.',
+                  'Disables S7, EtherNet/IP, BACnet, FINS, Fox, DNP3, IEC 61850, NetBIOS, SMB, RPC, and OPC UA. ARP, PROFINET, SNMP, LLDP, and CDP are controlled separately.',
               },
             },
             {
@@ -647,6 +647,7 @@ export const OtterProfiles: CollectionConfig = {
             { name: 'noOpcua', type: 'checkbox', defaultValue: false, label: 'Disable OPC UA' },
             { name: 'noSnmp', type: 'checkbox', defaultValue: false, label: 'Disable SNMP' },
             { name: 'noLldp', type: 'checkbox', defaultValue: false, label: 'Disable LLDP' },
+            { name: 'noCdp', type: 'checkbox', defaultValue: false, label: 'Disable CDP' },
             {
               name: 'adsSourceNetId',
               label: 'ADS source NetID',

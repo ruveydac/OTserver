@@ -116,7 +116,7 @@ For a pinned deployment, replace `latest` with an exact release tag (`X.Y.Z`).
 | OTserver and maintenance worker | `https://api.github.com/repos/ruveydac/OTserver-metadata` and `https://raw.githubusercontent.com/ruveydac/OTserver-metadata` | DNS UDP/TCP 53 and outbound TCP 443, when daily metadata updates are enabled | Manufacturer and device metadata updates |
 
 Otter also needs access from the scanner to approved target networks for the configured discovery
-protocols. Ports depend on enabled probes; ARP, PROFINET DCP, and LLDP require the same Layer-2
+protocols. Ports depend on enabled probes; ARP, PROFINET DCP, LLDP, and CDP require the same Layer-2
 segment. See [Otter's supported discovery protocols](otserver-otter/README.md#what-it-discovers).
 
 Failed catalog and release requests are logged as warnings by the application logger, with the

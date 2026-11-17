@@ -51,6 +51,7 @@ export type ImportedAsset = {
 export const importedProtocols = [
   'bacnet',
   'beckhoff-ads',
+  'cdp',
   'dnp3',
   'ethernet-ip',
   'http',

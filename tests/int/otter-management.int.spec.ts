@@ -1012,7 +1012,12 @@ describe('Otter management controller', () => {
           name: 'Line A',
           site: site.id,
           scanner: scannerID,
-          configuration: { targets: ['192.0.2.10'], interface: 'eth0', noSnmp: false },
+          configuration: {
+            targets: ['192.0.2.10'],
+            interface: 'eth0',
+            noSnmp: false,
+            noCdp: false,
+          },
           assetOverrides: { assetOwner: 'Central owner' },
           customFieldOverrides: { [customField.id]: 7 },
         },
@@ -1137,6 +1142,7 @@ describe('Otter management controller', () => {
         interface: 'eth0',
         noSnmp: false,
       })
+      expect(snapshot.configSnapshot).not.toHaveProperty('noCdp')
       expect(snapshot.importOverridesSnapshot).toMatchObject({
         assetOverrides: { assetOwner: 'Central owner' },
       })
