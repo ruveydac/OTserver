@@ -246,26 +246,77 @@ export const parseCsafAggregator = (input: unknown): string[] => {
   return [
     ...new Set(
       providers
-        .flatMap((provider) => array(record(provider).mirrors))
+        .flatMap((provider) => [
+          ...array(record(provider).mirrors),
+          record(record(provider).metadata).url,
+        ])
         .map(trustedCsafURL)
         .filter((url): url is string => Boolean(url)),
     ),
   ]
 }
 
-export const parseCsafProviderMetadata = (input: unknown): string[] => {
+const csafProviderDistributions = (input: unknown) => {
   const source = record(input)
   if (text(source.metadata_version) !== '2.0' || !Array.isArray(source.distributions)) {
     throw new Error('The CSAF provider metadata does not match version 2.0.')
   }
-  return [
-    ...new Set(
-      array(source.distributions)
-        .flatMap((distribution) => array(record(record(distribution).rolie).feeds))
-        .map((feed) => trustedCsafURL(record(feed).url))
-        .filter((url): url is string => Boolean(url)),
-    ),
-  ]
+  return array(source.distributions)
+}
+
+export const parseCsafProviderMetadata = (input: unknown): string[] => [
+  ...new Set(
+    csafProviderDistributions(input)
+      .flatMap((distribution) => array(record(record(distribution).rolie).feeds))
+      .map((feed) => trustedCsafURL(record(feed).url))
+      .filter((url): url is string => Boolean(url)),
+  ),
+]
+
+export const parseCsafDirectoryMetadata = (input: unknown): string[] => [
+  ...new Set(
+    csafProviderDistributions(input)
+      .map((distribution) => trustedCsafURL(record(distribution).directory_url))
+      .filter((url): url is string => Boolean(url)),
+  ),
+]
+
+export const csafDirectoryFileURL = (
+  directoryURL: string,
+  file: 'index.txt' | 'changes.csv',
+): string => {
+  const base = new URL(directoryURL)
+  if (!base.pathname.endsWith('/')) base.pathname += '/'
+  return new URL(file, base).href
+}
+
+export const parseCsafDirectoryIndex = (input: unknown, directoryURL: string): string[] => {
+  if (typeof input !== 'string') throw new Error('The CSAF directory index is invalid.')
+  const base = new URL(directoryURL)
+  if (!base.pathname.endsWith('/')) base.pathname += '/'
+  const documents = new Set<string>()
+  for (const line of input
+    .split(/\r?\n/)
+    .map((value) => value.trim())
+    .filter(Boolean)) {
+    let url: URL
+    try {
+      url = new URL(line, base)
+    } catch {
+      throw new Error('The CSAF directory index contains an invalid path.')
+    }
+    if (
+      trustedCsafURL(url.href) !== url.href ||
+      url.origin !== base.origin ||
+      !url.pathname.startsWith(base.pathname) ||
+      !url.pathname.endsWith('.json') ||
+      url.search ||
+      url.hash
+    )
+      throw new Error('The CSAF directory index contains an invalid path.')
+    documents.add(url.href)
+  }
+  return [...documents]
 }
 
 export const parseRolieFeed = (

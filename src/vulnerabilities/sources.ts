@@ -2,6 +2,8 @@ export const CISA_KEV_URL =
   'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json'
 export const CSAF_AGGREGATOR_URL =
   'https://aggregator.certvde.com/.well-known/csaf-aggregator/aggregator.json'
+export const ISIDATEN_CSAF_AGGREGATOR_URL = 'https://hub.isidaten.com/csaf-quellen.json'
+export const CSAF_AGGREGATOR_URLS = [CSAF_AGGREGATOR_URL, ISIDATEN_CSAF_AGGREGATOR_URL] as const
 export const CISA_CSAF_FEED_URLS = [
   'https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/cisa-csaf-ot-feed-tlp-white.json',
   'https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/IT/white/cisa-csaf-it-feed-tlp-white.json',
@@ -11,6 +13,7 @@ export const ICS_ADVISORY_URL =
 export const NVD_FEED_BASE_URL = 'https://nvd.nist.gov/feeds/json/cve/2.0'
 export const FIRST_NVD_YEAR = 2002
 export const MAX_CUSTOM_CSAF_FEEDS = 100
+export const MAX_CSAF_DIRECTORY_INDEX_BYTES = 16 * 1024 * 1024
 export const CSAF_FEED_TYPES = ['aggregator', 'provider-metadata', 'rolie'] as const
 export type CsafFeedType = (typeof CSAF_FEED_TYPES)[number]
 export type CustomCsafFeed = { name: string; type: CsafFeedType; url: string }
@@ -74,6 +77,6 @@ export const feedSources = [
   { value: 'cisa-kev', label: 'CISA KEV', urls: [CISA_KEV_URL] },
   { value: 'nvd', label: 'NVD', urls: [] },
   { value: 'ics-advisories', label: 'ICS Advisory Project', urls: [ICS_ADVISORY_URL] },
-  { value: 'csaf', label: 'CSAF', urls: [CSAF_AGGREGATOR_URL, ...CISA_CSAF_FEED_URLS] },
+  { value: 'csaf', label: 'CSAF', urls: [...CSAF_AGGREGATOR_URLS, ...CISA_CSAF_FEED_URLS] },
 ] as const
 export type FeedSource = (typeof feedSources)[number]['value']

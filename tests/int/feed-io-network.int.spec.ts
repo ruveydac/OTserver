@@ -61,7 +61,7 @@ describe('public vulnerability feed requests', () => {
       }) as never)
 
     await expect(
-      readFeed(await downloadFeed('https://feeds.example/catalog.json?token=private')),
+      readFeed(await downloadFeed('https://pinned-feed.example/catalog.json?token=private')),
     ).resolves.toEqual(Buffer.from('feed'))
 
     const calls = mocks.request.mock.calls as unknown as [
@@ -70,15 +70,17 @@ describe('public vulnerability feed requests', () => {
     ][]
     const options = calls[1]![0]
     expect(options).toMatchObject({
-      hostname: 'feeds.example',
+      hostname: 'pinned-feed.example',
       path: '/catalog.json?token=private',
-      servername: 'feeds.example',
+      servername: 'pinned-feed.example',
     })
     const allAddresses = vi.fn()
-    options.lookup('feeds.example', { all: true }, allAddresses)
+    options.lookup('pinned-feed.example', { all: true }, allAddresses)
+    await Promise.resolve()
     expect(allAddresses).toHaveBeenCalledWith(null, [{ address: '1.1.1.1', family: 4 }])
     const oneAddress = vi.fn()
-    options.lookup('feeds.example', {}, oneAddress)
+    options.lookup('pinned-feed.example', {}, oneAddress)
+    await Promise.resolve()
     expect(oneAddress).toHaveBeenCalledWith(null, '1.1.1.1', 4)
   })
 
@@ -89,29 +91,58 @@ describe('public vulnerability feed requests', () => {
       return request
     }) as never)
 
-    await expect(downloadFeed('https://feeds.example/catalog.json')).rejects.toThrow(
+    await expect(downloadFeed('https://failed-feed.example/catalog.json')).rejects.toThrow(
       'connect failed',
     )
   })
 
+  it('prefers IPv4 addresses before IPv6 addresses', async () => {
+    mocks.lookup.mockResolvedValue([
+      { address: '2606:4700:4700::1111', family: 6 },
+      { address: '8.8.8.8', family: 4 },
+    ])
+    mocks.request.mockImplementationOnce(((
+      _options: unknown,
+      callback: (value: unknown) => void,
+    ) => {
+      const request = new EventEmitter() as EventEmitter & { end: () => void }
+      request.end = () => queueMicrotask(() => callback(response(200, {}, 'feed')))
+      return request
+    }) as never)
+
+    await expect(
+      readFeed(await downloadFeed('https://dual-stack-feed.example/catalog.json')),
+    ).resolves.toEqual(Buffer.from('feed'))
+
+    const options = (
+      mocks.request.mock.calls as unknown as [{ lookup: LookupFunction }, unknown][]
+    )[0]![0]
+    const allAddresses = vi.fn()
+    options.lookup('dual-stack-feed.example', { all: true }, allAddresses)
+    await Promise.resolve()
+    expect(allAddresses).toHaveBeenCalledWith(null, [{ address: '8.8.8.8', family: 4 }])
+  })
+
   it('follows safe redirects and rejects malformed or excessive redirects', async () => {
     respondWith(response(302, { location: '/final.json' }), response(200, {}, 'redirected'))
-    await expect(readFeed(await downloadFeed('https://feeds.example/start.json'))).resolves.toEqual(
-      Buffer.from('redirected'),
-    )
+    await expect(
+      readFeed(await downloadFeed('https://redirect-feed.example/start.json')),
+    ).resolves.toEqual(Buffer.from('redirected'))
 
     respondWith(response(302))
-    await expect(downloadFeed('https://feeds.example/missing-location')).rejects.toThrow(
+    await expect(downloadFeed('https://missing-location.example/feed')).rejects.toThrow(
       'no destination',
     )
 
-    respondWith(response(302, { location: 'https://user:secret@feeds.example/private' }))
-    await expect(downloadFeed('https://feeds.example/credentials')).rejects.toThrow(
+    respondWith(response(302, { location: 'https://user:secret@redirect-target.example/private' }))
+    await expect(downloadFeed('https://credentials-redirect.example/feed')).rejects.toThrow(
       'credentials or a fragment',
     )
 
     respondWith(...Array.from({ length: 6 }, () => response(302, { location: '/loop' })))
-    await expect(downloadFeed('https://feeds.example/loop')).rejects.toThrow('redirect limit')
+    await expect(downloadFeed('https://redirect-loop.example/feed')).rejects.toThrow(
+      'redirect limit',
+    )
   })
 
   it('checks mapped IPv4 addresses while classifying public IPv4 and IPv6 ranges', () => {

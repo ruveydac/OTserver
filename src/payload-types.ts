@@ -1455,12 +1455,13 @@ export interface DeviceCatalog {
 export interface VulnerabilityFeed {
   id: string;
   source: string;
-  status: 'idle' | 'queued' | 'running' | 'ready' | 'partial' | 'failed';
+  status: 'idle' | 'queued' | 'running' | 'ready' | 'partial' | 'failed' | 'cancelled';
   lastSyncedAt?: string | null;
   documentCount?: number | null;
   catalogVersion?: string | null;
   dateReleased?: string | null;
   error?: string | null;
+  progress?: string | null;
   state?:
     | {
         [k: string]: unknown;
@@ -2477,6 +2478,7 @@ export interface VulnerabilityFeedsSelect<T extends boolean = true> {
   catalogVersion?: T;
   dateReleased?: T;
   error?: T;
+  progress?: T;
   state?: T;
   jobID?: T;
   lastImportMethod?: T;
@@ -2571,7 +2573,7 @@ export interface ApplicationSetting {
      */
     pullIntervalDays?: number | null;
     /**
-     * Add public HTTPS CSAF aggregators, provider metadata, or ROLIE feeds. Referenced feeds and advisories are discovered automatically.
+     * Add public HTTPS CSAF aggregators, provider metadata, or ROLIE feeds. Directory indexes and referenced advisories are discovered automatically.
      */
     customCsafFeeds?:
       | {

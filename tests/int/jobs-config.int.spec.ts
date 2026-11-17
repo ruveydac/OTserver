@@ -140,12 +140,15 @@ describe('Payload job configuration', () => {
       JobCancelledError,
     )
     expect(await run(args)).toEqual({ output: {} })
-    expect(mocks.feeds).toHaveBeenCalledWith(req.payload, args.input)
+    expect(mocks.feeds).toHaveBeenCalledWith(req.payload, args.input, 'feed-job')
     const transient = Object.assign(new Error('Connection reset'), { code: 'ECONNRESET' })
     mocks.feeds.mockRejectedValueOnce(transient)
     await expect(run(args)).rejects.toBe(transient)
     mocks.feeds.mockRejectedValueOnce(Object.assign(new Error('Invalid feed'), { status: 400 }))
     await expect(run(args)).rejects.toBeInstanceOf(JobCancelledError)
+    const cancelled = new JobCancelledError('Stopped by the administrator.')
+    mocks.feeds.mockRejectedValueOnce(cancelled)
+    await expect(run(args)).rejects.toBe(cancelled)
   })
 
   it('runs automatic feed sync only on the maintenance worker', async () => {
@@ -157,7 +160,7 @@ describe('Payload job configuration', () => {
     mocks.worker = { queue: 'maintenance' }
     await expect(run({ ...args, input: { version: 2 } })).rejects.toBeInstanceOf(JobCancelledError)
     expect(await run(args)).toEqual({ output: {} })
-    expect(mocks.scheduledFeedSync).toHaveBeenCalledWith(req.payload)
+    expect(mocks.scheduledFeedSync).toHaveBeenCalledWith(req.payload, 'auto-feed-job')
 
     mocks.scheduledFeedSync.mockRejectedValueOnce(
       Object.assign(new Error('Connection reset'), { code: 'ECONNRESET' }),
@@ -167,6 +170,9 @@ describe('Payload job configuration', () => {
       Object.assign(new Error('Invalid settings'), { status: 400 }),
     )
     await expect(run(args)).rejects.toBeInstanceOf(JobCancelledError)
+    const cancelled = new JobCancelledError('Stopped by the administrator.')
+    mocks.scheduledFeedSync.mockRejectedValueOnce(cancelled)
+    await expect(run(args)).rejects.toBe(cancelled)
   })
   it('keeps raw queue operations private without adding disabled hooks', async () => {
     expect(await jobs.access!.run!({} as never)).toBe(false)
