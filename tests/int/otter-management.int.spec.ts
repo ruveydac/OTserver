@@ -1012,7 +1012,12 @@ describe('Otter management controller', () => {
           name: 'Line A',
           site: site.id,
           scanner: scannerID,
-          configuration: { targets: ['192.0.2.10'], interface: 'eth0', noSnmp: false },
+          configuration: {
+            targets: ['192.0.2.10'],
+            interface: 'eth0',
+            noSnmp: false,
+            noCdp: false,
+          },
           assetOverrides: { assetOwner: 'Central owner' },
           customFieldOverrides: { [customField.id]: 7 },
         },
@@ -1137,6 +1142,7 @@ describe('Otter management controller', () => {
         interface: 'eth0',
         noSnmp: false,
       })
+      expect(snapshot.configSnapshot).not.toHaveProperty('noCdp')
       expect(snapshot.importOverridesSnapshot).toMatchObject({
         assetOverrides: { assetOwner: 'Central owner' },
       })
@@ -1144,6 +1150,34 @@ describe('Otter management controller', () => {
         snmp: [{ version: '2c', community: 'public' }],
       })
       await payload.delete({ collection: 'otter-runs', id: defaultRunID })
+      await payload.update({
+        collection: 'otter-profiles',
+        id: profile.id,
+        data: {
+          configuration: {
+            targets: ['192.0.2.10'],
+            interface: 'eth0',
+            noSnmp: false,
+            noCdp: true,
+          },
+        },
+        overrideAccess: false,
+        user,
+      })
+      const cdpRun = await runOtterNow(
+        await request('/otter/v1/runs', {
+          body: { scannerID, profileID: profile.id },
+          token: `JWT ${login.token}`,
+        }),
+      )
+      const cdpRunID = ((await cdpRun.json()) as { id: string }).id
+      const cdpSnapshot = await payload.findByID({
+        collection: 'otter-runs',
+        id: cdpRunID,
+        depth: 0,
+      })
+      expect(cdpSnapshot.configSnapshot).toHaveProperty('noCdp', true)
+      await payload.delete({ collection: 'otter-runs', id: cdpRunID })
       await expect(
         runOtterNow(
           await request('/otter/v1/runs', {

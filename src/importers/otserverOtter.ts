@@ -20,6 +20,7 @@ const sources: Record<string, DataQuality> = {
   arp: 'medium',
   bacnet: 'medium',
   'beckhoff-ads': 'high',
+  cdp: 'medium',
   dnp3: 'medium',
   'ethernet-ip': 'high',
   http: 'low',
@@ -512,7 +513,9 @@ export const parseOTserverOtter = (input: string): ImportResult => {
       observedAt: link.observedAt,
       raw: link.raw,
       remote,
-      source: ['lldp', 'profinet-dcp', 'snmp'].includes(link.source) ? link.source : 'unknown',
+      source: ['cdp', 'lldp', 'profinet-dcp', 'snmp'].includes(link.source)
+        ? link.source
+        : 'unknown',
     }
   })
 

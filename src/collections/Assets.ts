@@ -404,6 +404,7 @@ export const Assets: CollectionConfig = {
       options: [
         { label: 'BACnet', value: 'bacnet' },
         { label: 'Beckhoff ADS', value: 'beckhoff-ads' },
+        { label: 'CDP', value: 'cdp' },
         { label: 'DNP3', value: 'dnp3' },
         { label: 'EtherNet/IP', value: 'ethernet-ip' },
         { label: 'HTTP', value: 'http' },

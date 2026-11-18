@@ -537,6 +537,7 @@ export interface Asset {
     | (
         | 'bacnet'
         | 'beckhoff-ads'
+        | 'cdp'
         | 'dnp3'
         | 'ethernet-ip'
         | 'http'
@@ -946,11 +947,15 @@ export interface OtterProfile {
      */
     sourceMac?: string | null;
     /**
-     * Disables S7, EtherNet/IP, BACnet, FINS, Fox, DNP3, IEC 61850, NetBIOS, SMB, RPC, and OPC UA. ARP, PROFINET, SNMP, and LLDP are controlled separately.
+     * Disables S7, EtherNet/IP, BACnet, FINS, Fox, DNP3, IEC 61850, NetBIOS, SMB, RPC, and OPC UA. ARP, PROFINET, SNMP, LLDP, and CDP are controlled separately.
      */
     noProtocols?: boolean | null;
     noArp?: boolean | null;
     noProfinet?: boolean | null;
+    /**
+     * Skips EPM discovery and PNIO record reads while keeping DCP enabled.
+     */
+    disablePnEpm?: boolean | null;
     allowDcpSource?: boolean | null;
     noS7?: boolean | null;
     noEnip?: boolean | null;
@@ -967,6 +972,7 @@ export interface OtterProfile {
     noOpcua?: boolean | null;
     noSnmp?: boolean | null;
     noLldp?: boolean | null;
+    noCdp?: boolean | null;
     /**
      * Optional six-octet AMS NetID. Leave empty to derive it from the selected adapter.
      */
@@ -2158,6 +2164,7 @@ export interface OtterProfilesSelect<T extends boolean = true> {
         noProtocols?: T;
         noArp?: T;
         noProfinet?: T;
+        disablePnEpm?: T;
         allowDcpSource?: T;
         noS7?: T;
         noEnip?: T;
@@ -2174,6 +2181,7 @@ export interface OtterProfilesSelect<T extends boolean = true> {
         noOpcua?: T;
         noSnmp?: T;
         noLldp?: T;
+        noCdp?: T;
         adsSourceNetId?: T;
         adsTargetNetIds?: T;
         adsPorts?: T;
