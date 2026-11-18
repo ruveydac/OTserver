@@ -612,6 +612,15 @@ export const OtterProfiles: CollectionConfig = {
               label: 'Disable PROFINET discovery',
             },
             {
+              name: 'disablePnEpm',
+              type: 'checkbox',
+              defaultValue: false,
+              label: 'Disable PROFINET PNIO record reads',
+              admin: {
+                description: 'Skips EPM discovery and PNIO record reads while keeping DCP enabled.',
+              },
+            },
+            {
               name: 'allowDcpSource',
               type: 'checkbox',
               defaultValue: false,

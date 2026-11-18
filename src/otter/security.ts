@@ -114,6 +114,7 @@ const configKeys = new Set([
   'noProtocols',
   'noArp',
   'noProfinet',
+  'disablePnEpm',
   'allowDcpSource',
   'noS7',
   'noEnip',
@@ -193,7 +194,7 @@ export const validateOtterConfiguration = (input: unknown) => {
     throw new APIError('The source MAC address is invalid.', 400)
 
   for (const [key, value] of Object.entries(config)) {
-    if (key.startsWith('no') || key === 'allowDcpSource') {
+    if (key.startsWith('no') || key === 'disablePnEpm' || key === 'allowDcpSource') {
       if (typeof value !== 'boolean') throw new APIError(`${key} must be a boolean.`, 400)
     }
   }

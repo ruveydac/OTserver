@@ -134,6 +134,7 @@ describe.skipIf(!process.env.OTTER_CLIENT_BIN)('Rust controller interoperability
               noProfinet: true,
               noSnmp: true,
               noLldp: true,
+              noCdp: true,
             },
           },
         })

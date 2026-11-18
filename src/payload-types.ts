@@ -952,6 +952,10 @@ export interface OtterProfile {
     noProtocols?: boolean | null;
     noArp?: boolean | null;
     noProfinet?: boolean | null;
+    /**
+     * Skips EPM discovery and PNIO record reads while keeping DCP enabled.
+     */
+    disablePnEpm?: boolean | null;
     allowDcpSource?: boolean | null;
     noS7?: boolean | null;
     noEnip?: boolean | null;
@@ -2160,6 +2164,7 @@ export interface OtterProfilesSelect<T extends boolean = true> {
         noProtocols?: T;
         noArp?: T;
         noProfinet?: T;
+        disablePnEpm?: T;
         allowDcpSource?: T;
         noS7?: T;
         noEnip?: T;

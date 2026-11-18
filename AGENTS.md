@@ -532,6 +532,12 @@ Explicit arguments on the application command can still give that process a diff
 
 ### Test checks
 
+Before completing a change in OpenCode, run the `repo-review` subagent after the final edits.
+Use `release` scope for tag or publishing changes or when checking the full CI/CD pipeline.
+Do not report the change as passing if the reviewer finds an unmet requirement or cannot verify
+an applicable check. Return its remaining tasks instead. Local results do not prove that hosted
+CI or publishing passed.
+
 Test commands own a disposable MongoDB 8 replica set and a unique upload directory. Use Docker or
 Podman; direct Vitest invocations stop before loading Payload unless an owning test harness supplies
 `OTSERVER_TEST_DATABASE_OWNER`, `TEST_DATABASE_URL`, and `OTSERVER_TEST_UPLOAD_DIR`.
