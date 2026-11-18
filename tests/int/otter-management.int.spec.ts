@@ -1150,6 +1150,34 @@ describe('Otter management controller', () => {
         snmp: [{ version: '2c', community: 'public' }],
       })
       await payload.delete({ collection: 'otter-runs', id: defaultRunID })
+      await payload.update({
+        collection: 'otter-profiles',
+        id: profile.id,
+        data: {
+          configuration: {
+            targets: ['192.0.2.10'],
+            interface: 'eth0',
+            noSnmp: false,
+            noCdp: true,
+          },
+        },
+        overrideAccess: false,
+        user,
+      })
+      const cdpRun = await runOtterNow(
+        await request('/otter/v1/runs', {
+          body: { scannerID, profileID: profile.id },
+          token: `JWT ${login.token}`,
+        }),
+      )
+      const cdpRunID = ((await cdpRun.json()) as { id: string }).id
+      const cdpSnapshot = await payload.findByID({
+        collection: 'otter-runs',
+        id: cdpRunID,
+        depth: 0,
+      })
+      expect(cdpSnapshot.configSnapshot).toHaveProperty('noCdp', true)
+      await payload.delete({ collection: 'otter-runs', id: cdpRunID })
       await expect(
         runOtterNow(
           await request('/otter/v1/runs', {

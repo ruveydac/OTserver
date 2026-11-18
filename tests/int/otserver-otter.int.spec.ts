@@ -413,6 +413,13 @@ describe('OTserver Otter importer', () => {
     ])
   })
 
+  it('keeps unsupported topology link sources as unknown', () => {
+    const file = mutableExport(randomMAC(), randomMAC())
+    file.links[0].source = 'unsupported'
+
+    expect(parseOTserverOtter(JSON.stringify(file)).links).toMatchObject([{ source: 'unknown' }])
+  })
+
   it('imports v0.6 raw inventory details and every observation field', () => {
     const localMAC = randomMAC()
     const alternateMAC = randomMAC()

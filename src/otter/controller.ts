@@ -309,7 +309,7 @@ const runInput = async (
   if (String(relationshipID(profile.site)) !== siteID)
     throw new APIError('The profile and scanner must belong to the same site.', 400)
   await assertSiteAllowsImports(siteID, req)
-  const configSnapshot = { ...configuration, name: profile.name }
+  const configSnapshot: Record<string, unknown> = { ...configuration, name: profile.name }
   if (configSnapshot.noCdp === false) delete configSnapshot.noCdp
   return {
     configSnapshot,
