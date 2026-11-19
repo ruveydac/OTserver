@@ -549,10 +549,12 @@ pnpm test
 MongoDB operations sharing a request transaction must run serially. `withAudit` establishes the
 transaction before Payload 3.87's parallel relationship validation can race its first command.
 
-The **Controller and production image** check runs on pull requests and release tags. It tests the
-exact pinned Otter revision with `./otserver-otter/lab/test-controller.sh` and builds and smoke-tests
-the production image with `pnpm test:container`. Only release tags can publish the image, and only
-after verification passes.
+Require **Application** and **Controller and production image** on `main` (see
+`.github/rulesets/required-ci.json`). PRs, main, and release tags run the full covered management
+suite once with `OTTER_MANAGEMENT_COVERAGE=1 ./otserver-otter/lab/test-controller.sh`, including
+the real client and the no-skips assertion. In parallel, smoke-test the exact production OCI image.
+Only stable `vX.Y.Z` tags on main's history can promote that verified digest to GHCR. Release
+inputs, compatibility baselines, and ruleset rollout are described in `docs/ci-release.md`.
 
 Run `pnpm test:container` after changing the Dockerfile or startup/bootstrap behavior. It detects
 Docker or Podman, builds the production image, starts an isolated MongoDB replica set, verifies the

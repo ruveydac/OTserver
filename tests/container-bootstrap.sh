@@ -32,7 +32,7 @@ APP="$PREFIX-app"
 IMPORT_WORKER="$PREFIX-import-worker"
 MAINTENANCE_WORKER="$PREFIX-maintenance-worker"
 RESTORED_APP="$PREFIX-restored-app"
-IMAGE="$PREFIX"
+IMAGE="${OTSERVER_TEST_IMAGE:-$PREFIX}"
 MONGO="$PREFIX-mongo"
 NETWORK="$PREFIX"
 UPLOADS="$PREFIX-import-files"
@@ -50,14 +50,20 @@ cleanup() {
   "$RUNTIME" rm --force "$APP" "$IMPORT_WORKER" "$MAINTENANCE_WORKER" "$RESTORED_APP" "$MONGO" >/dev/null 2>&1 || true
   "$RUNTIME" volume rm "$UPLOADS" >/dev/null 2>&1 || true
   "$RUNTIME" network rm "$NETWORK" >/dev/null 2>&1 || true
-  "$RUNTIME" image rm "$IMAGE" >/dev/null 2>&1 || true
+  if [ -z "${OTSERVER_TEST_IMAGE:-}" ]; then
+    "$RUNTIME" image rm "$IMAGE" >/dev/null 2>&1 || true
+  fi
   exit "$status"
 }
 trap cleanup EXIT
 trap 'exit 1' INT TERM
 
-echo "Building the production image with $RUNTIME..."
-"$RUNTIME" build --tag "$IMAGE" "$ROOT"
+if [ -z "${OTSERVER_TEST_IMAGE:-}" ]; then
+  echo "Building the production image with $RUNTIME..."
+  "$RUNTIME" build --tag "$IMAGE" "$ROOT"
+else
+  "$RUNTIME" image inspect "$IMAGE" >/dev/null
+fi
 "$RUNTIME" run --rm "$IMAGE" node -e \
   'const assert = require("node:assert/strict"); assert.equal(process.env.NODE_OPTIONS, "--max-old-space-size=2048"); assert.ok(require("node:v8").getHeapStatistics().heap_size_limit >= 2048 * 1024 ** 2)'
 "$RUNTIME" run --rm --env NODE_OPTIONS=--max-old-space-size=768 "$IMAGE" node -e \

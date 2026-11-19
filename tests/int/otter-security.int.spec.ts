@@ -142,10 +142,8 @@ describe.each(['development', 'production'])('Otter browser requests in %s', (en
 
 describe('Otter security and scheduling boundaries', () => {
   it('covers every local Otter configuration option with managed fields or encrypted credentials', async () => {
-    const source = await readFile('otserver-otter/src/main.rs', 'utf8')
-    const config = source.match(/pub struct ScannerConfig \{([\s\S]*?)\n\}/)![1]!
-    const options = [...config.matchAll(/pub (\w+):/g)].map(([, name]) =>
-      name!.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase()),
+    const options: string[] = JSON.parse(
+      await readFile('otserver-otter/contracts/scanner-config-fields.json', 'utf8'),
     )
     const fieldNames = (fields: Field[]): string[] =>
       fields.flatMap((field) => [

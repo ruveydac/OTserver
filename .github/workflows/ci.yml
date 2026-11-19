@@ -4,9 +4,14 @@ on:
   pull_request:
   push:
     branches: [main]
+    tags: ['v*']
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   application:
@@ -18,7 +23,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          submodules: recursive
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify stable release tag on main
+        if: github.ref_type == 'tag'
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          git merge-base --is-ancestor HEAD origin/main
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
@@ -28,19 +39,161 @@ jobs:
       - run: pnpm check:generated
       - run: pnpm exec prettier --check .
       - run: pnpm lint
-      - run: pnpm test:safety && bash tests/run-vitest.sh --coverage --reporter=junit --outputFile=test-report.junit.xml
+      - run: pnpm build
+      - name: Check whitespace in the proposed change
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [[ -n "$BASE_SHA" ]]; then git diff --check "$BASE_SHA"...HEAD
+          else git show --check --oneline HEAD; fi
+
+  controller:
+    name: Controller and application coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev openssl
+      - run: pnpm install --frozen-lockfile
+      - run: ./otserver-otter/lab/test-controller.sh
+        env:
+          OTTER_MANAGEMENT_COVERAGE: '1'
+      - name: Verify coverage was produced
+        run: test -s coverage/lcov.info
+      - name: Upload controller reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: controller-${{ github.run_id }}-${{ github.run_attempt }}
+          path: otserver-otter/lab/artifacts/controller.*/
+          retention-days: 7
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v7
         with:
           files: ./coverage/lcov.info
           disable_search: true
           token: ${{ secrets.CODECOV_TOKEN }}
+      - name: Locate the test report
+        id: junit
+        if: ${{ !cancelled() && hashFiles('otserver-otter/lab/artifacts/controller.*/management.junit.xml') != '' }}
+        run: |
+          reports=(otserver-otter/lab/artifacts/controller.*/management.junit.xml)
+          echo "path=${reports[0]}" >> "$GITHUB_OUTPUT"
       - name: Upload test results to Codecov
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.junit.outputs.path != '' }}
         uses: codecov/test-results-action@v1
         with:
-          files: ./test-report.junit.xml
+          files: ${{ steps.junit.outputs.path }}
           disable_search: true
           token: ${{ secrets.CODECOV_TOKEN }}
-      - run: pnpm build
-      - run: git diff --check
+
+  image:
+    name: Production image smoke test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      registry:
+        image: registry:2
+        ports: ['127.0.0.1:5000:5000']
+    outputs:
+      digest: ${{ steps.smoke.outputs.digest }}
+      artifact: ${{ steps.archive.outputs.artifact-id }}
+      otter: ${{ steps.smoke.outputs.otter }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          provenance: mode=min
+          outputs: type=oci,dest=${{ runner.temp }}/image.tar
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke-test the archived manifest
+        id: smoke
+        run: |
+          archive="oci-archive:$RUNNER_TEMP/image.tar"
+          repo=127.0.0.1:5000/otserver
+          skopeo copy --all --preserve-digests --dest-tls-verify=false --digestfile "$RUNNER_TEMP/digest" "$archive" "docker://$repo:candidate"
+          digest=$(cat "$RUNNER_TEMP/digest")
+          docker pull "$repo@$digest"
+          OTSERVER_TEST_IMAGE="$repo@$digest" sh tests/container-bootstrap.sh
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "otter=$(git rev-parse HEAD:otserver-otter)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        id: archive
+        if: github.ref_type == 'tag'
+        with:
+          name: verified-image-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/image.tar
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+
+  verify:
+    name: Controller and production image
+    needs: [controller, image]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "$CONTROLLER" = success && test "$IMAGE" = success
+        env:
+          CONTROLLER: ${{ needs.controller.result }}
+          IMAGE: ${{ needs.image.result }}
+
+  publish:
+    name: Publish verified image
+    needs: [application, verify, image]
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: publish-stable-image
+      queue: max
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          artifact-ids: ${{ needs.image.outputs.artifact }}
+          merge-multiple: true
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Promote the smoke-tested digest
+        env:
+          DIGEST: ${{ needs.image.outputs.digest }}
+          OTTER_SHA: ${{ needs.image.outputs.otter }}
+        run: |
+          set -euo pipefail
+          repo="docker://ghcr.io/${GITHUB_REPOSITORY,,}"
+          version=${GITHUB_REF_NAME#v}
+          minor=${version%.*}
+          test "sha256:$(skopeo inspect --raw oci-archive:image.tar | sha256sum | cut -d' ' -f1)" = "$DIGEST"
+          skopeo copy --all --preserve-digests oci-archive:image.tar "$repo:$version"
+          tags=$(skopeo list-tags "$repo" | jq -r '.Tags[] | select(test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"))' | sort -V)
+          if [[ "$version" == "$(awk -F. -v m="$minor" '$1"."$2==m' <<< "$tags" | tail -1)" ]]; then
+            skopeo copy --all --preserve-digests "$repo@$DIGEST" "$repo:$minor"
+          fi
+          if [[ "$version" == "$(tail -1 <<< "$tags")" ]]; then
+            skopeo copy --all --preserve-digests "$repo@$DIGEST" "$repo:latest"
+          fi
+          echo "Published $version at $DIGEST (management $GITHUB_SHA, Otter $OTTER_SHA)" >> "$GITHUB_STEP_SUMMARY"
