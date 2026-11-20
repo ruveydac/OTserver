@@ -3,11 +3,17 @@ import type { PayloadRequest } from 'payload'
 import type { Asset, AssetIdentifier, NetworkEndpoint } from '../payload-types'
 import type { ImportedAsset } from '../importers/types'
 import { hardwareKey, scopedKey, text, endpointBindingKey } from './keys'
+import { normalizeMAC, validateMACAddress } from '../domain/network'
 import { idOf, requireWritableAsset } from './access'
 import { writeAudit } from '../collections/AuditLogs'
 import { mergeAssetData, type DataQuality } from '../importers/assetQuality'
 import { importSources } from '../importers/sources'
 import { removeOrphanedBindings } from './deletion'
+
+const record = (value: unknown): Record<string, unknown> =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
 
 export const openIdentityCase = async (
   input: {
@@ -587,6 +593,187 @@ export const suggestAdjacentInterfaces = async (asset: Asset, mac: string, req: 
       },
       req,
     )
+  }
+}
+
+export const suggestSharedLldpChassis = async (
+  imported: ImportedAsset[],
+  site: string,
+  req: PayloadRequest,
+) => {
+  const chassisIDs = new Set(
+    imported.flatMap((asset) =>
+      (asset.observations || []).flatMap((observation) => {
+        const chassis = text(record(record(observation.raw).chassisId).hex)
+        return observation.source === 'lldp' &&
+          /^[\da-f]{2,510}$/i.test(chassis) &&
+          chassis.length % 2 === 0
+          ? [chassis.toUpperCase()]
+          : []
+      }),
+    ),
+  )
+  if (!chassisIDs.size) return
+
+  // shortcut: scan the latest 10,000 site LLDP observations; paginate if a site can exceed that.
+  const observations = await req.payload.find({
+    collection: 'asset-observations',
+    depth: 0,
+    limit: 10000,
+    overrideAccess: false,
+    req,
+    sort: '-observedAt',
+    select: { asset: true, fields: true, raw: true },
+    where: {
+      and: [
+        { site: { equals: site } },
+        { source: { equals: 'lldp' } },
+        { 'raw.chassisId.hex': { exists: true } },
+      ],
+    },
+  })
+  const lldp = observations.docs.flatMap((observation) => {
+    const raw = record(observation.raw)
+    const chassis = record(raw.chassisId)
+    const hex = text(chassis.hex).toUpperCase()
+    const subtype = Number(chassis.subtype)
+    const subjectMAC = text(record(raw.subject).macAddress)
+    const fieldMAC = text(record(observation.fields).macAddress)
+    const macAddress = subjectMAC || fieldMAC
+    const assetID = idOf(observation.asset)
+    if (
+      !assetID ||
+      !chassisIDs.has(hex) ||
+      !Number.isInteger(subtype) ||
+      subtype < 1 ||
+      subtype > 7 ||
+      !macAddress ||
+      validateMACAddress(macAddress) !== true ||
+      (subjectMAC && fieldMAC && normalizeMAC(subjectMAC) !== normalizeMAC(fieldMAC))
+    )
+      return []
+    const port = record(raw.portId)
+    return [
+      {
+        assetID,
+        chassisID: hex,
+        chassisSubtype: subtype,
+        macAddress: normalizeMAC(macAddress),
+        portID: text(port.text || port.hex).slice(0, 256),
+      },
+    ]
+  })
+  const assetIDs = [...new Set(lldp.map(({ assetID }) => assetID))]
+  if (!assetIDs.length) return
+  const activeAssets = await req.payload.find({
+    collection: 'assets',
+    depth: 0,
+    limit: 2000,
+    overrideAccess: false,
+    req,
+    where: {
+      and: [
+        { id: { in: assetIDs } },
+        { site: { equals: site } },
+        { lifecycle: { not_in: ['merged', 'retired', 'replaced'] } },
+      ],
+    },
+  })
+  const activeIDs = new Set(activeAssets.docs.map(({ id }) => String(id)))
+  const candidates = lldp.filter(({ assetID }) => activeIDs.has(assetID))
+  const cdpObservations = await req.payload.find({
+    collection: 'asset-observations',
+    depth: 0,
+    limit: 10000,
+    overrideAccess: false,
+    req,
+    select: { asset: true, fields: true, raw: true },
+    where: {
+      and: [
+        { site: { equals: site } },
+        { source: { equals: 'cdp' } },
+        { asset: { in: [...activeIDs] } },
+      ],
+    },
+  })
+  const cdpByAssetMAC = new Map<string, { deviceID: string; portID: string }[]>()
+  for (const observation of cdpObservations.docs) {
+    const raw = record(observation.raw)
+    const subjectMAC = text(record(raw.subject).macAddress)
+    const fieldMAC = text(record(observation.fields).macAddress)
+    const macAddress = subjectMAC || fieldMAC
+    const deviceID = text(raw.deviceId).slice(0, 256)
+    if (
+      !macAddress ||
+      validateMACAddress(macAddress) !== true ||
+      (subjectMAC && fieldMAC && normalizeMAC(subjectMAC) !== normalizeMAC(fieldMAC)) ||
+      !deviceID
+    )
+      continue
+    const key = JSON.stringify([idOf(observation.asset), normalizeMAC(macAddress)])
+    const values = cdpByAssetMAC.get(key) || []
+    values.push({ deviceID, portID: text(raw.portId).slice(0, 256) })
+    cdpByAssetMAC.set(key, values)
+  }
+
+  const byChassis = new Map<
+    string,
+    Map<string, Map<string, { lldpPortIDs: Set<string>; cdp: Map<string, string> }>>
+  >()
+  for (const item of candidates) {
+    const chassisKey = JSON.stringify([item.chassisSubtype, item.chassisID])
+    const devices = byChassis.get(chassisKey) || new Map()
+    const interfaces = devices.get(item.assetID) || new Map()
+    const key = item.macAddress
+    const networkInterface = interfaces.get(key) || {
+      lldpPortIDs: new Set<string>(),
+      cdp: new Map<string, string>(),
+    }
+    if (item.portID) networkInterface.lldpPortIDs.add(item.portID)
+    for (const cdp of cdpByAssetMAC.get(JSON.stringify([item.assetID, item.macAddress])) || [])
+      networkInterface.cdp.set(cdp.deviceID, cdp.portID)
+    interfaces.set(key, networkInterface)
+    devices.set(item.assetID, interfaces)
+    byChassis.set(chassisKey, devices)
+  }
+
+  for (const [chassisKey, devices] of byChassis) {
+    const entries = [...devices.entries()].sort(([left], [right]) => left.localeCompare(right))
+    if (entries.length < 2) continue
+    const [chassisSubtype, chassisID] = JSON.parse(chassisKey) as [number, string]
+    const [first, ...others] = entries
+    for (const other of others) {
+      const detail = ([assetID, interfaces]: typeof first) => ({
+        assetID,
+        interfaces: [...interfaces.entries()]
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([macAddress, evidence]) => ({
+            macAddress,
+            lldpPortIDs: [...evidence.lldpPortIDs].sort().slice(0, 16),
+            cdp: [...evidence.cdp.entries()]
+              .sort(([left], [right]) => left.localeCompare(right))
+              .slice(0, 16)
+              .map(([deviceID, portID]) => ({ deviceID, portID })),
+          })),
+      })
+      await openIdentityCase(
+        {
+          site,
+          asset: first[0],
+          candidate: other[0],
+          kind: 'possible-duplicate',
+          confidence: 1,
+          reason:
+            'The same LLDP chassis ID was advertised by different MAC addresses. Review the reported ports and CDP device IDs; this evidence does not merge the assets.',
+          evidence: {
+            protocol: 'lldp',
+            chassisID: { subtype: chassisSubtype, hex: chassisID },
+            devices: [detail(first), detail(other)],
+          },
+        },
+        req,
+      )
+    }
   }
 }
 

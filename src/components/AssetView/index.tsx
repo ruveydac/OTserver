@@ -31,6 +31,7 @@ type VulnerabilitySeverity = (typeof vulnerabilitySeverities)[number]
 const tabs = [
   { id: 'overview', label: 'Overview' },
   { id: 'network', label: 'Network' },
+  { id: 'ports', label: 'Ports and interfaces' },
   { id: 'hardware', label: 'Hardware' },
   { id: 'connected', label: 'Connected information' },
   { id: 'security', label: 'Security' },
@@ -39,6 +40,15 @@ const tabs = [
 ] as const
 
 type Tab = (typeof tabs)[number]['id']
+
+type ObservedNetworkRecord = {
+  observedAt: string
+  source: string
+  value: Record<string, unknown>
+}
+
+type NetworkObservation = Pick<AssetObservation, 'observedAt' | 'source'> &
+  Partial<Pick<AssetObservation, 'interfaces' | 'ports' | 'raw'>>
 
 type Detail = {
   key?: string
@@ -53,6 +63,58 @@ const record = (value: unknown): Record<string, unknown> =>
     : {}
 
 const array = (value: unknown): unknown[] => (Array.isArray(value) ? value : [])
+const text = (value: unknown): string => (typeof value === 'string' ? value : '')
+
+const latestNetworkRecords = (
+  observations: NetworkObservation[],
+  field: 'interfaces' | 'ports',
+): ObservedNetworkRecord[] => {
+  const latest = new Map<string, ObservedNetworkRecord>()
+  for (const observation of observations) {
+    for (const entry of array(observation[field])) {
+      const value = record(entry)
+      const source = text(value.source) || observation.source
+      const key = text(value.key) || text(value.interfaceKey) || text(value.portId)
+      if (!key) continue
+      const id = `${source}:${key}`
+      const current = latest.get(id)
+      if (!current || Date.parse(observation.observedAt) > Date.parse(current.observedAt))
+        latest.set(id, { observedAt: observation.observedAt, source, value })
+    }
+  }
+  return [...latest.values()]
+}
+
+const latestProfinetPorts = (observations: NetworkObservation[]): ObservedNetworkRecord[] => {
+  const latest = new Map<string, ObservedNetworkRecord>()
+  for (const observation of observations) {
+    for (const entry of array(record(observation.raw).physicalEntities)) {
+      const value = record(entry)
+      const key = text(value.ref)
+      if (value.class !== 'port' || !key) continue
+      const current = latest.get(key)
+      if (!current || Date.parse(observation.observedAt) > Date.parse(current.observedAt))
+        latest.set(key, { observedAt: observation.observedAt, source: observation.source, value })
+    }
+  }
+  return [...latest.values()]
+}
+
+const PortDetails = ({ details }: { details: [string, ReactNode][] }) => {
+  const visible = details.filter(
+    ([, value]) => value !== undefined && value !== null && value !== '',
+  )
+  return (
+    <dl className="asset-view__port-details">
+      {visible.map(([label, value]) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd>{value}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
 
 const firstParam = (value: unknown): string | undefined => {
   const item = Array.isArray(value) ? value[0] : value
@@ -131,11 +193,15 @@ const copyValue = (value?: null | string) =>
   ) : undefined
 
 const Section = ({
+  cardDetails,
   details,
+  emptyText,
   title,
   wide,
 }: {
+  cardDetails?: boolean
   details: Detail[]
+  emptyText?: string
   title: string
   wide?: boolean
 }) => (
@@ -145,22 +211,28 @@ const Section = ({
     <div className="asset-view__section-heading">
       <h2>{title}</h2>
       <span>
-        {details.length} item{details.length === 1 ? '' : 's'}
+        {details.length
+          ? `${details.length} item${details.length === 1 ? '' : 's'}`
+          : emptyText
+            ? 'No items'
+            : '0 items'}
       </span>
     </div>
-    <dl className="asset-view__details">
-      {details.map(({ key, label, value, wide: wideDetail }, index) => (
-        <div
-          className={
-            wideDetail ? 'asset-view__detail asset-view__detail--wide' : 'asset-view__detail'
-          }
-          key={key || `${label}-${index}`}
-        >
-          <dt>{label}</dt>
-          <dd>{value === null || value === undefined || value === '' ? '—' : value}</dd>
-        </div>
-      ))}
-    </dl>
+    {details.length || !emptyText ? (
+      <dl className="asset-view__details">
+        {details.map(({ key, label, value, wide: wideDetail }, index) => (
+          <div
+            className={`asset-view__detail${wideDetail ? ' asset-view__detail--wide' : ''}${cardDetails ? ' asset-view__detail--card' : ''}`}
+            key={key || `${label}-${index}`}
+          >
+            <dt>{label}</dt>
+            <dd>{value === null || value === undefined || value === '' ? '—' : value}</dd>
+          </div>
+        ))}
+      </dl>
+    ) : (
+      <p>{emptyText}</p>
+    )}
   </section>
 )
 
@@ -372,6 +444,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
     vulnerabilityFindings,
     resolvedVulnerabilities,
     endpointCount,
+    portObservations,
     loadedSite,
     loadedAssetClass,
     historyScopeTruncated,
@@ -383,6 +456,7 @@ const AssetView = async (props: DocumentViewServerProps) => {
     discoveryPage,
     topologyPage,
     pageSize: 50,
+    includePorts: selectedTab === 'ports',
   })
 
   const request = props.initPageResult.req
@@ -518,6 +592,136 @@ const AssetView = async (props: DocumentViewServerProps) => {
         {id === 'security' && matches.length ? <span>{matches.length}</span> : null}
       </Link>
     ))
+  const networkObservations = portObservations?.docs ?? []
+  const networkInterfaces = latestNetworkRecords(networkObservations, 'interfaces').sort(
+    (left, right) =>
+      text(left.value.name || left.value.key).localeCompare(
+        text(right.value.name || right.value.key),
+      ),
+  )
+  const reportedPorts = latestNetworkRecords(networkObservations, 'ports')
+  const profinetPorts = latestProfinetPorts(networkObservations)
+  const interfaceByKey = new Map(
+    networkInterfaces.map((entry) => [text(entry.value.key), entry.value]),
+  )
+  const interfaceDetails = networkInterfaces.map(({ observedAt, source, value }) => ({
+    key: `${source}:${text(value.key)}`,
+    label: text(value.name) || text(value.key) || 'Reported interface',
+    value: (
+      <PortDetails
+        details={[
+          ['Interface key', text(value.key)],
+          ['Source', source],
+          ['Description', text(value.description)],
+          ['MAC address', value.macAddress ? <code>{String(value.macAddress)}</code> : undefined],
+          [
+            'IP addresses',
+            array(value.ipAddresses)
+              .filter((address): address is string => typeof address === 'string')
+              .join(', '),
+          ],
+          ['Administrative state', text(value.adminStatus)],
+          ['Operational state', text(value.operStatus)],
+          ['Speed', typeof value.speed === 'number' ? `${value.speed} bit/s` : undefined],
+          ['MTU', typeof value.mtu === 'number' ? value.mtu : undefined],
+          ['Last reported', formatDateTime(observedAt)],
+        ]}
+      />
+    ),
+    wide: true,
+  }))
+  const portDetails = reportedPorts.map(({ observedAt, source, value }) => {
+    const interfaceKey = text(value.interfaceKey)
+    const networkInterface = interfaceByKey.get(interfaceKey)
+    return {
+      key: `${source}:${text(value.key)}`,
+      label: text(value.portId) || text(value.key) || 'Reported port',
+      value: (
+        <PortDetails
+          details={[
+            ['Source', source],
+            ['Interface', text(networkInterface?.name) || interfaceKey],
+            ['Description', text(value.description)],
+            [
+              'Interface MAC',
+              networkInterface?.macAddress ? (
+                <code>{String(networkInterface.macAddress)}</code>
+              ) : undefined,
+            ],
+            [
+              'IP addresses',
+              array(networkInterface?.ipAddresses)
+                .filter((address): address is string => typeof address === 'string')
+                .join(', '),
+            ],
+            ['VLANs', array(value.vlans).map(String).join(', ')],
+            ['Last reported', formatDateTime(observedAt)],
+          ]}
+        />
+      ),
+      wide: true,
+    }
+  })
+  const profinetPortDetails = profinetPorts.map(({ observedAt, source, value }) => {
+    const linkState = record(value.linkState)
+    const peers = array(value.peers)
+      .map(record)
+      .map((peer) =>
+        [
+          text(peer.macAddress) ? `MAC ${text(peer.macAddress)}` : '',
+          text(peer.portId) ? `port ${text(peer.portId)}` : '',
+          text(peer.chassisId) ? `chassis ${text(peer.chassisId)}` : '',
+        ]
+          .filter(Boolean)
+          .join(' · '),
+      )
+      .filter(Boolean)
+      .join('; ')
+    return {
+      key: text(value.ref),
+      label: text(value.portId) || text(value.ref) || 'PROFINET port',
+      value: (
+        <PortDetails
+          details={[
+            ['Source', source],
+            [
+              'API / slot / subslot',
+              [value.api, value.slot, value.subslot]
+                .filter((item) => item !== undefined)
+                .join(' / '),
+            ],
+            ['Peer', peers],
+            ['Link state', text(linkState.link)],
+            ['Media type', text(value.mediaTypeName)],
+            ['Last reported', formatDateTime(observedAt)],
+          ]}
+        />
+      ),
+      wide: true,
+    }
+  })
+  const topologyPortDetails = topologyLinks.docs.map((link) => {
+    const localIsAsset = relationID(link.localAsset) === String(asset.id)
+    const ownPort = record(localIsAsset ? link.local : link.remote)
+    const peerPort = record(localIsAsset ? link.remote : link.local)
+    const peerAsset = localIsAsset ? link.remoteAsset : link.localAsset
+    return {
+      key: String(link.id),
+      label: `${link.source} · ${text(ownPort.portId) || text(ownPort.interfaceKey) || 'Observed connection'}`,
+      value: (
+        <PortDetails
+          details={[
+            ['Local MAC', text(ownPort.macAddress)],
+            ['Neighbor', text(peerPort.stationName) || relationLabel(peerAsset, 'Unresolved peer')],
+            ['Neighbor port', text(peerPort.portId)],
+            ['Neighbor MAC', text(peerPort.macAddress)],
+            ['Last observed', formatDateTime(link.observedAt)],
+          ]}
+        />
+      ),
+      wide: true,
+    }
+  })
 
   const overview = (
     <>
@@ -698,6 +902,52 @@ const AssetView = async (props: DocumentViewServerProps) => {
         currentPage={topologyPage}
         href={(page) => pageURL('network', 'topologyPage', page)}
         label="Topology"
+        totalPages={topologyLinks.totalPages}
+      />
+    </>
+  )
+
+  const ports = (
+    <>
+      <p className="asset-view__security-help">
+        Reported interfaces and physical ports are shown separately from network endpoint bindings.
+        Values retain their discovery source and observation time.
+      </p>
+      <Section
+        cardDetails
+        details={interfaceDetails}
+        emptyText="No network interface data has been reported."
+        title="Network interfaces"
+        wide
+      />
+      <Section
+        cardDetails
+        details={portDetails}
+        emptyText="No protocol port data has been reported."
+        title="Reported ports"
+        wide
+      />
+      <Section
+        cardDetails
+        details={profinetPortDetails}
+        emptyText="No PROFINET device ports have been reported."
+        title="PROFINET device ports"
+        wide
+      />
+      <Section
+        cardDetails
+        details={topologyPortDetails}
+        emptyText="No port-level topology connections have been recorded."
+        title="Observed port connections"
+        wide
+      />
+      {portObservations?.hasNextPage ? (
+        <p role="status">Showing network details from the latest 200 discovery observations.</p>
+      ) : null}
+      <PageNavigation
+        currentPage={topologyPage}
+        href={(page) => pageURL('ports', 'topologyPage', page)}
+        label="Port connections"
         totalPages={topologyLinks.totalPages}
       />
     </>
@@ -1071,6 +1321,8 @@ const AssetView = async (props: DocumentViewServerProps) => {
   const mainContent =
     selectedTab === 'network' ? (
       network
+    ) : selectedTab === 'ports' ? (
+      ports
     ) : selectedTab === 'hardware' ? (
       hardware
     ) : selectedTab === 'connected' ? (

@@ -666,6 +666,154 @@ describe('device identity', () => {
     ).toBeGreaterThan(2)
   })
 
+  it('suggests same-site duplicates from shared LLDP chassis IDs and includes CDP port evidence', async () => {
+    const siteID = await site()
+    const otherSiteID = await site()
+    const chassisHex = Buffer.from('SWITCH-42').toString('hex').toUpperCase()
+    const neighbor = (macAddress: string, port: string, at: string, chassisID = chassisHex) => {
+      const input = scan('', [[macAddress, '192.0.2.10']], at) as unknown as {
+        devices: unknown[]
+      }
+      input.devices = [
+        {
+          macAddress,
+          macAddresses: [macAddress],
+          ipAddresses: ['192.0.2.10'],
+          interfaces: [
+            {
+              key: `ifIndex:${port}`,
+              source: 'snmp',
+              name: port,
+              macAddress,
+              ipAddresses: ['192.0.2.10'],
+            },
+          ],
+          ports: [
+            {
+              key: `ifIndex:${port}`,
+              source: 'lldp',
+              interfaceKey: `ifIndex:${port}`,
+              portId: port,
+            },
+          ],
+          observations: [
+            {
+              source: 'lldp',
+              observedAt: at,
+              ipAddress: null,
+              macAddress,
+              fields: { name: 'Access switch', protocols: ['lldp'] },
+              raw: {
+                observationId: randomUUID(),
+                subject: { kind: 'device', macAddress },
+                acquisition: {
+                  mechanism: 'passive-announcement',
+                  interfaceMac: '02:00:00:00:00:01',
+                },
+                chassisId: { subtype: 7, hex: chassisID, text: 'SWITCH-42' },
+                portId: {
+                  subtype: 5,
+                  hex: Buffer.from(port).toString('hex').toUpperCase(),
+                  text: port,
+                },
+                ttl: 120,
+                vlans: [],
+                tlvs: [],
+                inventory: {},
+                fieldSources: {},
+              },
+              warnings: [],
+            },
+            {
+              source: 'cdp',
+              observedAt: at,
+              ipAddress: null,
+              macAddress,
+              fields: { name: 'Access switch', protocols: ['cdp'] },
+              raw: {
+                observationId: randomUUID(),
+                subject: { kind: 'device', macAddress },
+                acquisition: {
+                  mechanism: 'passive-announcement',
+                  interfaceMac: '02:00:00:00:00:01',
+                },
+                protocol: 'cdp',
+                version: 2,
+                ttl: 120,
+                deviceId: 'access-switch-42',
+                portId: port,
+                platform: null,
+                systemName: 'Access switch',
+                vlans: [],
+                inventory: {},
+                tlvs: [],
+              },
+              warnings: [],
+            },
+          ],
+        },
+      ]
+      return input as unknown as ReturnType<typeof scan>
+    }
+    const firstMAC = mac()
+    const secondMAC = mac()
+    const firstImport = await upload(
+      siteID,
+      neighbor(firstMAC, 'GigabitEthernet1/0/1', '2026-09-10T10:00:00Z'),
+    )
+    const secondImport = await upload(
+      siteID,
+      neighbor(secondMAC, 'GigabitEthernet1/0/2', '2026-09-11T10:00:00Z', chassisHex.toLowerCase()),
+    )
+    expect(firstImport.createdAssets).toBe(1)
+    expect(secondImport.createdAssets).toBe(1)
+    const inventory = await payload.find({
+      collection: 'assets',
+      depth: 0,
+      where: { site: { equals: siteID } },
+    })
+    expect(inventory.docs).toHaveLength(2)
+    expect(new Set(inventory.docs.map(({ lifecycle }) => lifecycle))).toEqual(new Set(['active']))
+
+    const cases = await payload.find({
+      collection: 'identity-cases',
+      depth: 0,
+      where: { site: { equals: siteID } },
+    })
+    expect(cases.docs).toHaveLength(1)
+    expect(cases.docs[0]).toMatchObject({
+      kind: 'possible-duplicate',
+      confidence: 1,
+      reason: expect.stringContaining('same LLDP chassis ID'),
+    })
+    const evidence = JSON.stringify(cases.docs[0].evidence)
+    expect(evidence).toContain(firstMAC)
+    expect(evidence).toContain(secondMAC)
+    expect(evidence).toContain('GigabitEthernet1/0/1')
+    expect(evidence).toContain('GigabitEthernet1/0/2')
+    expect(evidence).toContain('access-switch-42')
+
+    const panel = renderToStaticMarkup(
+      await DeviceIdentity({ asset: inventory.docs[0], payload, user, view: 'hardware' }),
+    )
+    expect(panel).toContain('device-identity__case-devices')
+    expect(panel).toContain(firstMAC)
+    expect(panel).toContain(secondMAC)
+    expect(panel).toContain(chassisHex)
+    expect(panel).toContain('access-switch-42')
+
+    await upload(otherSiteID, neighbor(mac(), 'GigabitEthernet1/0/3', '2026-09-12T10:00:00Z'))
+    expect(
+      (
+        await payload.find({
+          collection: 'identity-cases',
+          depth: 0,
+          where: { site: { equals: otherSiteID } },
+        })
+      ).docs,
+    ).toHaveLength(0)
+  })
+
   it('supports MAC-free modules, slot movement, cycle guards, merge/split, lifecycle and explicit transfer', async () => {
     const siteID = await site(),
       destination = await site()

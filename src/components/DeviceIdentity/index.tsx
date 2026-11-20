@@ -9,6 +9,12 @@ import './index.scss'
 
 type IdentityView = 'all' | 'hardware' | 'network'
 
+const record = (value: unknown): Record<string, unknown> =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
+const array = (value: unknown): unknown[] => (Array.isArray(value) ? value : [])
+
 export default async function DeviceIdentity({
   asset,
   payload,
@@ -218,8 +224,75 @@ export default async function DeviceIdentity({
               <ul>
                 {cases.docs.map((item) => (
                   <li key={item.id}>
-                    {recordLink('identity-cases', item.id, `${item.kind} — ${item.reason}`)} (
+                    {recordLink('identity-cases', item.id, `${item.kind}: ${item.reason}`)} (
                     {item.status})
+                    {array(record(item.evidence).devices).length > 1 ? (
+                      <div
+                        aria-label="Reported interface evidence"
+                        className="device-identity__case-devices"
+                        role="group"
+                      >
+                        {typeof record(record(item.evidence).chassisID).hex === 'string' ? (
+                          <p>
+                            LLDP chassis ID (subtype{' '}
+                            {String(record(record(item.evidence).chassisID).subtype)}):{' '}
+                            <code>{String(record(record(item.evidence).chassisID).hex)}</code>
+                          </p>
+                        ) : null}
+                        {array(record(item.evidence).devices).map((entry, deviceIndex) => {
+                          const device = record(entry)
+                          const assetID =
+                            typeof device.assetID === 'string' ? device.assetID : undefined
+                          return (
+                            <section key={assetID || deviceIndex}>
+                              <h4>
+                                {assetID
+                                  ? recordLink('assets', assetID, `Asset ${assetID}`)
+                                  : `Interface group ${deviceIndex + 1}`}
+                              </h4>
+                              <ul>
+                                {array(device.interfaces).map((entry, interfaceIndex) => {
+                                  const networkInterface = record(entry)
+                                  const cdp = array(networkInterface.cdp).map(record)
+                                  return (
+                                    <li
+                                      key={
+                                        typeof networkInterface.macAddress === 'string'
+                                          ? networkInterface.macAddress
+                                          : interfaceIndex
+                                      }
+                                    >
+                                      <code>
+                                        {String(networkInterface.macAddress || 'Unknown MAC')}
+                                      </code>
+                                      {array(networkInterface.lldpPortIDs).length ? (
+                                        <span>
+                                          {' · LLDP port '}
+                                          {array(networkInterface.lldpPortIDs).join(', ')}
+                                        </span>
+                                      ) : null}
+                                      {cdp.length ? (
+                                        <span>
+                                          {' · CDP '}
+                                          {cdp
+                                            .map(
+                                              (item) =>
+                                                `${String(item.deviceID || 'unknown device')}${
+                                                  item.portID ? ` (${String(item.portID)})` : ''
+                                                }`,
+                                            )
+                                            .join(', ')}
+                                        </span>
+                                      ) : null}
+                                    </li>
+                                  )
+                                })}
+                              </ul>
+                            </section>
+                          )
+                        })}
+                      </div>
+                    ) : null}
                   </li>
                 ))}
               </ul>
