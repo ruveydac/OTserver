@@ -219,7 +219,8 @@ describe('asset network fields', () => {
           .mockImplementation(
             ({ collection, select }: { collection: string; select?: Record<string, boolean> }) => {
               if (collection === 'asset-installations') return Promise.resolve({ docs: [] })
-              if (collection === 'topology-links') return Promise.resolve({ docs: [] })
+              if (collection === 'topology-links')
+                return Promise.resolve({ docs: [], totalPages: 2 })
               if (collection === 'asset-observations' && select?.interfaces) {
                 return Promise.resolve({
                   docs: [
@@ -271,8 +272,88 @@ describe('asset network fields', () => {
                         ],
                       },
                     },
+                    {
+                      id: 'network-observation-latest',
+                      source: 'snmp',
+                      observedAt: '2026-08-08T10:30:00.000Z',
+                      interfaces: [
+                        {
+                          key: 'ifIndex:7',
+                          name: 'Ethernet 1/1',
+                          macAddress: '02:00:00:00:00:07',
+                          ipAddresses: ['192.0.2.7'],
+                        },
+                        {
+                          key: 'ifIndex:8',
+                          name: 'Ethernet 1/2',
+                          ipAddresses: [],
+                        },
+                        { interfaceKey: 'ifIndex:9', source: 'lldp', name: '' },
+                        { key: 'ifIndex:10', name: '' },
+                        { portId: 'interface-port:11', source: 'cdp', name: '' },
+                        { name: 'No interface key' },
+                      ],
+                      ports: [
+                        {
+                          key: 'ifIndex:7',
+                          source: 'lldp',
+                          interfaceKey: 'ifIndex:7',
+                          portId: 'GigabitEthernet1/1',
+                          description: 'Latest uplink',
+                          vlans: [10, 20],
+                        },
+                        { interfaceKey: 'ifIndex:10', vlans: [] },
+                        {
+                          key: 'connector:unknown',
+                          interfaceKey: 'missing-interface',
+                          vlans: [],
+                        },
+                        {
+                          portId: 'connector:legacy',
+                          source: 'cdp',
+                          interfaceKey: 'missing-interface',
+                          vlans: [],
+                        },
+                      ],
+                      raw: {
+                        physicalEntities: [
+                          {
+                            ref: 'pnio:0:0:1',
+                            class: 'port',
+                            portId: 'X2',
+                            peers: [
+                              {
+                                macAddress: '02:00:00:00:00:88',
+                                portId: 'GigabitEthernet1/2',
+                                chassisId: 'remote-switch',
+                              },
+                              {},
+                            ],
+                          },
+                          { ref: 'pnio:0:0:2', class: 'port', peers: [{}] },
+                          { ref: 'entity:container', class: 'container' },
+                          { class: 'port' },
+                        ],
+                      },
+                    },
+                    {
+                      id: 'network-observation-stale',
+                      source: 'snmp',
+                      observedAt: '2026-08-08T09:00:00.000Z',
+                      interfaces: [{ key: 'ifIndex:7', name: 'Stale interface' }],
+                      ports: [
+                        {
+                          key: 'ifIndex:7',
+                          source: 'lldp',
+                          portId: 'Stale uplink',
+                        },
+                      ],
+                      raw: {
+                        physicalEntities: [{ ref: 'pnio:0:0:1', class: 'port', portId: 'X0' }],
+                      },
+                    },
                   ],
-                  hasNextPage: false,
+                  hasNextPage: true,
                 })
               }
               if (collection === 'vulnerabilities') {
@@ -400,16 +481,27 @@ describe('asset network fields', () => {
     const portsView = await AssetView({ ...props, searchParams: { tab: 'ports' } })
     const portsHTML = renderToStaticMarkup(createElement(() => portsView))
     expect(portsHTML).toContain('<h2>Network interfaces</h2>')
-    expect([...portsHTML.matchAll(/asset-view__detail--card/g)]).toHaveLength(3)
+    expect([...portsHTML.matchAll(/asset-view__detail--card/g)]).toHaveLength(11)
     expect(portsHTML).toContain('Ethernet 1/1')
+    expect(portsHTML).toContain('Ethernet 1/2')
+    expect(portsHTML).toContain('Reported interface')
     expect(portsHTML).toContain('192.0.2.7')
     expect(portsHTML).toContain('02:00:00:00:00:07')
     expect(portsHTML).toContain('GigabitEthernet1/1')
+    expect(portsHTML).toContain('Latest uplink')
+    expect(portsHTML).toContain('Reported port')
     expect(portsHTML).toContain('VLANs')
+    expect(portsHTML).not.toContain('Stale interface')
+    expect(portsHTML).not.toContain('Stale uplink')
     expect(portsHTML).toContain('<h2>PROFINET device ports</h2>')
-    expect(portsHTML).toContain('X1')
+    expect(portsHTML).toContain('X2')
+    expect(portsHTML).not.toContain('X0')
     expect(portsHTML).toContain('02:00:00:00:00:88')
     expect(portsHTML).toContain('GigabitEthernet1/2')
+    expect(portsHTML).toContain(
+      'Showing network details from the latest 200 discovery observations.',
+    )
+    expect(portsHTML).toContain('tab=ports&amp;topologyPage=2')
     expect(portsHTML).not.toContain('<h2>Discovery evidence</h2>')
 
     const historyView = await AssetView({ ...props, searchParams: { tab: 'history' } })
@@ -518,6 +610,12 @@ describe('asset network fields', () => {
     expect(renderToStaticMarkup(createElement(() => discoveryView))).toContain(
       'No scanner evidence recorded yet',
     )
+
+    const portsView = await AssetView({ ...props, searchParams: { tab: 'ports' } })
+    const portsHTML = renderToStaticMarkup(createElement(() => portsView))
+    expect(portsHTML).toContain('No network interface data has been reported.')
+    expect(portsHTML).toContain('No protocol port data has been reported.')
+    expect(portsHTML).toContain('No PROFINET device ports have been reported.')
 
     const historyView = await AssetView({ ...props, searchParams: { tab: 'history' } })
     const historyHTML = renderToStaticMarkup(createElement(() => historyView))

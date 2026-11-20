@@ -15,7 +15,11 @@ import {
 import { identityAction, migrateIdentity, performIdentityAction } from '@/identity/actions'
 import { idOf } from '@/identity/access'
 import { assetHistoryScope } from '@/identity/relationships'
-import { suggestAdjacentInterfaces, suggestAttachmentChange } from '@/identity/reconcile'
+import {
+  suggestAdjacentInterfaces,
+  suggestAttachmentChange,
+  suggestSharedLldpChassis,
+} from '@/identity/reconcile'
 import { findAssemblyVulnerabilities } from '@/vulnerabilities/match'
 import { parseOTserverOtter } from '@/importers/otserverOtter'
 import DeviceIdentity from '@/components/DeviceIdentity'
@@ -77,6 +81,120 @@ describe('device identity', () => {
       serial: '001a',
       productScope: 'X',
     })
+  })
+
+  it('filters invalid LLDP and CDP evidence and sorts repeated interface evidence', async () => {
+    const chassisHex = 'AABBCCDD'
+    const mac1 = '02:00:00:00:00:01'
+    const mac2 = '02:00:00:00:00:02'
+    const mac3 = '02:00:00:00:00:03'
+    const mac4 = '02:00:00:00:00:04'
+    const mac5 = '02:00:00:00:00:05'
+    const lldp = (
+      asset: string | undefined,
+      macAddress: string,
+      options: {
+        chassis?: string
+        fieldMAC?: string
+        portID?: { hex?: string; text?: string }
+        subject?: boolean
+        subtype?: number
+      } = {},
+    ) => ({
+      asset,
+      fields: { macAddress: options.fieldMAC ?? macAddress },
+      raw: {
+        chassisId: { subtype: options.subtype ?? 7, hex: options.chassis ?? chassisHex },
+        ...(options.subject === false ? {} : { subject: { macAddress } }),
+        ...(options.portID ? { portId: options.portID } : {}),
+      },
+    })
+    let lldpDocs = [
+      lldp('asset-a', mac1, { subject: false, portID: { hex: '01' } }),
+      lldp('asset-a', mac1, { portID: { text: '02' } }),
+      lldp('asset-a', mac2),
+      lldp('asset-b', mac3, { portID: { text: '03' } }),
+      lldp(undefined, mac4),
+      lldp('asset-a', mac4, { chassis: 'EEFF' }),
+      lldp('asset-a', 'invalid'),
+      lldp('asset-a', mac4, { subtype: 0 }),
+      lldp('asset-a', mac4, { fieldMAC: mac5 }),
+    ]
+    const cdpDocs = [
+      {
+        asset: 'asset-a',
+        fields: { macAddress: mac1 },
+        raw: { deviceId: 'z-switch', portId: 'port-z' },
+      },
+      {
+        asset: 'asset-a',
+        fields: { macAddress: mac1 },
+        raw: {
+          subject: { macAddress: mac1 },
+          deviceId: 'a-switch',
+          portId: 'port-a',
+        },
+      },
+      {
+        asset: 'asset-a',
+        fields: { macAddress: mac5 },
+        raw: { subject: { macAddress: mac4 }, deviceId: 'mismatch' },
+      },
+      { asset: 'asset-a', fields: { macAddress: 'invalid' }, raw: { deviceId: 'bad-mac' } },
+      { asset: 'asset-a', fields: { macAddress: mac2 }, raw: { deviceId: '' } },
+    ]
+    type FindArgs = {
+      collection: string
+      where?: { and?: { source?: { equals?: string } }[] }
+    }
+    const payload = {
+      find: vi.fn(({ collection, where }: FindArgs) => {
+        if (collection === 'asset-observations') {
+          const source = where?.and?.find((clause) => clause.source)?.source?.equals
+          return Promise.resolve({ docs: source === 'lldp' ? lldpDocs : cdpDocs })
+        }
+        return Promise.resolve({
+          docs: collection === 'assets' ? [{ id: 'asset-a' }, { id: 'asset-b' }] : [],
+        })
+      }),
+      create: vi.fn(({ data }: { data: Record<string, unknown> }) => Promise.resolve(data)),
+    }
+    const imported = [
+      { observations: [{ source: 'lldp', raw: { chassisId: { hex: chassisHex } } }] },
+    ] as never
+
+    await suggestSharedLldpChassis(imported, 'site-a', { payload } as never)
+
+    expect(payload.create).toHaveBeenCalledOnce()
+    expect(payload.create.mock.calls[0]![0].data.evidence).toMatchObject({
+      protocol: 'lldp',
+      chassisID: { subtype: 7, hex: chassisHex },
+      devices: [
+        {
+          assetID: 'asset-a',
+          interfaces: [
+            {
+              macAddress: mac1,
+              lldpPortIDs: ['01', '02'],
+              cdp: [
+                { deviceID: 'a-switch', portID: 'port-a' },
+                { deviceID: 'z-switch', portID: 'port-z' },
+              ],
+            },
+            { macAddress: mac2, lldpPortIDs: [], cdp: [] },
+          ],
+        },
+        { assetID: 'asset-b', interfaces: [{ macAddress: mac3, lldpPortIDs: ['03'], cdp: [] }] },
+      ],
+    })
+
+    const callsBeforeEmptyResult = payload.find.mock.calls.length
+    lldpDocs = [lldp('asset-a', 'invalid')]
+    await suggestSharedLldpChassis(imported, 'site-a', { payload } as never)
+    expect(
+      payload.find.mock.calls.slice(callsBeforeEmptyResult).map(([args]) => args.collection),
+    ).toEqual(['asset-observations'])
+    expect(payload.create).toHaveBeenCalledOnce()
   })
 
   it('extracts qualified v2 identities, conserves endpoint ambiguity, and preserves ENTITY-MIB containment', () => {
@@ -801,6 +919,44 @@ describe('device identity', () => {
     expect(panel).toContain(secondMAC)
     expect(panel).toContain(chassisHex)
     expect(panel).toContain('access-switch-42')
+
+    await payload.create({
+      collection: 'identity-cases',
+      data: {
+        asset: inventory.docs[0]!.id,
+        candidate: inventory.docs[1]!.id,
+        caseKey: `sparse-evidence-${randomUUID()}`,
+        confidence: 1,
+        evidence: {
+          chassisID: { subtype: 7, hex: 42 },
+          devices: [
+            { interfaces: [{ macAddress: null, lldpPortIDs: [], cdp: [] }] },
+            {
+              assetID: inventory.docs[1]!.id,
+              interfaces: [
+                {
+                  macAddress: null,
+                  lldpPortIDs: [],
+                  cdp: [{ deviceID: '', portID: '' }],
+                },
+              ],
+            },
+          ],
+        },
+        kind: 'possible-duplicate',
+        reason: 'Sparse interface evidence',
+        site: siteID,
+        status: 'open',
+      },
+      user,
+      overrideAccess: true,
+    })
+    const sparsePanel = renderToStaticMarkup(
+      await DeviceIdentity({ asset: inventory.docs[0]!, payload, user, view: 'hardware' }),
+    )
+    expect(sparsePanel).toContain('Interface group 1')
+    expect(sparsePanel).toContain('Unknown MAC')
+    expect(sparsePanel).toContain('unknown device')
 
     await upload(otherSiteID, neighbor(mac(), 'GigabitEthernet1/0/3', '2026-09-12T10:00:00Z'))
     expect(
