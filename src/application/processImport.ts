@@ -18,6 +18,7 @@ import {
   resolveImportedIdentity,
   suggestAdjacentInterfaces,
   suggestAttachmentChange,
+  suggestSharedLldpChassis,
 } from '../identity/reconcile'
 import { scopedKey } from '../identity/keys'
 import { withRequestContext } from '../integrations/payload/context'
@@ -284,6 +285,9 @@ const processImportInContext = async ({
       }
       assetsProcessed++
     }
+
+    phase = 'suggest-shared-lldp-chassis'
+    await suggestSharedLldpChassis(topology.assets, String(site), req)
 
     phase = 'record-containment'
     for (const asset of topology.assets) {

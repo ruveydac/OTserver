@@ -199,6 +199,7 @@
     display: inline-flex;
     flex-shrink: 0;
     gap: 0.4rem;
+    min-height: 44px;
     padding: 0.65rem 0.8rem;
     text-decoration: none;
 
@@ -286,6 +287,13 @@
 
     &--wide {
       grid-column: 1 / -1;
+    }
+
+    &--card {
+      background: var(--theme-elevation-50);
+      border: 1px solid var(--theme-elevation-500);
+      border-radius: var(--style-radius-s);
+      padding: 0.85rem;
     }
 
     dt {
@@ -496,6 +504,28 @@
     gap: 0.5rem;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 6rem), 1fr));
     margin: 0;
+  }
+
+  &__port-details {
+    display: grid;
+    gap: 0.35rem 0.9rem;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+    margin: 0;
+    min-width: 0;
+
+    > div {
+      min-width: 0;
+    }
+
+    dt {
+      color: var(--theme-elevation-700);
+      font-size: 0.8rem;
+    }
+
+    dd {
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
   }
 
   &__severity-count {
@@ -722,6 +752,10 @@
 
     .asset-view__details {
       gap: 0.45rem 0.75rem;
+    }
+
+    .asset-view__detail--card {
+      padding: 0.6rem;
     }
 
     .asset-view__metric {

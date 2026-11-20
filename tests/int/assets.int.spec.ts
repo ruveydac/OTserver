@@ -214,50 +214,191 @@ describe('asset network fields', () => {
               : undefined,
           ),
         ),
-        find: vi.fn().mockImplementation(({ collection }: { collection: string }) => {
-          if (collection === 'asset-installations') return Promise.resolve({ docs: [] })
-          if (collection === 'vulnerabilities') {
-            return Promise.resolve({
-              docs: [
-                { cve: 'CVE-2099-0001', cvssScore: 5.0, knownExploited: false },
-                { cve: 'CVE-2099-0002', cvssScore: 9.8, knownExploited: false },
-                { cve: 'CVE-2099-0003', cvssScore: 7.5, knownExploited: true },
-                { cve: 'CVE-2099-0004', cvssScore: 6.0, knownExploited: false },
-                { cve: 'CVE-2099-0005', cvssScore: 8.1, knownExploited: false },
-                { cve: 'CVE-2099-0006', cvssScore: 4.0, knownExploited: false },
-                { cve: 'CVE-2099-0007', cvssScore: 9.1, knownExploited: false },
-              ].map((doc) => ({
-                ...doc,
-                description: 'A crafted network request can interrupt controller operation.',
-                affected: [
-                  {
-                    part: 'a',
-                    product: 'simatic_s7-1500_firmware',
-                    vendor: 'siemens',
-                    version: '2.5',
-                  },
-                ],
-              })),
-            })
-          }
-          return Promise.resolve({
-            docs:
-              collection === 'audit-logs'
-                ? [
+        find: vi
+          .fn()
+          .mockImplementation(
+            ({ collection, select }: { collection: string; select?: Record<string, boolean> }) => {
+              if (collection === 'asset-installations') return Promise.resolve({ docs: [] })
+              if (collection === 'topology-links')
+                return Promise.resolve({ docs: [], totalPages: 2 })
+              if (collection === 'asset-observations' && select?.interfaces) {
+                return Promise.resolve({
+                  docs: [
                     {
-                      action: 'update',
-                      actorEmail: 'operator@example.test',
-                      changes: { status: { after: 'online', before: 'offline' } },
-                      createdAt: '2026-08-08T10:30:00.000Z',
-                      id: 'audit-1',
+                      id: 'network-observation',
+                      source: 'snmp',
+                      observedAt: '2026-08-08T10:00:00.000Z',
+                      interfaces: [
+                        {
+                          key: 'ifIndex:7',
+                          source: 'snmp',
+                          name: 'Ethernet 1/1',
+                          macAddress: '02:00:00:00:00:07',
+                          ipAddresses: ['192.0.2.7'],
+                          operStatus: 'up',
+                          speed: 1000000000,
+                          mtu: 1500,
+                        },
+                      ],
+                      ports: [
+                        {
+                          key: 'ifIndex:7',
+                          source: 'lldp',
+                          interfaceKey: 'ifIndex:7',
+                          portId: 'GigabitEthernet1/1',
+                          description: 'Controller uplink',
+                          vlans: [10, 20],
+                        },
+                      ],
+                      raw: {
+                        physicalEntities: [
+                          {
+                            ref: 'pnio:0:0:1',
+                            class: 'port',
+                            api: 0,
+                            slot: 0,
+                            subslot: 1,
+                            portId: 'X1',
+                            peers: [
+                              {
+                                macAddress: '02:00:00:00:00:88',
+                                portId: 'GigabitEthernet1/2',
+                                chassisId: 'remote-switch',
+                              },
+                            ],
+                            linkState: { link: 'up' },
+                            mediaTypeName: 'copper',
+                          },
+                        ],
+                      },
                     },
-                  ]
-                : [
-                    { id: 'field-enabled', label: 'Remote access enabled', type: 'checkbox' },
-                    { id: 'field-level', label: 'ISA-95 level', type: 'number' },
+                    {
+                      id: 'network-observation-latest',
+                      source: 'snmp',
+                      observedAt: '2026-08-08T10:30:00.000Z',
+                      interfaces: [
+                        {
+                          key: 'ifIndex:7',
+                          name: 'Ethernet 1/1',
+                          macAddress: '02:00:00:00:00:07',
+                          ipAddresses: ['192.0.2.7'],
+                        },
+                        {
+                          key: 'ifIndex:8',
+                          name: 'Ethernet 1/2',
+                          ipAddresses: [],
+                        },
+                        { interfaceKey: 'ifIndex:9', source: 'lldp', name: '' },
+                        { key: 'ifIndex:10', name: '' },
+                        { portId: 'interface-port:11', source: 'cdp', name: '' },
+                        { name: 'No interface key' },
+                      ],
+                      ports: [
+                        {
+                          key: 'ifIndex:7',
+                          source: 'lldp',
+                          interfaceKey: 'ifIndex:7',
+                          portId: 'GigabitEthernet1/1',
+                          description: 'Latest uplink',
+                          vlans: [10, 20],
+                        },
+                        { interfaceKey: 'ifIndex:10', vlans: [] },
+                        {
+                          key: 'connector:unknown',
+                          interfaceKey: 'missing-interface',
+                          vlans: [],
+                        },
+                        {
+                          portId: 'connector:legacy',
+                          source: 'cdp',
+                          interfaceKey: 'missing-interface',
+                          vlans: [],
+                        },
+                      ],
+                      raw: {
+                        physicalEntities: [
+                          {
+                            ref: 'pnio:0:0:1',
+                            class: 'port',
+                            portId: 'X2',
+                            peers: [
+                              {
+                                macAddress: '02:00:00:00:00:88',
+                                portId: 'GigabitEthernet1/2',
+                                chassisId: 'remote-switch',
+                              },
+                              {},
+                            ],
+                          },
+                          { ref: 'pnio:0:0:2', class: 'port', peers: [{}] },
+                          { ref: 'entity:container', class: 'container' },
+                          { class: 'port' },
+                        ],
+                      },
+                    },
+                    {
+                      id: 'network-observation-stale',
+                      source: 'snmp',
+                      observedAt: '2026-08-08T09:00:00.000Z',
+                      interfaces: [{ key: 'ifIndex:7', name: 'Stale interface' }],
+                      ports: [
+                        {
+                          key: 'ifIndex:7',
+                          source: 'lldp',
+                          portId: 'Stale uplink',
+                        },
+                      ],
+                      raw: {
+                        physicalEntities: [{ ref: 'pnio:0:0:1', class: 'port', portId: 'X0' }],
+                      },
+                    },
                   ],
-          })
-        }),
+                  hasNextPage: true,
+                })
+              }
+              if (collection === 'vulnerabilities') {
+                return Promise.resolve({
+                  docs: [
+                    { cve: 'CVE-2099-0001', cvssScore: 5.0, knownExploited: false },
+                    { cve: 'CVE-2099-0002', cvssScore: 9.8, knownExploited: false },
+                    { cve: 'CVE-2099-0003', cvssScore: 7.5, knownExploited: true },
+                    { cve: 'CVE-2099-0004', cvssScore: 6.0, knownExploited: false },
+                    { cve: 'CVE-2099-0005', cvssScore: 8.1, knownExploited: false },
+                    { cve: 'CVE-2099-0006', cvssScore: 4.0, knownExploited: false },
+                    { cve: 'CVE-2099-0007', cvssScore: 9.1, knownExploited: false },
+                  ].map((doc) => ({
+                    ...doc,
+                    description: 'A crafted network request can interrupt controller operation.',
+                    affected: [
+                      {
+                        part: 'a',
+                        product: 'simatic_s7-1500_firmware',
+                        vendor: 'siemens',
+                        version: '2.5',
+                      },
+                    ],
+                  })),
+                })
+              }
+              return Promise.resolve({
+                docs:
+                  collection === 'audit-logs'
+                    ? [
+                        {
+                          action: 'update',
+                          actorEmail: 'operator@example.test',
+                          changes: { status: { after: 'online', before: 'offline' } },
+                          createdAt: '2026-08-08T10:30:00.000Z',
+                          id: 'audit-1',
+                        },
+                      ]
+                    : [
+                        { id: 'field-enabled', label: 'Remote access enabled', type: 'checkbox' },
+                        { id: 'field-level', label: 'ISA-95 level', type: 'number' },
+                      ],
+              })
+            },
+          ),
       },
       initPageResult: { req: { context: {}, user: null } },
       routeSegments: ['collections', 'assets', 'asset-1'],
@@ -300,6 +441,7 @@ describe('asset network fields', () => {
       ),
     ).toBe(true)
     expect(html).toContain('href="/admin/collections/assets/asset-1?tab=network"')
+    expect(html).toContain('href="/admin/collections/assets/asset-1?tab=ports"')
     expect(html).toContain('href="/admin/collections/assets/asset-1?tab=connected"')
     expect(html).toContain('href="/admin/collections/assets/asset-1?tab=security"')
     expect(html).toContain('href="/admin/collections/assets/asset-1?tab=discovery"')
@@ -335,6 +477,32 @@ describe('asset network fields', () => {
     expect(connectedHTML).toContain('Connected manufacturer and device information')
     expect(connectedHTML).toContain('No device catalog has been imported')
     expect(connectedHTML).not.toContain('<h2>Hardware record</h2>')
+
+    const portsView = await AssetView({ ...props, searchParams: { tab: 'ports' } })
+    const portsHTML = renderToStaticMarkup(createElement(() => portsView))
+    expect(portsHTML).toContain('<h2>Network interfaces</h2>')
+    expect([...portsHTML.matchAll(/asset-view__detail--card/g)]).toHaveLength(11)
+    expect(portsHTML).toContain('Ethernet 1/1')
+    expect(portsHTML).toContain('Ethernet 1/2')
+    expect(portsHTML).toContain('Reported interface')
+    expect(portsHTML).toContain('192.0.2.7')
+    expect(portsHTML).toContain('02:00:00:00:00:07')
+    expect(portsHTML).toContain('GigabitEthernet1/1')
+    expect(portsHTML).toContain('Latest uplink')
+    expect(portsHTML).toContain('Reported port')
+    expect(portsHTML).toContain('VLANs')
+    expect(portsHTML).not.toContain('Stale interface')
+    expect(portsHTML).not.toContain('Stale uplink')
+    expect(portsHTML).toContain('<h2>PROFINET device ports</h2>')
+    expect(portsHTML).toContain('X2')
+    expect(portsHTML).not.toContain('X0')
+    expect(portsHTML).toContain('02:00:00:00:00:88')
+    expect(portsHTML).toContain('GigabitEthernet1/2')
+    expect(portsHTML).toContain(
+      'Showing network details from the latest 200 discovery observations.',
+    )
+    expect(portsHTML).toContain('tab=ports&amp;topologyPage=2')
+    expect(portsHTML).not.toContain('<h2>Discovery evidence</h2>')
 
     const historyView = await AssetView({ ...props, searchParams: { tab: 'history' } })
     const historyHTML = renderToStaticMarkup(createElement(() => historyView))
@@ -442,6 +610,12 @@ describe('asset network fields', () => {
     expect(renderToStaticMarkup(createElement(() => discoveryView))).toContain(
       'No scanner evidence recorded yet',
     )
+
+    const portsView = await AssetView({ ...props, searchParams: { tab: 'ports' } })
+    const portsHTML = renderToStaticMarkup(createElement(() => portsView))
+    expect(portsHTML).toContain('No network interface data has been reported.')
+    expect(portsHTML).toContain('No protocol port data has been reported.')
+    expect(portsHTML).toContain('No PROFINET device ports have been reported.')
 
     const historyView = await AssetView({ ...props, searchParams: { tab: 'history' } })
     const historyHTML = renderToStaticMarkup(createElement(() => historyView))

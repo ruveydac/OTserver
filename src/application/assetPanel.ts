@@ -11,6 +11,7 @@ export const loadAssetPanel = async ({
   discoveryPage,
   topologyPage,
   pageSize,
+  includePorts = false,
 }: {
   asset: Asset
   payload: Payload
@@ -19,6 +20,7 @@ export const loadAssetPanel = async ({
   discoveryPage: number
   topologyPage: number
   pageSize: number
+  includePorts?: boolean
 }) => {
   const limit = Number.isInteger(pageSize) ? Math.max(1, Math.min(pageSize, 100)) : 50
   const site = typeof asset.site === 'object' ? asset.site : undefined
@@ -65,6 +67,7 @@ export const loadAssetPanel = async ({
     topologyLinks,
     vulnerabilityReviews,
     endpointCount,
+    portObservations,
     loadedSite,
     loadedAssetClass,
   ] = await Promise.all([
@@ -116,6 +119,18 @@ export const loadAssetPanel = async ({
       user,
       where: { and: [{ asset: { equals: asset.id } }, { endedAt: { exists: false } }] },
     }),
+    includePorts
+      ? payload.find({
+          collection: 'asset-observations',
+          depth: 0,
+          limit: 200,
+          overrideAccess: false,
+          select: { interfaces: true, observedAt: true, ports: true, raw: true, source: true },
+          sort: '-observedAt',
+          user,
+          where: { asset: { equals: asset.id } },
+        })
+      : Promise.resolve(null),
     siteRequest,
     assetClassRequest,
   ])
@@ -128,6 +143,7 @@ export const loadAssetPanel = async ({
     vulnerabilityFindings: vulnerabilityReviews.findings,
     resolvedVulnerabilities: vulnerabilityReviews.resolved,
     endpointCount,
+    portObservations,
     loadedSite,
     loadedAssetClass,
     historyScopeTruncated: historyScope.truncated,

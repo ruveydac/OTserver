@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   resolveImportedIdentity: vi.fn(),
   suggestAdjacentInterfaces: vi.fn().mockResolvedValue(undefined),
   suggestAttachmentChange: vi.fn().mockResolvedValue(undefined),
+  suggestSharedLldpChassis: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock('../../src/importers/nmap', () => ({ parseNmap: mocks.parseNmap }))
@@ -31,6 +32,7 @@ vi.mock('../../src/identity/reconcile', () => ({
   resolveImportedIdentity: mocks.resolveImportedIdentity,
   suggestAdjacentInterfaces: mocks.suggestAdjacentInterfaces,
   suggestAttachmentChange: mocks.suggestAttachmentChange,
+  suggestSharedLldpChassis: mocks.suggestSharedLldpChassis,
 }))
 
 import { processImport } from '../../src/application/processImport'
