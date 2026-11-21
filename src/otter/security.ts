@@ -118,6 +118,7 @@ const configKeys = new Set([
   'allowDcpSource',
   'noS7',
   'noEnip',
+  'noIoLink',
   'noBacnet',
   'noFins',
   'noFox',

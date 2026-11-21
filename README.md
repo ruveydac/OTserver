@@ -146,6 +146,13 @@ For managed scanners, set a stable `OTSERVER_OTTER_ENCRYPTION_KEY` and configure
 controller URL under **Settings > Application settings**. See [Otter management](otter_management.md)
 for setup.
 
+Before upgrading an installation with managed Otter configurations, finish or cancel pending runs
+and back up the database. The migration runs on production startup, or you can run `pnpm migrate`
+from the upgraded source checkout. It disables IO-Link and CDP in saved configurations that had no
+setting for them. To opt in, clear the corresponding **Disable** checkbox under **Discovery and
+protocols**. Managed configurations that disable IO-Link require Otter 0.18.0 or newer; disabling CDP
+requires Otter 0.17.0 or newer.
+
 ## Development and technical guidance
 
 Local development requires Node.js 22, pnpm 10, and a MongoDB 8 replica set:

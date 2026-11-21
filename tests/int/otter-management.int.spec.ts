@@ -1017,6 +1017,7 @@ describe('Otter management controller', () => {
             interface: 'eth0',
             noSnmp: false,
             noCdp: false,
+            noIoLink: false,
           },
           assetOverrides: { assetOwner: 'Central owner' },
           customFieldOverrides: { [customField.id]: 7 },
@@ -1143,6 +1144,7 @@ describe('Otter management controller', () => {
         noSnmp: false,
       })
       expect(snapshot.configSnapshot).not.toHaveProperty('noCdp')
+      expect(snapshot.configSnapshot).not.toHaveProperty('noIoLink')
       expect(snapshot.importOverridesSnapshot).toMatchObject({
         assetOverrides: { assetOwner: 'Central owner' },
       })
@@ -1164,6 +1166,36 @@ describe('Otter management controller', () => {
         overrideAccess: false,
         user,
       })
+      await expect(
+        runOtterNow(
+          await request('/otter/v1/runs', {
+            body: { scannerID, profileID: profile.id },
+            token: `JWT ${login.token}`,
+          }),
+        ),
+      ).rejects.toMatchObject({ status: 400 })
+      await payload.update({
+        collection: 'otter-scanners',
+        context: { otterScannerUpdate: true },
+        data: { version: 'unknown' },
+        id: scannerID!,
+        overrideAccess: true,
+      })
+      await expect(
+        runOtterNow(
+          await request('/otter/v1/runs', {
+            body: { scannerID, profileID: profile.id },
+            token: `JWT ${login.token}`,
+          }),
+        ),
+      ).rejects.toMatchObject({ status: 400 })
+      await payload.update({
+        collection: 'otter-scanners',
+        context: { otterScannerUpdate: true },
+        data: { version: '0.17.0' },
+        id: scannerID!,
+        overrideAccess: true,
+      })
       const cdpRun = await runOtterNow(
         await request('/otter/v1/runs', {
           body: { scannerID, profileID: profile.id },
@@ -1178,6 +1210,72 @@ describe('Otter management controller', () => {
       })
       expect(cdpSnapshot.configSnapshot).toHaveProperty('noCdp', true)
       await payload.delete({ collection: 'otter-runs', id: cdpRunID })
+      await payload.update({
+        collection: 'otter-profiles',
+        id: profile.id,
+        data: {
+          configuration: {
+            targets: ['192.0.2.10'],
+            interface: 'eth0',
+            noSnmp: false,
+            noCdp: false,
+            noIoLink: true,
+          },
+        },
+        overrideAccess: false,
+        user,
+      })
+      await expect(
+        runOtterNow(
+          await request('/otter/v1/runs', {
+            body: { scannerID, profileID: profile.id },
+            token: `JWT ${login.token}`,
+          }),
+        ),
+      ).rejects.toMatchObject({ status: 400 })
+      await payload.update({
+        collection: 'otter-scanners',
+        context: { otterScannerUpdate: true },
+        data: { version: '0.18.0' },
+        id: scannerID!,
+        overrideAccess: true,
+      })
+      const ioLinkRun = await runOtterNow(
+        await request('/otter/v1/runs', {
+          body: { scannerID, profileID: profile.id },
+          token: `JWT ${login.token}`,
+        }),
+      )
+      const ioLinkRunID = ((await ioLinkRun.json()) as { id: string }).id
+      const ioLinkSnapshot = await payload.findByID({
+        collection: 'otter-runs',
+        id: ioLinkRunID,
+        depth: 0,
+      })
+      expect(ioLinkSnapshot.configSnapshot).toHaveProperty('noIoLink', true)
+      await payload.delete({ collection: 'otter-runs', id: ioLinkRunID })
+      await payload.update({
+        collection: 'otter-scanners',
+        context: { otterScannerUpdate: true },
+        data: { version: '0.9.0' },
+        id: scannerID!,
+        overrideAccess: true,
+      })
+      await payload.update({
+        collection: 'otter-profiles',
+        id: profile.id,
+        data: {
+          configuration: {
+            targets: ['192.0.2.10'],
+            interface: 'eth0',
+            noSnmp: false,
+            noCdp: false,
+            noIoLink: false,
+          },
+        },
+        overrideAccess: false,
+        user,
+      })
       await expect(
         runOtterNow(
           await request('/otter/v1/runs', {
@@ -2551,5 +2649,5 @@ describe('Otter management controller', () => {
       if (oldKey === undefined) delete process.env.OTSERVER_OTTER_ENCRYPTION_KEY
       else process.env.OTSERVER_OTTER_ENCRYPTION_KEY = oldKey
     }
-  })
+  }, 120_000)
 })

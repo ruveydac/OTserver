@@ -282,6 +282,22 @@ const profileFor = async (req: PayloadRequest, id: unknown, scannerID: string) =
   return { configuration, encryptedCredentials: profile.encryptedCredentials, profile }
 }
 
+const supportsNoCdp = (version?: string | null) => {
+  try {
+    return Boolean(version && compareOtterVersions(version, '0.17.0') >= 0)
+  } catch {
+    return false
+  }
+}
+
+const supportsNoIoLink = (version?: string | null) => {
+  try {
+    return Boolean(version && compareOtterVersions(version, '0.18.0') >= 0)
+  } catch {
+    return false
+  }
+}
+
 const publicControllerURL = async (req: PayloadRequest, configuredValue?: string) => {
   const value = configuredValue ?? (await configuredControllerURL(req.payload, req))
   if (!value)
@@ -310,7 +326,18 @@ const runInput = async (
     throw new APIError('The profile and scanner must belong to the same site.', 400)
   await assertSiteAllowsImports(siteID, req)
   const configSnapshot: Record<string, unknown> = { ...configuration, name: profile.name }
+  if (configSnapshot.noCdp === true && !supportsNoCdp(scanner.version))
+    throw new APIError(
+      'Disabling CDP requires an Otter scanner running version 0.17.0 or newer.',
+      400,
+    )
   if (configSnapshot.noCdp === false) delete configSnapshot.noCdp
+  if (configSnapshot.noIoLink === true && !supportsNoIoLink(scanner.version))
+    throw new APIError(
+      'Disabling IO-Link device discovery requires an Otter scanner running version 0.18.0 or newer.',
+      400,
+    )
+  if (configSnapshot.noIoLink === false) delete configSnapshot.noIoLink
   return {
     configSnapshot,
     importOverridesSnapshot: {

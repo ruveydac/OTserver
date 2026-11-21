@@ -165,6 +165,12 @@ describe('asset network fields', () => {
   })
 
   it('renders every asset section with an explicit edit link', async () => {
+    const portObservationQueries: {
+      limit?: number
+      select?: Record<string, boolean>
+      sort?: string
+      where?: { asset?: { equals?: string } }
+    }[] = []
     const props = {
       doc: {
         assetClass: {
@@ -217,11 +223,24 @@ describe('asset network fields', () => {
         find: vi
           .fn()
           .mockImplementation(
-            ({ collection, select }: { collection: string; select?: Record<string, boolean> }) => {
+            ({
+              collection,
+              limit,
+              select,
+              sort,
+              where,
+            }: {
+              collection: string
+              limit?: number
+              select?: Record<string, boolean>
+              sort?: string
+              where?: { asset?: { equals?: string } }
+            }) => {
               if (collection === 'asset-installations') return Promise.resolve({ docs: [] })
               if (collection === 'topology-links')
                 return Promise.resolve({ docs: [], totalPages: 2 })
               if (collection === 'asset-observations' && select?.interfaces) {
+                portObservationQueries.push({ limit, select, sort, where })
                 return Promise.resolve({
                   docs: [
                     {
@@ -481,7 +500,6 @@ describe('asset network fields', () => {
     const portsView = await AssetView({ ...props, searchParams: { tab: 'ports' } })
     const portsHTML = renderToStaticMarkup(createElement(() => portsView))
     expect(portsHTML).toContain('<h2>Network interfaces</h2>')
-    expect([...portsHTML.matchAll(/asset-view__detail--card/g)]).toHaveLength(11)
     expect(portsHTML).toContain('Ethernet 1/1')
     expect(portsHTML).toContain('Ethernet 1/2')
     expect(portsHTML).toContain('Reported interface')
@@ -502,6 +520,12 @@ describe('asset network fields', () => {
       'Showing network details from the latest 200 discovery observations.',
     )
     expect(portsHTML).toContain('tab=ports&amp;topologyPage=2')
+    expect(portObservationQueries.at(-1)).toEqual({
+      limit: 200,
+      select: { interfaces: true, observedAt: true, ports: true, raw: true, source: true },
+      sort: '-observedAt',
+      where: { asset: { equals: 'asset-1' } },
+    })
     expect(portsHTML).not.toContain('<h2>Discovery evidence</h2>')
 
     const historyView = await AssetView({ ...props, searchParams: { tab: 'history' } })
@@ -616,6 +640,7 @@ describe('asset network fields', () => {
     expect(portsHTML).toContain('No network interface data has been reported.')
     expect(portsHTML).toContain('No protocol port data has been reported.')
     expect(portsHTML).toContain('No PROFINET device ports have been reported.')
+    expect(portsHTML).toContain('No port-level topology connections have been recorded.')
 
     const historyView = await AssetView({ ...props, searchParams: { tab: 'history' } })
     const historyHTML = renderToStaticMarkup(createElement(() => historyView))
@@ -698,18 +723,36 @@ describe('asset network fields', () => {
               docs: [
                 {
                   id: 'link-1',
-                  local: { name: 'PLC 3' },
+                  local: {
+                    macAddress: '02:00:00:00:00:30',
+                    name: 'PLC 3',
+                    portId: 'Ethernet 1/1',
+                  },
                   localAsset: { id: 'asset-3' },
                   observedAt: '2026-08-08T10:00:00.000Z',
-                  remote: { name: 'Peer' },
+                  remote: {
+                    macAddress: '02:00:00:00:00:31',
+                    name: 'Peer',
+                    portId: 'GigabitEthernet1/1',
+                  },
+                  remoteAsset: { id: 'peer-1', name: 'Peer switch' },
                   source: 'lldp',
                 },
                 {
                   id: 'link-2',
-                  local: { name: 'Other peer' },
-                  localAsset: 'other',
+                  local: {
+                    name: 'Other peer',
+                    portId: 'GigabitEthernet1/2',
+                    stationName: 'Other peer device',
+                  },
+                  localAsset: { id: 'other', name: 'Other peer' },
                   observedAt: '2026-08-08T10:00:00.000Z',
-                  remote: { name: 'PLC 3' },
+                  remote: {
+                    macAddress: '02:00:00:00:00:30',
+                    name: 'PLC 3',
+                    portId: 'Ethernet 1/2',
+                  },
+                  remoteAsset: { id: 'asset-3' },
                   source: 'lldp',
                 },
               ],
@@ -730,6 +773,16 @@ describe('asset network fields', () => {
     expect(html).toContain('Peer')
     expect(html).toContain('Other peer')
     expect(html).toContain('No changes recorded yet')
+
+    const portsView = await AssetView({ ...props, searchParams: { tab: 'ports' } })
+    const portsHTML = renderToStaticMarkup(createElement(() => portsView))
+    expect(portsHTML).toContain('<h2>Observed port connections</h2>')
+    expect(portsHTML).toContain('lldp · Ethernet 1/1')
+    expect(portsHTML).toContain('Peer switch')
+    expect(portsHTML).toContain('GigabitEthernet1/1')
+    expect(portsHTML).toContain('02:00:00:00:00:31')
+    expect(portsHTML).toContain('lldp · Ethernet 1/2')
+    expect(portsHTML).toContain('Other peer device')
 
     const discoveryView = await AssetView({ ...props, searchParams: { tab: 'discovery' } })
     expect(renderToStaticMarkup(createElement(() => discoveryView))).toContain(

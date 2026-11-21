@@ -488,6 +488,59 @@ describe('OTserver Otter importer', () => {
     })
   })
 
+  it('preserves live IO-Link component evidence without creating physical identity', () => {
+    const localMAC = randomMAC()
+    const file = mutableExport(localMAC, randomMAC())
+    file.devices = [
+      {
+        interfaces: [],
+        ipAddresses: ['192.0.2.10'],
+        macAddress: localMAC,
+        macAddresses: [localMAC],
+        observations: [
+          {
+            fields: { macAddress: localMAC, protocols: ['profinet', 'profinet-pnio'] },
+            observedAt: '2026-11-21T10:00:00Z',
+            raw: {
+              observationId: 'a82e3b66-0ff7-46c3-b1b0-5e2b63db33e8',
+              subject: { kind: 'device', macAddress: localMAC },
+              physicalEntities: [
+                {
+                  ref: 'pnio:19969:1:1:port:1',
+                  parentRef: 'pnio:19969:1:1',
+                  parentPosition: 1,
+                  class: 'unknown',
+                  componentType: 'io-link-device',
+                  ioLinkVendorId: 26,
+                  ioLinkDeviceId: 8389011,
+                  portStatus: 'operate',
+                },
+              ],
+            },
+            source: 'profinet-dcp',
+            warnings: [],
+          },
+        ],
+        ports: [],
+      },
+    ]
+    file.links = []
+
+    const result = parseOTserverOtter(JSON.stringify(file))
+    expect(result.assets).toHaveLength(1)
+    expect(result.assets[0].identity).toBeUndefined()
+    expect(result.assets[0].observations?.[0]?.raw).toMatchObject({
+      physicalEntities: [
+        {
+          componentType: 'io-link-device',
+          ioLinkVendorId: 26,
+          ioLinkDeviceId: 8389011,
+          portStatus: 'operate',
+        },
+      ],
+    })
+  })
+
   it('enriches Siemens assets from device descriptions and LLDP neighbor details', () => {
     const localMAC = randomMAC()
     const switchMAC = randomMAC()
