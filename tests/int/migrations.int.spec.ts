@@ -8,6 +8,10 @@ import { ensureAdminRole, initializeAuthorization } from '../../src/collections/
 import { migrations } from '../../src/migrations'
 
 let payload: Payload
+const otterProtocolDefaults = migrations.find(
+  ({ name }) => name === '20261121_150000_otter_protocol_defaults',
+)!
+const legacyMigrations = migrations.filter((migration) => migration !== otterProtocolDefaults)
 
 beforeAll(async () => {
   payload = await getPayload({ config })
@@ -93,7 +97,7 @@ describe('versioned legacy identity migration', () => {
       expect(legacyAsset).not.toHaveProperty('assetClass')
       expect(legacyUser).not.toHaveProperty('role')
 
-      await payload.db.migrate({ migrations: migrations as never })
+      await payload.db.migrate({ migrations: legacyMigrations as never })
       const fallbackType = await siteTypeID(payload, 'to-be-changed')
       for (const id of [site.id, childSite.id]) {
         const migratedSite = await payload.findByID({ collection: 'sites', id, depth: 0 })
@@ -114,7 +118,7 @@ describe('versioned legacy identity migration', () => {
         site: childSite.id,
         changes: { type: { before: 'Bespoke work cell', after: fallbackType } },
       })
-      await payload.db.migrate({ migrations: migrations as never })
+      await payload.db.migrate({ migrations: legacyMigrations as never })
 
       const migratedAsset = (await payload.db.collections.assets
         .findById(asset.id)
@@ -185,6 +189,107 @@ describe('versioned legacy identity migration', () => {
       await payload.delete({ collection: 'assets', id: asset.id })
       await payload.delete({ collection: 'users', id: user.id })
       await payload.delete({ collection: 'sites', id: childSite.id })
+      await payload.delete({ collection: 'sites', id: site.id })
+    }
+  })
+})
+
+describe('Otter protocol defaults migration', () => {
+  it('disables only unset protocols and lets operators opt in after the upgrade', async () => {
+    const site = await payload.create({
+      collection: 'sites',
+      data: { name: `Otter defaults ${randomUUID()}`, type: await siteTypeID(payload) },
+    })
+    const scanner = await payload.create({
+      collection: 'otter-scanners',
+      data: { name: 'Otter defaults', site: site.id },
+    })
+    const admin = await payload.create({
+      collection: 'users',
+      data: {
+        email: `otter-migration-${randomUUID()}@example.test`,
+        name: 'Otter migration admin',
+        password: randomUUID(),
+        role: (await ensureAdminRole(payload)).id,
+      },
+    })
+    const profiles = payload.db.collections['otter-profiles'].collection
+    const ObjectId = payload.db.connection.base.Types.ObjectId
+    const targets = ['192.0.2.1']
+    const legacy = await profiles.insertOne({
+      configuration: { targets, noSnmp: true },
+      name: 'Legacy configuration',
+      scanner: new ObjectId(scanner.id),
+      site: new ObjectId(site.id),
+    })
+    const mixed = await profiles.insertOne({
+      configuration: { targets, noIoLink: null, noCdp: false },
+      name: 'Existing CDP choice',
+      scanner: new ObjectId(scanner.id),
+      site: new ObjectId(site.id),
+    })
+    const explicit = await profiles.insertOne({
+      configuration: { targets, noIoLink: false, noCdp: true },
+      name: 'Existing protocol choices',
+      scanner: new ObjectId(scanner.id),
+      site: new ObjectId(site.id),
+    })
+    const ids = [legacy.insertedId, mixed.insertedId, explicit.insertedId]
+    try {
+      await payload.db.migrate({ migrations: [otterProtocolDefaults] as never })
+      for (const [index, expected] of [
+        { targets, noSnmp: true, noIoLink: true, noCdp: true },
+        { targets, noIoLink: true, noCdp: false },
+        { targets, noIoLink: false, noCdp: true },
+      ].entries()) {
+        expect(
+          await payload.findByID({
+            collection: 'otter-profiles',
+            id: String(ids[index]),
+            depth: 0,
+          }),
+        ).toMatchObject({ configuration: expected })
+      }
+      const audit = await payload.find({
+        collection: 'audit-logs',
+        depth: 0,
+        where: { targetCollection: { equals: 'otter-profiles' }, site: { equals: site.id } },
+      })
+      expect(audit.totalDocs).toBe(2)
+      expect(audit.docs).toContainEqual(
+        expect.objectContaining({
+          actorName: 'Versioned migration',
+          documentID: String(legacy.insertedId),
+          changes: { configuration: { before: {}, after: { noIoLink: true, noCdp: true } } },
+        }),
+      )
+
+      await payload.update({
+        collection: 'otter-profiles',
+        id: String(legacy.insertedId),
+        data: { configuration: { targets, noIoLink: false } },
+        user: admin,
+      })
+      await payload.db.migrate({ migrations: [otterProtocolDefaults] as never })
+      expect(await profiles.findOne({ _id: legacy.insertedId })).toMatchObject({
+        configuration: { noIoLink: false, noCdp: true, noSnmp: true },
+      })
+      const fresh = await payload.create({
+        collection: 'otter-profiles',
+        data: {
+          configuration: { targets },
+          name: 'New configuration',
+          scanner: scanner.id,
+          site: site.id,
+        },
+        user: admin,
+      })
+      ids.push(new ObjectId(fresh.id))
+      expect(fresh.configuration).toMatchObject({ noIoLink: false, noCdp: false })
+    } finally {
+      await profiles.deleteMany({ _id: { $in: ids } })
+      await payload.delete({ collection: 'users', id: admin.id })
+      await payload.delete({ collection: 'otter-scanners', id: scanner.id })
       await payload.delete({ collection: 'sites', id: site.id })
     }
   })

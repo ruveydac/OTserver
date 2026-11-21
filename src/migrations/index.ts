@@ -6,6 +6,7 @@ import * as migration_20261018_120000_site_types from './20261018_120000_site_ty
 import * as migration_20261019_120000_asset_vulnerability_reviews from './20261019_120000_asset_vulnerability_reviews'
 import * as migration_20261106_120000_otter_updates from './20261106_120000_otter_updates'
 import * as migration_20261108_120000_asset_tags from './20261108_120000_asset_tags'
+import * as migration_20261121_150000_otter_protocol_defaults from './20261121_150000_otter_protocol_defaults'
 
 export const migrations = [
   {
@@ -47,5 +48,10 @@ export const migrations = [
     up: migration_20261108_120000_asset_tags.up,
     down: migration_20261108_120000_asset_tags.down,
     name: '20261108_120000_asset_tags',
+  },
+  {
+    up: migration_20261121_150000_otter_protocol_defaults.up,
+    down: migration_20261121_150000_otter_protocol_defaults.down,
+    name: '20261121_150000_otter_protocol_defaults',
   },
 ]

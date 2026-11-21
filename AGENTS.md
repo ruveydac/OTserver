@@ -209,6 +209,11 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
   protected. Internal controller updates use the `otterScannerUpdate` request context.
   `noIoLink` disables IO-Link reads in PROFINET and EtherNet/IP; omit its default `false` from run
   snapshots, and require scanner version 0.18.0 or newer when it is `true`.
+  Add a versioned migration when introducing a discovery protocol or probe. Backfill only unset
+  options to disabled on existing configurations so an upgrade does not expand discovery scope.
+  Preserve explicit choices and existing run snapshots. The `20261121_150000_otter_protocol_defaults`
+  migration disables unset IO-Link and CDP options; back up and run `pnpm migrate` before resuming
+  managed scans. Older scanners must meet the existing minimum version for any disable option used.
   Manual configuration runs require a Yes/No authorization confirmation. Schedules derive their
   scanner and exact site from the selected configuration on save, ignoring supplied scope fields.
   New configurations store an encrypted SNMP v2c `public` community by default; later credential
