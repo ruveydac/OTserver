@@ -196,6 +196,7 @@ describe('Otter security and scheduling boundaries', () => {
         targets: ['192.0.2.1', '192.0.2.0/24'],
         interface: 'eth0',
         disablePnEpm: true,
+        noIoLink: true,
         noSnmp: true,
         noSmb: true,
         noRpc: true,
@@ -209,6 +210,7 @@ describe('Otter security and scheduling boundaries', () => {
     ).toMatchObject({
       targets: ['192.0.2.1', '192.0.2.0/24'],
       disablePnEpm: true,
+      noIoLink: true,
       noSmb: true,
       noRpc: true,
       noHttp: true,
@@ -227,6 +229,9 @@ describe('Otter security and scheduling boundaries', () => {
     expect(() =>
       validateOtterConfiguration({ targets: ['192.0.2.1'], disablePnEpm: 'false' }),
     ).toThrow(/boolean/i)
+    expect(() => validateOtterConfiguration({ targets: ['192.0.2.1'], noIoLink: 'false' })).toThrow(
+      /boolean/i,
+    )
     expect(() => validateOtterConfiguration({ targets: ['192.0.2.0/15'] })).toThrow(/65,536/i)
     expect(() => validateOtterConfiguration({ targets: ['192.0.2.1'], interface: '  ' })).toThrow(
       /interface/i,

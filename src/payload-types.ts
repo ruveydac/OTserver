@@ -959,6 +959,7 @@ export interface OtterProfile {
     allowDcpSource?: boolean | null;
     noS7?: boolean | null;
     noEnip?: boolean | null;
+    noIoLink?: boolean | null;
     noBacnet?: boolean | null;
     noFins?: boolean | null;
     noFox?: boolean | null;
@@ -2168,6 +2169,7 @@ export interface OtterProfilesSelect<T extends boolean = true> {
         allowDcpSource?: T;
         noS7?: T;
         noEnip?: T;
+        noIoLink?: T;
         noBacnet?: T;
         noFins?: T;
         noFox?: T;

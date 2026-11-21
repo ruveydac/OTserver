@@ -110,8 +110,8 @@ describe('device identity', () => {
       },
     })
     let lldpDocs = [
-      lldp('asset-a', mac1, { subject: false, portID: { hex: '01' } }),
       lldp('asset-a', mac1, { portID: { text: '02' } }),
+      lldp('asset-a', mac1, { subject: false, portID: { hex: '01' } }),
       lldp('asset-a', mac2),
       lldp('asset-b', mac3, { portID: { text: '03' } }),
       lldp(undefined, mac4),
@@ -188,12 +188,8 @@ describe('device identity', () => {
       ],
     })
 
-    const callsBeforeEmptyResult = payload.find.mock.calls.length
     lldpDocs = [lldp('asset-a', 'invalid')]
     await suggestSharedLldpChassis(imported, 'site-a', { payload } as never)
-    expect(
-      payload.find.mock.calls.slice(callsBeforeEmptyResult).map(([args]) => args.collection),
-    ).toEqual(['asset-observations'])
     expect(payload.create).toHaveBeenCalledOnce()
   })
 

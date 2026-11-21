@@ -628,6 +628,12 @@ export const OtterProfiles: CollectionConfig = {
             },
             { name: 'noS7', type: 'checkbox', defaultValue: false, label: 'Disable Siemens S7' },
             { name: 'noEnip', type: 'checkbox', defaultValue: false, label: 'Disable EtherNet/IP' },
+            {
+              name: 'noIoLink',
+              type: 'checkbox',
+              defaultValue: false,
+              label: 'Disable IO-Link device discovery',
+            },
             { name: 'noBacnet', type: 'checkbox', defaultValue: false, label: 'Disable BACnet' },
             { name: 'noFins', type: 'checkbox', defaultValue: false, label: 'Disable Omron FINS' },
             { name: 'noFox', type: 'checkbox', defaultValue: false, label: 'Disable Niagara Fox' },

@@ -207,6 +207,8 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
   overrides together for every run. Never layer scanner-level network overrides onto configurations.
   Generic scanner writes may change only the name; controller-owned inventory and credentials remain
   protected. Internal controller updates use the `otterScannerUpdate` request context.
+  `noIoLink` disables IO-Link reads in PROFINET and EtherNet/IP; omit its default `false` from run
+  snapshots, and require scanner version 0.18.0 or newer when it is `true`.
   Manual configuration runs require a Yes/No authorization confirmation. Schedules derive their
   scanner and exact site from the selected configuration on save, ignoring supplied scope fields.
   New configurations store an encrypted SNMP v2c `public` community by default; later credential

@@ -139,11 +139,6 @@ describe.skipIf(!process.env.OTTER_CLIENT_BIN)('Rust controller interoperability
           },
         })
         created.push({ collection: 'otter-profiles', id: profile.id })
-        const run = (await management('runs', {
-          scannerID: scanner.scanner.id,
-          profileID: profile.id,
-        })) as { id: string }
-        created.push({ collection: 'otter-runs', id: run.id })
         const startClient = (
           serverURL: string,
           enroll: boolean,
@@ -208,11 +203,52 @@ describe.skipIf(!process.env.OTTER_CLIENT_BIN)('Rust controller interoperability
           /Scanner credential is expired or not accepted/,
         )
         expect(await readFile(join(stateDirectory, 'agent-state.json'), 'utf8')).toBe(previousState)
-        const enrollmentLog = await readFile(join(stateDirectory, 'controller.log'), 'utf8')
-        expect(enrollmentLog).toContain('POST /api/otter/v1/enroll: HTTP 401')
-        expect(enrollmentLog).not.toContain('i'.repeat(43))
+        const rejectedEnrollmentLog = await readFile(join(stateDirectory, 'controller.log'), 'utf8')
+        expect(rejectedEnrollmentLog).toContain('POST /api/otter/v1/enroll: HTTP 401')
+        expect(rejectedEnrollmentLog).not.toContain('i'.repeat(43))
         await Promise.race([
           startClient(format === 'bare' ? `127.0.0.1:${address.port}` : url, true, true),
+          expect
+            .poll(
+              async () => {
+                try {
+                  const enrolled = JSON.parse(
+                    await readFile(join(stateDirectory, 'agent-state.json'), 'utf8'),
+                  )
+                  return (
+                    enrolled.scanner?.id === scanner.scanner.id &&
+                    Boolean(enrolled.fileCredential?.credential)
+                  )
+                } catch {
+                  return false
+                }
+              },
+              { timeout: 60_000 },
+            )
+            .toBe(true),
+        ])
+        expect(
+          (
+            await payload.findByID({
+              collection: 'otter-scanners',
+              id: scanner.scanner.id,
+              depth: 0,
+            })
+          ).version,
+        ).toBeTruthy()
+        const enrollmentLog = await readFile(join(stateDirectory, 'controller.log'), 'utf8')
+        expect(requests).toContainEqual({ path: '/api/otter/v1/enroll', status: 201 })
+        await new Promise<void>((done) => {
+          client!.once('close', () => done())
+          client!.kill('SIGKILL')
+        })
+        const run = (await management('runs', {
+          scannerID: scanner.scanner.id,
+          profileID: profile.id,
+        })) as { id: string }
+        created.push({ collection: 'otter-runs', id: run.id })
+        await Promise.race([
+          startClient(url, false),
           expect
             .poll(
               async () => {
