@@ -113,7 +113,7 @@ const request = (role: Record<string, unknown> | undefined = undefined) => {
   return {
     context: {},
     payload: { count: vi.fn(), create: vi.fn().mockResolvedValue({ id: 'admin-role' }), find },
-    user: role ? { id: 'user-1', role: 'role-1' } : undefined,
+    user: role ? { collection: 'users', id: 'user-1', role: 'role-1' } : undefined,
   }
 }
 
@@ -149,8 +149,12 @@ describe('site authorization', () => {
       writableSiteIDs: [],
     })
     const missing = request()
-    missing.user = { id: 'user-1', role: 'missing' } as never
+    missing.user = { collection: 'users', id: 'user-1', role: 'missing' } as never
     expect(await getAuthorization(missing as never)).toMatchObject({ isAdmin: false })
+    const keyPrincipal = request({ isAdmin: true })
+    keyPrincipal.user = { collection: 'payload-mcp-api-keys', id: 'key-1', role: 'role-1' }
+    expect(await getAuthorization(keyPrincipal as never)).toMatchObject({ isAdmin: false })
+    expect(await adminOrSelf({ req: keyPrincipal } as never)).toBe(false)
 
     const admin = request({ isAdmin: true })
     expect(await adminOnly({ req: admin } as never)).toBe(true)
@@ -809,7 +813,9 @@ describe('collection safety hooks', () => {
       expect(await invoke(collection.access?.delete, {})).toBe(false)
       expect(await invoke(collection.access?.update, {})).toBe(false)
     }
-    expect(Users.access?.admin?.({ req: { user: { id: '1' } } } as never)).toBe(true)
+    expect(
+      Users.access?.admin?.({ req: { user: { collection: 'users', id: '1' } } } as never),
+    ).toBe(true)
   })
 
   it('keeps identity bindings historical and prevents conflicting accepted keys', async () => {

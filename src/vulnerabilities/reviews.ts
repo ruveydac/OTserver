@@ -290,8 +290,12 @@ export const performVulnerabilityReview = async (
 ) => {
   const principal = req.user
   if (!principal) throw new APIError('Authentication required.', 401)
-  if (req.context.otterScannerID || 'otterScannerID' in principal)
-    throw new APIError('Scanner credentials cannot review vulnerabilities.', 403)
+  if (
+    principal.collection !== 'users' ||
+    req.context.otterScannerID ||
+    'otterScannerID' in principal
+  )
+    throw new APIError('Only user accounts can review vulnerabilities.', 403)
   const action = input.action as ReviewAction
   const cve = input.cve
   const expectedRevision = input.revision

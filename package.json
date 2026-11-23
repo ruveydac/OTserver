@@ -30,7 +30,9 @@
   "dependencies": {
     "@payloadcms/db-mongodb": "3.90.1",
     "@payloadcms/next": "3.90.1",
+    "@payloadcms/plugin-mcp": "3.90.1",
     "@payloadcms/ui": "3.90.1",
+    "@seshuk/payload-plugin-openapi": "0.2.3",
     "@xyflow/react": "^12.12.1",
     "croner": "10.0.1",
     "cross-env": "^7.0.3",

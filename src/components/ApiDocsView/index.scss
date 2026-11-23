@@ -1,0 +1,52 @@
+.api-docs {
+  padding-bottom: var(--spacing-view-bottom);
+
+  > p {
+    max-width: 75ch;
+  }
+
+  h2 {
+    margin-top: 2rem;
+  }
+
+  pre {
+    background: var(--theme-elevation-50);
+    border: 1px solid var(--theme-elevation-150);
+    border-radius: var(--style-radius-s);
+    overflow-x: auto;
+    padding: 1rem;
+  }
+
+  &__operations {
+    border: 1px solid var(--theme-elevation-150);
+    border-radius: var(--style-radius-s);
+  }
+
+  &__operation {
+    overflow-wrap: anywhere;
+
+    &:not(:last-child) {
+      border-bottom: 1px solid var(--theme-elevation-150);
+    }
+
+    summary {
+      cursor: pointer;
+      padding: 0.75rem 1rem;
+
+      code {
+        margin-left: 0.5rem;
+      }
+
+      span {
+        display: block;
+        margin-top: 0.25rem;
+      }
+    }
+
+    pre {
+      border: 0;
+      border-radius: 0;
+      margin: 0;
+    }
+  }
+}

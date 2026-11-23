@@ -102,6 +102,17 @@ Open <http://localhost:3000/admin> and create the first administrator account.
 The named volumes retain the database and uploaded import files.
 For a pinned deployment, replace `latest` with an exact release tag (`X.Y.Z`).
 
+Signed-in users can open **API documentation** from the admin navigation for authentication
+examples, inventory endpoints, and a downloadable OpenAPI specification. The reference stays on
+the OTserver host and is not available to unauthenticated visitors.
+
+MCP is off by default. An administrator can enable it under **Settings > Application settings >
+Enable MCP access**, then create a key under **Settings > MCP keys** for a selected user and allow
+**Find** for assets and/or sites on that key. Connect an MCP client to `https://<your-host>/api/mcp`
+using `Authorization: Bearer <MCP key>`. Only read tools are available, and reads follow the key
+owner's current site permissions. Disable MCP in Application settings to reject new MCP requests,
+or delete a key to revoke that client. Use HTTPS and store keys securely.
+
 ### Firewall rules
 
 <!-- prettier-ignore -->
