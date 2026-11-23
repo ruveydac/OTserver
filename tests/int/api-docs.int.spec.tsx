@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { getPayload, type Payload } from 'payload'
 
 import config from '@/payload.config'
-import { getApiDocument } from '@/apiDocs/openapi'
+import * as apiDocs from '@/apiDocs/openapi'
 import { GET } from '@/app/(payload)/api-docs/openapi.json/route'
 import ApiDocsView from '@/components/ApiDocsView'
 
@@ -118,6 +118,17 @@ describe('API documentation', () => {
       } as never),
     ).rejects.toThrow()
 
+    await expect(
+      ApiDocsView({
+        payload,
+        initPageResult: {
+          req: { user: { otterScannerID: 'scanner-1' } },
+          permissions: {},
+          visibleEntities: { collections: [], globals: [] },
+        },
+      } as never),
+    ).rejects.toThrow()
+
     const user = await payload.findByID({ collection: 'users', id: userID })
     const html = renderToStaticMarkup(
       await ApiDocsView({
@@ -135,6 +146,53 @@ describe('API documentation', () => {
     expect(html).toContain('where[site][equals]')
     expect(html).toContain('/api-docs/openapi.json')
     expect(html).not.toContain('/api/otter/v1')
-    expect((await getApiDocument(payload)).paths?.['/api/assets']).toBeDefined()
+    expect((await apiDocs.getApiDocument(payload)).paths?.['/api/assets']).toBeDefined()
+  })
+
+  it('handles missing operation metadata and an empty OpenAPI paths object', async () => {
+    const getApiDocument = vi.spyOn(apiDocs, 'getApiDocument')
+    getApiDocument
+      .mockReturnValueOnce({
+        paths: {
+          '/api/assets': {
+            get: { summary: 'List assets' },
+            post: {},
+            patch: { summary: 42 },
+            put: null,
+            delete: 'invalid operation',
+            options: { summary: 'Not an inventory method' },
+          },
+          '/empty': null,
+        },
+      } as never)
+      .mockReturnValueOnce({ paths: null } as never)
+
+    try {
+      const user = await payload.findByID({ collection: 'users', id: userID })
+      const props = {
+        payload,
+        initPageResult: {
+          req: { user },
+          permissions: {},
+          visibleEntities: { collections: [], globals: [] },
+        },
+      } as never
+
+      const html = renderToStaticMarkup(await ApiDocsView(props))
+      expect(html).toContain('List assets')
+      expect(html).toContain('invalid operation')
+      expect(html).not.toContain('Not an inventory method')
+
+      const emptyHtml = renderToStaticMarkup(await ApiDocsView(props))
+      expect(emptyHtml).toContain('No inventory endpoints are available in this reference.')
+    } finally {
+      getApiDocument.mockRestore()
+    }
+  })
+
+  it('rejects requests for an unconfigured OpenAPI plugin', () => {
+    expect(() => apiDocs.getApiDocument({ config: {} } as Payload)).toThrow(
+      'The OpenAPI plugin is not configured.',
+    )
   })
 })
