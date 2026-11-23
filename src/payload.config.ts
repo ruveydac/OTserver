@@ -1,7 +1,11 @@
 import { mongooseAdapter } from '@payloadcms/db-mongodb'
+import { mcpPlugin } from '@payloadcms/plugin-mcp'
+import { openapi } from '@seshuk/payload-plugin-openapi'
 import path from 'node:path'
-import { buildConfig, type Payload } from 'payload'
+import { buildConfig, UnauthorizedError, type Payload } from 'payload'
 
+import { adminOnly, getAuthorization, hideFromNonAdmins } from './access/authorization'
+import { readApplicationSettings } from './application/settings'
 import { Assets } from './collections/Assets'
 import { AssetClasses, initializeAssetClasses } from './collections/AssetClasses'
 import { AssetImports } from './collections/AssetImports'
@@ -65,6 +69,81 @@ const initializeApplication = async (payload: Payload) => {
 
 export default buildConfig({
   jobs,
+  plugins: [
+    mcpPlugin({
+      collections: {
+        assets: { enabled: { find: true } },
+        sites: { enabled: { find: true } },
+      },
+      overrideAuth: async (req, getDefaultMcpAccessSettings) => {
+        if ((await readApplicationSettings(req.payload, req)).mcpEnabled !== true)
+          throw new UnauthorizedError()
+        return getDefaultMcpAccessSettings()
+      },
+      overrideApiKeyCollection: (collection) =>
+        withAudit({
+          ...collection,
+          labels: { singular: 'MCP key', plural: 'MCP keys' },
+          access: {
+            ...collection.access,
+            admin: async ({ req }) => (await getAuthorization(req)).isAdmin,
+            create: adminOnly,
+            delete: adminOnly,
+            read: adminOnly,
+            unlock: adminOnly,
+            update: adminOnly,
+          },
+          admin: { ...collection.admin, group: 'Settings', hidden: hideFromNonAdmins },
+          fields: collection.fields.map((field) =>
+            field.type === 'relationship' && field.name === 'user'
+              ? {
+                  ...field,
+                  access: {
+                    ...field.access,
+                    create: async ({ req }) => (await getAuthorization(req)).isAdmin,
+                  },
+                }
+              : field,
+          ),
+        }),
+    }),
+    openapi({
+      metadata: { title: 'OTserver API', version: '1.0.0' },
+      openapiVersion: '3.1',
+      serve: false,
+      filters: {
+        include: ['assets', 'sites', 'asset-classes', 'tags', 'tag-groups', 'asset-imports'],
+        includeHidden: true,
+        includeAuth: false,
+        includeCustom: false,
+        includeJobs: false,
+        includeVersions: false,
+      },
+      extensions: [
+        {
+          transform: (document) => {
+            document.components!.securitySchemes!.PayloadToken = {
+              type: 'apiKey',
+              in: 'header',
+              name: 'Authorization',
+              description: 'Use JWT <token> or users API-Key <key>.',
+            }
+            const schemas = document.components!.schemas!
+            // Relationships can reference collections deliberately omitted from this inventory spec.
+            for (const [, name] of JSON.stringify(document).matchAll(
+              /"\$ref":"#\/components\/schemas\/([^"]+)"/g,
+            ))
+              schemas[name] ??= {
+                type: 'object',
+                additionalProperties: true,
+                description: 'Related document omitted from this inventory reference.',
+              }
+            return document
+          },
+        },
+      ],
+    }),
+  ],
   endpoints: [
     { path: '/health/ready', method: 'get', handler: readiness },
     { path: '/operations', method: 'get', handler: workerDiagnostics },
@@ -72,7 +151,7 @@ export default buildConfig({
   ],
   admin: {
     components: {
-      afterNavLinks: ['@/components/TopologyNavLink'],
+      afterNavLinks: ['@/components/TopologyNavLink', '@/components/ApiDocsNavLink'],
       beforeDashboard: ['@/components/BeforeDashboard'],
       graphics: {
         Icon: '@/components/Brand#Icon',
@@ -82,6 +161,10 @@ export default buildConfig({
         Button: '@/components/LogoutButton',
       },
       views: {
+        apiDocs: {
+          Component: '@/components/ApiDocsView',
+          path: '/api-docs',
+        },
         purdue: {
           Component: '@/components/PurdueView',
           path: '/purdue',

@@ -192,6 +192,11 @@ The scanner-source fallback is low quality. User-entered import overrides are hu
   never give them generic Payload or descendant-site access.
   Shared authorization recognizes their exact-site read/write scope only inside the server-owned
   `assetImport` context, including identity reconciliation of existing assets; never cache that scope.
+- MCP is off by default and enabled through the administrator-only Application settings global.
+  Enforce that switch on every MCP request, without caching. The pinned Payload MCP plugin exposes
+  only read tools for assets and sites. Only administrators issue and revoke audited MCP keys;
+  keys may belong to site-scoped users, and reads must enforce the current owner's Payload access.
+  Do not expose configuration, scanner, import, or write tools through MCP by default.
 - Otter enrollment tokens are single-use, short-lived digests; machine credentials are hashed,
   expiring, and revocable. SNMP/OPC UA credentials are encrypted with
   `OTSERVER_OTTER_ENCRYPTION_KEY` and must never be returned to ordinary profile reads or logged.

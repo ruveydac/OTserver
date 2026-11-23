@@ -43,7 +43,7 @@ export const Users: CollectionConfig = {
   slug: 'users',
   labels: { singular: 'User', plural: 'Users' },
   access: {
-    admin: ({ req }) => Boolean(req.user),
+    admin: ({ req }) => req.user?.collection === 'users',
     create: canCreateUser,
     delete: adminOnly,
     read: adminOrSelf,

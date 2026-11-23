@@ -43,6 +43,8 @@ vi.mock('@payloadcms/ui', async () => {
       return createElement('button', props, children as never)
     },
     Gutter: ({ children }: { children: React.ReactNode }) => createElement('div', null, children),
+    NavGroup: ({ children, label }: { children: React.ReactNode; label: string }) =>
+      createElement('nav', { 'aria-label': label }, children),
     Pill: ({ children }: { children: React.ReactNode }) => createElement('span', null, children),
     FieldLabel: ({ label }: { label: string }) => createElement('label', null, label),
     FieldError: () => null,
@@ -218,6 +220,7 @@ import OtterEnrollment, { otterAction } from '../../src/components/OtterEnrollme
 import OtterScannerActions from '../../src/components/OtterScannerActions'
 import OtterManagedSettingsField from '../../src/components/OtterManagedSettingsField'
 import TopologyNavLink from '../../src/components/TopologyNavLink'
+import ApiDocsNavLink from '../../src/components/ApiDocsNavLink'
 
 let container: HTMLDivElement
 let root: Root
@@ -1514,6 +1517,20 @@ describe('remaining Otter component states', () => {
     expect(container.querySelector('.nav__link-indicator')).toBeNull()
 
     mocks.pathname = '/admin/topology'
+    await renderFresh(link)
+    expect(container.querySelector('.nav__link-indicator')).not.toBeNull()
+  })
+
+  it('shows the API documentation nav link and active route indicator', async () => {
+    const link = createElement(ApiDocsNavLink)
+    await render(link)
+
+    expect(container.querySelector('nav[aria-label="Documentation"]')).not.toBeNull()
+    expect(container.querySelector('a.nav__link')?.getAttribute('href')).toBe('/admin/api-docs')
+    expect(container.querySelector('a.nav__link')?.textContent).toContain('API documentation')
+    expect(container.querySelector('.nav__link-indicator')).toBeNull()
+
+    mocks.pathname = '/admin/api-docs'
     await renderFresh(link)
     expect(container.querySelector('.nav__link-indicator')).not.toBeNull()
   })

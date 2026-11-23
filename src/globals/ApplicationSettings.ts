@@ -73,6 +73,16 @@ export const ApplicationSettings: GlobalConfig = {
   },
   fields: [
     {
+      name: 'mcpEnabled',
+      label: 'Enable MCP access',
+      type: 'checkbox',
+      defaultValue: false,
+      admin: {
+        description:
+          'Allow MCP clients with administrator-issued keys to read permitted assets and sites. Issue keys under Settings > MCP keys.',
+      },
+    },
+    {
       name: 'vulnerabilityFeeds',
       type: 'group',
       label: 'Vulnerability feeds',

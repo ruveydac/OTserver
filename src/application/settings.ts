@@ -31,6 +31,7 @@ export type ApplicationSettings = {
     jobID?: string | null
   } | null
   controllerURL?: string | null
+  mcpEnabled?: boolean | null
   queuedImports?: 'deployment' | 'enabled' | 'disabled' | null
 }
 

@@ -67,6 +67,7 @@ export const getAuthorization = async (req: PayloadRequest): Promise<Authorizati
       ? { ...noAuthorization, readableSiteIDs: [siteID], writableSiteIDs: [siteID] }
       : noAuthorization
   }
+  if (req.user.collection === 'payload-mcp-api-keys') return noAuthorization
 
   const cached = req.context.siteAuthorization as Promise<Authorization> | undefined
   if (cached) return cached
@@ -135,7 +136,7 @@ export const canReadInitialAdminRole: Access = async ({ req }) => {
 export const adminOrSelf: Access = async ({ req }) => {
   const authorization = await getAuthorization(req)
   if (authorization.isAdmin) return true
-  return req.user ? { id: { equals: req.user.id } } : false
+  return req.user?.collection === 'users' ? { id: { equals: req.user.id } } : false
 }
 
 export const canAssignRoles: FieldAccess = async ({ req }) => {
