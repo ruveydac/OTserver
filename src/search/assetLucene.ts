@@ -1,6 +1,6 @@
 import lucene from 'lucene-query-parser'
 import { APIError, type CollectionBeforeOperationHook, type Where } from 'payload'
-import { assetSearchFields } from './assetSearchFields'
+import { assetSearchFields, maxAssetSearchLength } from './assetSearchFields'
 
 type LuceneNode = {
   boost?: null | number
@@ -160,7 +160,8 @@ const countNotOperators = (node: LuceneNode): number =>
 export const parseAssetSearch = (query: string): Where => {
   const trimmed = query.trim()
   if (!trimmed) return {}
-  if (trimmed.length > 500) return fail('query is longer than 500 characters.')
+  if (trimmed.length > maxAssetSearchLength)
+    return fail(`query is longer than ${maxAssetSearchLength} characters.`)
 
   try {
     const tree = lucene.parse(trimmed) as LuceneNode

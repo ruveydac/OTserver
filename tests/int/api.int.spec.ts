@@ -7,6 +7,7 @@ import {
   createLocalReq,
   createPayloadRequest,
   getPayload,
+  handleEndpoints,
   type Payload,
   type RequiredDataFromCollectionSlug,
 } from 'payload'
@@ -573,6 +574,29 @@ describe('asset CRUD', () => {
         where: { id: { in: [aachenAsset.id, usaAsset.id] } },
       })
       expect(visibleInBrowser.docs.map(({ id }) => id)).toEqual([aachenAsset.id])
+
+      const previewParams = new URLSearchParams({
+        search: `id:${aachenAsset.id} OR id:${usaAsset.id}`,
+        limit: '3',
+        depth: '1',
+        pagination: 'false',
+        'select[name]': 'true',
+        'select[site]': 'true',
+        'populate[sites][path]': 'true',
+      })
+      const preview = await handleEndpoints({
+        config: payload.config,
+        request: new Request(`http://localhost/api/assets?${previewParams}`, {
+          headers: { Authorization: `JWT ${login.token}` },
+        }),
+      })
+      expect(preview.status).toBe(200)
+      expect((await preview.json()).docs).toEqual([
+        expect.objectContaining({
+          id: aachenAsset.id,
+          site: expect.objectContaining({ id: aachen.id, path: aachen.path }),
+        }),
+      ])
 
       browserReq.query.search = 'name:USA'
       const luceneFiltered = await payload.find({

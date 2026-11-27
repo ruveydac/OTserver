@@ -1,5 +1,7 @@
 export type AssetSearchFieldKind = 'date' | 'keyword' | 'number' | 'text'
 
+export const maxAssetSearchLength = 500
+
 type AssetSearchField = {
   kind: AssetSearchFieldKind
   path: string

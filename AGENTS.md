@@ -460,6 +460,9 @@ builder is a query-language assistant, not an independent filter path. Keep both
 sync. Unsupported regex, fuzzy, boost, unary NOT, invalid range, unknown-field, oversized, and deeply
 nested queries must continue to fail with a clear HTTP 400 error.
 
+The signed-in admin header previews at most three assets through the normal site-scoped Assets
+read, suggests fields from `assetSearchFields`, and submits the same `search` to the Assets list.
+
 ## Generated Files
 
 - Do not hand-edit `src/payload-types.ts`; run `pnpm generate:types` after collection schema changes.

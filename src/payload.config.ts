@@ -153,6 +153,7 @@ export default buildConfig({
     components: {
       afterNavLinks: ['@/components/TopologyNavLink', '@/components/ApiDocsNavLink'],
       beforeDashboard: ['@/components/BeforeDashboard'],
+      header: ['@/components/AssetSearchHeader'],
       graphics: {
         Icon: '@/components/Brand#Icon',
         Logo: '@/components/Brand#Logo',
