@@ -2,9 +2,45 @@ import type { Where } from 'payload'
 import { describe, expect, it } from 'vitest'
 
 import { applyAssetSearch, parseAssetSearch } from '../../src/search/assetLucene'
+import { assetSearchHints } from '../../src/search/assetSearchHints'
+import { assetSearchFields } from '../../src/search/assetSearchFields'
 import { whereToLucene } from '../../src/search/whereToLucene'
 
 describe('asset Lucene search', () => {
+  it('completes manifest fields at the cursor without rewriting other clauses', () => {
+    const suggestions = (query: string, caret = query.length) =>
+      assetSearchHints(query, caret).suggestions
+    for (const field of Object.keys(assetSearchFields)) {
+      expect(suggestions(field)).toContainEqual({
+        field,
+        query: `${field}:`,
+        caret: field.length + 1,
+      })
+    }
+    expect(suggestions('status:online')[0].query).toBe('status:online AND site:')
+    expect(suggestions('status:online AND ')[0].query).toBe('status:online AND site:')
+    expect(suggestions('(')[0].query).toBe('(site:')
+    expect(suggestions('ven OR name:PLC', 2)[0]).toEqual({
+      field: 'vendor',
+      query: 'vendor: OR name:PLC',
+      caret: 7,
+    })
+    expect(suggestions('vendor:SIEMENS', 2)[0].query).toBe('vendor:SIEMENS')
+    expect(suggestions('osAccuracy:[80 TO 100]', 16)).toEqual([])
+    for (const range of ['[80 TO 100}', '{80 TO 100]']) {
+      expect(suggestions(`osAccuracy:${range} AND ven`)[0].query).toBe(
+        `osAccuracy:${range} AND vendor:`,
+      )
+    }
+    expect(suggestions('tag:"Outdated Firmware"', 16)).toEqual([])
+    expect(suggestions('tag:"Outdated Firmware" ')[0].query).toBe(
+      'tag:"Outdated Firmware" AND site:',
+    )
+    expect(suggestions('class:PLC OR vendor:S', 7)).toEqual([])
+    expect(suggestions('ven1', 3)).toEqual([])
+    expect(assetSearchHints('vendor:', 7).hint).toBe('Enter a value for vendor.')
+    expect(assetSearchHints('['.repeat(501), 501).hint).toContain('longer than 500 characters')
+  })
   it('translates search, boolean filters, aliases, and ranges', () => {
     expect(parseAssetSearch('plc').or).toContainEqual({ name: { like: 'plc' } })
     expect(parseAssetSearch('status:online AND vendor:Siemens')).toEqual({

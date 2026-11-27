@@ -78,6 +78,7 @@ vi.mock('@payloadcms/ui', async () => {
       readOnly,
       htmlAttributes,
       label,
+      inputRef,
     }: {
       value?: string
       onChange: React.ChangeEventHandler<HTMLInputElement>
@@ -85,12 +86,14 @@ vi.mock('@payloadcms/ui', async () => {
       readOnly?: boolean
       htmlAttributes?: React.InputHTMLAttributes<HTMLInputElement>
       label?: string
+      inputRef?: React.RefObject<HTMLInputElement>
     }) =>
       createElement(
         'div',
         null,
         createElement('label', { htmlFor: `field-${path.replaceAll('.', '__')}` }, label),
         createElement('input', {
+          ref: inputRef,
           ...htmlAttributes,
           id: `field-${path.replaceAll('.', '__')}`,
           value,
@@ -156,6 +159,8 @@ vi.mock('@payloadcms/ui', async () => {
     CopyToClipboard: ({ defaultMessage }: { defaultMessage: string }) =>
       createElement('span', null, defaultMessage),
     Banner: ({ children }: { children: React.ReactNode }) => createElement('div', null, children),
+    Link: ({ children, href }: { children: React.ReactNode; href: string }) =>
+      createElement('a', { href }, children),
     useDocumentInfo: () => ({
       id: mocks.documentID,
       collectionSlug: mocks.collectionSlug,
@@ -206,6 +211,7 @@ vi.mock('@payloadcms/next/templates', async () => {
 })
 
 import AssetListInteractions from '../../src/components/AssetListInteractions'
+import AssetSearchHeader from '../../src/components/AssetSearchHeader'
 import BulkManualTags from '../../src/components/AssetListInteractions/BulkManualTags'
 import CopyButton from '../../src/components/AssetView/CopyButton'
 import DensityToggle from '../../src/components/AssetView/DensityToggle'
@@ -263,6 +269,145 @@ afterEach(async () => {
   await act(async () => root.unmount())
   document.body.replaceChildren()
   vi.unstubAllGlobals()
+})
+
+describe('global asset search', () => {
+  const type = async (input: HTMLInputElement, value: string) => {
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value)
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+  }
+  const settlePreview = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(300)
+    })
+
+  it('shows filter help, bounded result links and a fresh Assets search URL', async () => {
+    await render(createElement(AssetSearchHeader))
+    expect(container.querySelector('input')).toBeNull()
+    expect(
+      container.querySelector('img[alt="OTserver dashboard"]')?.closest('a')?.getAttribute('href'),
+    ).toBe('/admin')
+    const help = container.querySelector('a[aria-label="OTserver documentation"]')
+    expect(help?.getAttribute('href')).toBe('https://www.otserver.org/docs/')
+    expect(help?.textContent).toBe('?')
+    mocks.authPermissions = { collections: { assets: { read: true } } }
+    await renderFresh(createElement(AssetSearchHeader))
+    const input = container.querySelector('input')!
+    const form = input.form!
+    const fetch = vi.fn().mockResolvedValue(
+      Response.json({
+        docs: [
+          { id: 'a', name: 'PLC', site: { path: 'Plant / Line' }, ipAddress: '192.0.2.1' },
+          { id: 'b', name: 'PLC B', site: { name: 'Other' } },
+          { id: 'c', name: 'PLC C', site: 'id' },
+        ],
+      }),
+    )
+    vi.stubGlobal('fetch', fetch)
+    vi.useFakeTimers()
+    try {
+      await act(async () => input.focus())
+      expect(container.textContent).toContain('Suggested filters')
+      expect(fetch).not.toHaveBeenCalled()
+      await type(input, 'ven')
+      await act(async () =>
+        container.querySelector<HTMLButtonElement>('.asset-search-header__filters button')!.click(),
+      )
+      expect(input.value).toBe('vendor:')
+      expect(container.textContent).toContain('Enter a value for vendor.')
+      expect(
+        await act(async () =>
+          form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true })),
+        ),
+      ).toBe(false)
+      await type(input, 'vendor:Siemens AND status:online')
+      expect(container.textContent).toContain('Searching assets')
+      await settlePreview()
+      const url = new URL(fetch.mock.calls[0][0], location.origin)
+      expect(url.pathname).toBe('/api/assets')
+      expect(url.searchParams.get('limit')).toBe('3')
+      expect(url.searchParams.get('search')).toBe(input.value)
+      expect(container.querySelectorAll('li')).toHaveLength(3)
+      expect(container.textContent).toContain('Plant / Line · 192.0.2.1')
+      expect(container.querySelector('li a')?.getAttribute('href')).toBe(
+        '/admin/collections/assets/a',
+      )
+      expect(form.getAttribute('action')).toBe('/admin/collections/assets')
+      expect([...new window.FormData(form)]).toEqual([['search', input.value]])
+      await act(async () => {
+        input.setSelectionRange(3, 3)
+        input.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowLeft', bubbles: true }))
+      })
+      const vendor = [...container.querySelectorAll('button')].find(
+        (button) => button.textContent === 'vendor:',
+      )!
+      await act(async () => vendor.click())
+      expect(container.querySelectorAll('li')).toHaveLength(3)
+      expect(form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))).toBe(
+        true,
+      )
+      await act(async () =>
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })),
+      )
+      expect(container.querySelector('li')).toBeNull()
+      expect(input.value).toBe('vendor:Siemens AND status:online')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('discards late previews, distinguishes errors from zero matches, and handles immediate Enter', async () => {
+    mocks.authPermissions = { collections: { assets: { read: true } } }
+    await render(createElement(AssetSearchHeader))
+    const input = container.querySelector('input')!
+    const form = input.form!
+    const submit = vi.spyOn(form, 'submit').mockImplementation(() => {})
+    const enter = () =>
+      act(async () => form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true })))
+    let resolveOld!: (value: Response) => void
+    const old = new Promise<Response>((resolve) => {
+      resolveOld = resolve
+    })
+    const fetch = vi
+      .fn()
+      .mockReturnValueOnce(old)
+      .mockResolvedValueOnce(
+        Response.json(
+          { errors: [{ message: 'Invalid asset search: unknown field' }] },
+          { status: 400 },
+        ),
+      )
+      .mockResolvedValueOnce(Response.json({ docs: [] }))
+      .mockRejectedValueOnce(new Error('offline'))
+    vi.stubGlobal('fetch', fetch)
+    vi.useFakeTimers()
+    try {
+      await act(async () => input.focus())
+      await type(input, 'old')
+      await settlePreview()
+      await type(input, 'bad:x')
+      await enter()
+      await settlePreview()
+      await act(async () => resolveOld(Response.json({ docs: [{ id: 'old', name: 'Stale' }] })))
+      expect(container.textContent).toContain('unknown field')
+      expect(container.textContent).not.toContain('Stale')
+      expect(submit).not.toHaveBeenCalled()
+      await type(input, 'plc')
+      await enter()
+      await settlePreview()
+      expect(container.textContent).toContain('No matching assets.')
+      expect(submit).toHaveBeenCalledOnce()
+      await type(input, 'plc ')
+      await settlePreview()
+      expect(container.textContent).toContain('Could not load asset previews.')
+      await act(async () => input.blur())
+      expect(container.querySelector('[role=status]')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe('custom asset fields', () => {

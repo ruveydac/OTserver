@@ -21,6 +21,7 @@ import { default as default_d5e71aff688bb616206a98b246bfeca0 } from '@/component
 import { default as default_53c4313c6188db5f3959fbb0619f45a8 } from '@/components/DeviceCatalogTables'
 import { default as default_b592229da68d7e936626a45ff13c95fc } from '@/components/DeviceCatalogImporter'
 import { default as default_f508ae1f898cb663ee56d6eff90b66ad } from '@/components/VulnerabilityFeedActions'
+import { default as default_0cb32f7b7e3a4075bde065643aa47a51 } from '@/components/AssetSearchHeader'
 import { default as default_db9ac62598c46d0f1db201f6af05442e } from '@/components/LogoutButton'
 import { Icon as Icon_ea112afe978e228c434ec2fb66c71b02 } from '@/components/Brand'
 import { Logo as Logo_ea112afe978e228c434ec2fb66c71b02 } from '@/components/Brand'
@@ -58,6 +59,7 @@ export const importMap = {
   '@/components/DeviceCatalogTables#default': default_53c4313c6188db5f3959fbb0619f45a8,
   '@/components/DeviceCatalogImporter#default': default_b592229da68d7e936626a45ff13c95fc,
   '@/components/VulnerabilityFeedActions#default': default_f508ae1f898cb663ee56d6eff90b66ad,
+  '@/components/AssetSearchHeader#default': default_0cb32f7b7e3a4075bde065643aa47a51,
   '@/components/LogoutButton#default': default_db9ac62598c46d0f1db201f6af05442e,
   '@/components/Brand#Icon': Icon_ea112afe978e228c434ec2fb66c71b02,
   '@/components/Brand#Logo': Logo_ea112afe978e228c434ec2fb66c71b02,
